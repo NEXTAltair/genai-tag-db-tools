@@ -42,3 +42,63 @@
 ## ライセンス
 
 MIT
+
+
+# V3
+```mermaid
+erDiagram
+    TAGS ||--o{ TAG_TRANSLATIONS : has
+    TAGS ||--o{ TAG_USAGE_COUNTS : has
+    TAGS ||--o{ TAG_STATUS : has
+    TAGS ||--o{ TAG_STATUS : is_preferred_by
+    TAG_FORMATS ||--o{ TAG_USAGE_COUNTS : has
+    TAG_FORMATS ||--o{ TAG_TYPE_FORMAT_MAPPING : has
+    TAG_TYPE_NAME ||--o{ TAG_TYPE_FORMAT_MAPPING : defines
+    TAG_TYPE_FORMAT_MAPPING ||--o{ TAG_STATUS : defines
+    
+    TAGS {
+        int tag_id PK
+        string source_tag
+        string tag
+    }
+    
+    TAG_TRANSLATIONS {
+        int translation_id PK
+        int tag_id FK
+        string language
+        string translation
+    }
+    
+    TAG_FORMATS {
+        int format_id PK
+        string format_name
+        string description
+    }
+    
+    TAG_TYPE_NAME {
+        int type_name_id PK
+        string type_name
+        str   string description
+    }
+    
+    TAG_USAGE_COUNTS {
+        int format_id PK, FK
+        int count
+    }
+    
+    TAG_STATUS {
+        int tag_id PK, FK
+        int tag_id PK, FK
+        int format_id PK, FK
+        int type_id FK
+        boolean alias
+        int preferred_tag_id FK
+    } ing description
+    }
+    
+    TAG_TYPE_FORMAT_MAPPING {
+        int format_id PK, FK
+        int type_id PK
+        int type_name_id FK
+     
+```

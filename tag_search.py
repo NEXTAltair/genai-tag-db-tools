@@ -1,9 +1,23 @@
 import sqlite3
+from pathlib import Path
 import pandas as pd
 import ipywidgets as widgets
 from IPython.display import display, clear_output
 
-conn = sqlite3.connect('tags_v3.db')
+db_path = Path(__file__).parent / "tags_v3.db"
+conn = sqlite3.connect(db_path)
+
+def execute_sql_query(query: str, params: tuple = None) -> pd.DataFrame:
+    """SQLクエリを実行し、結果をDataFrameとして返します。
+
+    Args:
+        query (str): SQLクエリ。
+        params (tuple, optional): クエリのパラメータ。デフォルトは None。
+
+    Returns:
+        pandas.DataFrame: クエリの実行結果。
+    """
+    return pd.read_sql_query(query, conn, params=params)
 
 def get_tag_details(tag_id):
     """
@@ -40,7 +54,7 @@ def get_tag_details(tag_id):
     LEFT JOIN TAGS pt ON ts.preferred_tag_id = pt.tag_id  -- preferred_tag_id をタグ名に変換するための結合
     WHERE t.tag_id = ?
     """
-    return pd.read_sql_query(query, conn, params=(tag_id,))
+    return execute_sql_query(query, params=(tag_id,))
 
 def get_tag_formats():
     """
@@ -50,7 +64,7 @@ def get_tag_formats():
         list: タグのフォーマットのリスト。'全て' を含みます。
     """
     query = "SELECT DISTINCT format_name FROM TAG_FORMATS"
-    formats = pd.read_sql_query(query, conn)
+    formats = execute_sql_query(query)
     return ['全て'] + formats['format_name'].tolist()
 
 def get_format_id_by_name(format_name: str) -> int:
@@ -63,7 +77,7 @@ def get_format_id_by_name(format_name: str) -> int:
         int: フォーマットID。見つからない場合は -1 を返します。
     """
     query = "SELECT format_id FROM TAG_FORMATS WHERE format_name = ?"
-    df = pd.read_sql_query(query, conn, params=(format_name,))
+    df = execute_sql_query(query, params=(format_name,))
     if not df.empty:
         return df['format_id'].iloc[0]
     else:
@@ -94,11 +108,17 @@ def get_preferred_tag(tag_id: int, format_name: str) -> str:
     WHERE 
         T1.tag_id = {tag_id} AND T1.format_id = {format_id}
     """
-    df = pd.read_sql_query(query, conn)
+    df = execute_sql_query(query)
     if not df.empty:
         return df['preferred_tag'].iloc[0]
     else:
-        return None
+        # 推奨タグが見つからない場合はformat_idをDanbooruの"1"として再検索
+        format_id = 1
+        df_1 = execute_sql_query(query)
+        if not df_1.empty:
+            return df_1['preferred_tag'].iloc[0]
+        else:
+            return None
 
 def search_tag_id(keyword: str) -> int:
     """TAGSテーブルからタグを完全一致で検索
@@ -115,23 +135,23 @@ def search_tag_id(keyword: str) -> int:
     FROM TAGS
     WHERE tag = ?
     """
-    df = pd.read_sql_query(query, conn, params=(keyword,))
+    df = execute_sql_query(query, params=(keyword,))
 
     if df.empty:
         return None
     elif len(df) > 1:
-        raise ValueError(f"タグ '{keyword}' に対して複数のIDが見つかりました。")
+        print(f"タグ '{keyword}' に対して複数のIDが見つかりました。\n {df}")
     else:
         return df['tag_id'].iloc[0]  # 最初の要素の値を取得
 
-def search_tags(keyword, match_mode='partial', format='全て'):
+def search_tags(keyword, match_mode='partial', format_name='全て'):
     """
     タグを検索する関数です。
 
     Parameters:
         keyword (str): 検索キーワード
         match_mode (str, optional): キーワードのマッチングモード。'partial'（部分一致）または 'exact'（完全一致）。デフォルトは 'partial'。
-        format (str, optional): タグのフォーマット。'全て'（すべてのフォーマット）または特定のフォーマット名。デフォルトは '全て'。
+        format_name (str, optional): タグのフォーマット。'全て'（すべてのフォーマット）または特定のフォーマット名。デフォルトは '全て'。
 
     Returns:
         pandas.DataFrame: 検索結果のタグデータを含むデータフレーム
@@ -155,13 +175,13 @@ def search_tags(keyword, match_mode='partial', format='全て'):
         WHERE (T.tag LIKE ? OR TT.translation LIKE ?)
         """
     
-    if format != '全て':
+    if format_name != '全て':
         base_query += " AND TF.format_name = ?"
-        params = (keyword, keyword, format) if match_mode == 'exact' else (f'%{keyword}%', f'%{keyword}%', format)
+        params = (keyword, keyword, format_name) if match_mode == 'exact' else (f'%{keyword}%', f'%{keyword}%', format_name)
     else:
         params = (keyword, keyword) if match_mode == 'exact' else (f'%{keyword}%', f'%{keyword}%')
     
-    return pd.read_sql_query(base_query, conn, params=params)
+    return execute_sql_query(base_query, params=params)
 
 def prompt_convert(keyword: str, format_name: str):
     """タグをフォーマット推奨の形式に変換して表示する
@@ -184,7 +204,8 @@ def prompt_convert(keyword: str, format_name: str):
             if tag_id is not None:
                 preferred_tag = get_preferred_tag(tag_id, format_name)
                 if preferred_tag:
-                    print(f"タグ '{tag}' は '{preferred_tag}' に変換されました")
+                    if tag != preferred_tag:
+                        print(f"タグ '{tag}' は '{preferred_tag}' に変換されました")
                     converted_tags.append(preferred_tag)  # preferred_tag を追加
                 else:
                     converted_tags.append(tag)  # 元のタグを追加
@@ -298,7 +319,7 @@ if __name__ == '__main__':
     # word = "1boy"
     # match_mode = "partial"
     # search_and_display(word, match_mode, "全て")
-    prompt = "[W_, aza_shinobu, Die Wergelder, score_9,score_8_up,score_7_up,very aesthetic,close-up,1man,jeans,jeans down,1girl, pretty, shy,tank top,skirt,strap slip,one breast out,medium breasts,perfect breasts,puffy nipples,kneeling,deepthroat,irrumatio,balls deep,drool,girl bedroom,detailed face,intricate details,naturalism,hyperdetailed,hyperrealistic,,<lora:g0th1cPXL:0.7>,g0thicPXL,<lora:HKStyle:0.8>,HKStyle,<lora:Expressive_H:0.8>,Expressiveh"
+    prompt = "1boy, 1girl, 2boys, 2girls, 3boys, 3girls, 4boys, 4girls, 5boys"
     format_name = "e621"
     cleanprompt = prompt_convert(prompt, format_name)
     print(prompt)
