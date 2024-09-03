@@ -140,15 +140,15 @@ class TagSearcher:
 
         """
         query = """
-        SELECT 
-            t.*, 
-            tt.language, 
-            tt.translation, 
-            ts.alias, 
+        SELECT
+            t.*,
+            tt.language,
+            tt.translation,
+            ts.alias,
             pt.tag AS preferred_tag,
-            ts.format_id, 
+            ts.format_id,
             ts.type_id,
-            tf.format_name, 
+            tf.format_name,
             tf.description AS format_description,
             tuc.count AS usage_count,
             ttfm.description AS type_description,
@@ -196,13 +196,13 @@ class TagSearcher:
         JOIN TAG_FORMATS AS TF ON TS.format_id = TF.format_id
         WHERE (T.tag {match_operator} ? OR TT.translation {match_operator} ?)
         """.replace("{match_operator}", "=" if match_mode == 'exact' else "LIKE")
-        
+
         params = (keyword, keyword) if match_mode == 'exact' else (f'%{keyword}%', f'%{keyword}%')
-        
+
         if format_name != '全て':
             base_query += " AND TF.format_name = ?"
             params += (format_name,)
-        
+
         return self.execute_sql_query(base_query, params=params)
 
     def search_and_display(self, keyword, match_mode, format_name, columns=None):
@@ -239,11 +239,11 @@ class TagSearcher:
                 all_details.append(detail_dict)
 
             df = pd.DataFrame(all_details)
-            
+
             if columns:
                 df = df[columns]
                 print(f"選択されたカラム: {', '.join(columns)}")
-            
+
             display(df)
 
         except Exception as e:
@@ -258,7 +258,7 @@ def create_widgets(tagsearcher):
         description='検索モード:',
         disabled=False
     )
-    
+
     # フォーマット選択用のドロップダウンを追加
     format_dropdown = widgets.Dropdown(
         options=tagsearcher.get_tag_formats(),
@@ -266,19 +266,19 @@ def create_widgets(tagsearcher):
         description='フォーマット:',
         disabled=False
     )
-    
+
     # カラム選択用のCheckboxを作成
     column_options = ['tag_id', 'tag', 'source_tag', 'language', 'translation', 'alias', 'preferred_tag', 'format_name', 'usage_count', 'type_name']
     column_checkboxes = [widgets.Checkbox(value=True, description=col) for col in column_options]
     column_box = widgets.VBox(column_checkboxes, description='表示カラム:')
-    
+
     def on_button_clicked(b):
         match_mode = 'partial' if match_mode_radio.value == '部分一致' else 'exact'
         selected_columns = [cb.description for cb in column_checkboxes if cb.value]
         tagsearcher.search_and_display(search_input.value, match_mode, format_dropdown.value, columns=selected_columns)
-    
+
     search_button.on_click(on_button_clicked)
-    
+
     vbox = widgets.VBox([search_input, match_mode_radio, format_dropdown, column_box, search_button])
     return vbox
 
