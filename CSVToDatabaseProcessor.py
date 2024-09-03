@@ -39,7 +39,7 @@ class CSVToDatabaseProcessor:
 
     def process_row(self, row: dict, format_id: int, default_type_id: int):
         source_tag = row['source_tag']
-        normalized_tag = self.normalize_tag(source_tag)
+        normalized_tag = CSVToDatabaseProcessor.normalize_tag(source_tag)
         
         # タグの処理とIDの取得
         tag_id = self.get_tag_id(source_tag, normalized_tag)
@@ -79,7 +79,7 @@ class CSVToDatabaseProcessor:
         if deprecated_tags_str:
             deprecated_tags = self.split_compound_field(deprecated_tags_str)
             for deprecated_tag in deprecated_tags:
-                normalized_deprecated_tag = self.normalize_tag(deprecated_tag)
+                normalized_deprecated_tag = CSVToDatabaseProcessor.normalize_tag(deprecated_tag)
                 deprecated_tag_id = self.get_tag_id(deprecated_tag, normalized_deprecated_tag)
                 
                 # 元のタグのステータスを更新
@@ -102,8 +102,8 @@ class CSVToDatabaseProcessor:
         except ValueError:
             return default
 
-    def normalize_tag(self, tag: str) -> str:
-        # 既存の実装をそのまま使用
+    @staticmethod
+    def normalize_tag(tag: str) -> str:
         tag = tag.lower() 
         tag = re.sub(r'_\(', r' (', tag)
         tag = tag.replace('(', r'\(').replace(')', r'\)')
@@ -113,7 +113,7 @@ class CSVToDatabaseProcessor:
         return tag
 
     def get_format_id(self, filename: str) -> int:
-        # 既存の実装をそのまま使用
+        # DominikDoom/a1111-sd-webui-tagcomplete: CSVファイル名からフォーマットIDを取得
         id0 = ["EnglishDictionary", "Tags_zh_full"]
         id1 = ["danbooru_klein10k_jp", "danbooru_machine_jp", "danbooru"]
         id2 = ["dataset_rising_v2", "e621_sfw", "e621_tags_jsonl", "e621", "rising_v2", "rising_v3"]

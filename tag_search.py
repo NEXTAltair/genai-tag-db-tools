@@ -1,10 +1,11 @@
-import re
 from typing import Optional
 import sqlite3
 from pathlib import Path
 import pandas as pd
 import ipywidgets as widgets
 from IPython.display import display, clear_output
+
+from CSVToDatabaseProcessor import CSVToDatabaseProcessor
 
 db_path = Path(__file__).parent / "tags_v3.db"
 conn = sqlite3.connect(db_path)
@@ -24,6 +25,18 @@ class TagSearcher:
             pandas.DataFrame: クエリの実行結果。
         """
         return pd.read_sql_query(query, conn, params=params)
+
+    def execute_insert_query(self, query: str, params: tuple = None):
+        """
+        SQL INSERT クエリを実行します。
+
+        Args:
+            query (str): SQL INSERT クエリ。
+            params (tuple, optional): クエリのパラメータ。デフォルトは None。
+        """
+        with conn:  # トランザクションを使用
+            cursor = conn.cursor()
+            cursor.execute(query, params)
 
     def search_tag_id(self, keyword: str) -> Optional[int]:
         """TAGSテーブルからタグを完全一致で検索
@@ -58,6 +71,15 @@ class TagSearcher:
         df = self.execute_sql_query(query, params=(format_name,))
         if not df.empty:
             return df['format_id'].iloc[0]
+        else:
+            return -1
+
+    def _get_type_id_by_name(self, type_name: str) -> int:
+        """タイプ名からタイプIDを取得します。"""
+        query = "SELECT type_name_id FROM TAG_TYPE_NAME WHERE type_name = ?"
+        df = self.execute_sql_query(query, params=(type_name,))
+        if not df.empty:
+            return df['type_name_id'].iloc[0]
         else:
             return -1
 
@@ -170,20 +192,59 @@ class TagSearcher:
         データベースからタグのフォーマットを取得する関数です。
 
         Returns:
-            list: タグのフォーマットのリスト。'全て' を含みます。
+            list: タグのフォーマットのリスト。'All' を含みます。
         """
         query = "SELECT DISTINCT format_name FROM TAG_FORMATS"
         formats = self.execute_sql_query(query)
-        return ['全て'] + formats['format_name'].tolist()
+        return ['All'] + formats['format_name'].tolist()
 
-    def search_tags(self, keyword, match_mode='partial', format_name='全て'):
+    def get_tag_langs(self):
+        """
+        データベースからタグの言語を取得する関数です。
+
+        Returns:
+            list: タグの言語のリスト。
+        """
+        query = "SELECT DISTINCT language FROM TAG_TRANSLATIONS"
+        langs = self.execute_sql_query(query)
+        return langs['language'].tolist()
+
+    def get_tag_types(self, format_name: str= None):
+        """フォーマットごとに設定されたタグのタイプを取得する関数
+
+        Args:
+            format_name (str): danbooru, e621, etc. または空文字列
+
+        Returns:
+            list: 指定されたフォーマットに対応するタグタイプのリスト。
+                フォーマットが指定されていない場合は空のリスト。
+        """
+        if not format_name:
+            return []
+
+        format_id = self._get_format_id_by_name(format_name)
+
+        if format_id is None:
+            return []
+
+        query = f"""
+        SELECT DISTINCT ttn.type_name
+        FROM TAG_TYPE_FORMAT_MAPPING AS ttfm
+        JOIN TAG_TYPE_NAME AS ttn ON ttfm.type_name_id = ttn.type_name_id
+        WHERE ttfm.format_id = {format_id}
+        """
+        types = self.execute_sql_query(query)
+
+        return types['type_name'].tolist()
+
+    def search_tags(self, keyword, match_mode='partial', format_name='All'):
         """
         タグを検索する関数です。
 
         Parameters:
             keyword (str): 検索キーワード
             match_mode (str, optional): キーワードのマッチングモード。'partial'（部分一致）または 'exact'（完全一致）。デフォルトは 'partial'。
-            format_name (str, optional): タグのフォーマット。'全て'（すべてのフォーマット）または特定のフォーマット名。デフォルトは '全て'。
+            format_name (str, optional): タグのフォーマット。'All'（すべてのフォーマット）または特定のフォーマット名。デフォルトは 'All'。
 
         Returns:
             pandas.DataFrame: 検索結果のタグデータを含むデータフレーム
@@ -199,7 +260,7 @@ class TagSearcher:
 
         params = (keyword, keyword) if match_mode == 'exact' else (f'%{keyword}%', f'%{keyword}%')
 
-        if format_name != '全て':
+        if format_name != 'All':
             base_query += " AND TF.format_name = ?"
             params += (format_name,)
 
@@ -250,6 +311,55 @@ class TagSearcher:
             print(f"エラーが発生しました: {str(e)}")
         print("search_and_display関数が完了しました")
 
+    def register_tag_in_db(self, tag_info: dict) -> int:
+        """
+        検証済みのタグ情報をデータベースに登録します。
+
+        Args:
+            tag_info (dict): register_tag_widget関数から返された検証済みタグ情報
+
+        Returns:
+            int: 登録されたタグのID
+
+
+        """
+        normalized_tag = tag_info['normalized_tag']
+        source_tag = tag_info['source_tag']
+        format_name = tag_info['format_name']
+        type_name = tag_info['type_name']
+        use_count = tag_info.get('use_count', 0)
+        language = tag_info.get('language', '')
+        translation = tag_info.get('translation', '')
+
+        format_id = self._get_format_id_by_name(format_name)
+        type_id = self._get_type_id_by_name(type_name)
+
+        if source_tag == normalized_tag:
+            source_tag = normalized_tag
+
+        # タグの存在確認
+        existing_tag = self.search_tag_id(normalized_tag)
+
+        if existing_tag is not None:
+            tag_id = existing_tag
+        else:
+            # 新しいタグの挿入
+            new_tag_df = pd.DataFrame([{'tag': normalized_tag, 'source_tag': source_tag}])
+            new_tag_df.to_sql('TAGS', conn, if_exists='append', index=False)
+            tag_id = self.search_tag_id(normalized_tag)
+
+            # TAG_STATUSの挿入
+            status_df = pd.DataFrame([{'tag_id': tag_id, 'format_id': format_id, 'type_id': type_id, 'alias': 0, 'preferred_tag_id': tag_id}])
+            status_df.to_sql('TAG_STATUS', conn, if_exists='append', index=False)
+            # TAG_USAGE_COUNTSの挿入
+            usage_df = pd.DataFrame([{'tag_id': tag_id, 'format_id': format_id, 'count': use_count}])
+            usage_df.to_sql('TAG_USAGE_COUNTS', conn, if_exists='append', index=False)
+            # TAG_TRANSLATIONSの挿入
+            translations_df = pd.DataFrame([{'tag_id': tag_id, 'language': language, 'translation': translation}])
+            translations_df.to_sql('TAG_TRANSLATIONS', conn, if_exists='append', index=False)
+
+        return tag_id
+
 def create_widgets(tagsearcher):
     search_input = widgets.Text(description="タグ検索:")
     search_button = widgets.Button(description="検索")
@@ -262,7 +372,7 @@ def create_widgets(tagsearcher):
     # フォーマット選択用のドロップダウンを追加
     format_dropdown = widgets.Dropdown(
         options=tagsearcher.get_tag_formats(),
-        value='全て',
+        value='All',
         description='フォーマット:',
         disabled=False
     )
@@ -289,7 +399,7 @@ def create_cleaning_widgets(tagsearcher):
     convert_button = widgets.Button(description="変換")
     format_dropdown = widgets.Dropdown(
         options=tagsearcher.get_tag_formats(),
-        value='全て',
+        value='All',
         description='フォーマット:',
         disabled=False
     )
@@ -304,17 +414,114 @@ def create_cleaning_widgets(tagsearcher):
     return vbox
 
 def initialize_tag_searcher() -> TagSearcher:
-    project_root = Path(__file__).resolve().parents[3]
-    db_path = project_root / "tags_v3.db"
+    db_path = Path("tags_v3.db")
     return TagSearcher(db_path)
+
+def register_tag_widgets(tagsearcher):
+    tag_input = widgets.Text(description="タグ:")
+    source_tag_input = widgets.Text(description="元タグ:")
+    format_dropdown = widgets.Dropdown(
+        options=tagsearcher.get_tag_formats(),
+        value='All',
+        description='フォーマット:',
+        disabled=False
+    )
+    # タイプ選択用のドロップダウンを追加
+    type_options = [('', None)] + [(t, t) for t in tagsearcher.get_tag_types(format_dropdown.value)]
+    type_dropdown = widgets.Dropdown(
+        options=type_options,
+        value=None,
+        description='タイプ:',
+        disabled=False,
+        placeholder='タイプを選択'
+    )
+
+    # カウント入力用のテキストボックスを追加
+    use_count_input = widgets.IntText(
+        value=0,
+        description='使用回数:',
+        disabled=False
+    )
+
+    language_combobox = widgets.Combobox(
+        options=tagsearcher.get_tag_langs(),
+        value='japanese',
+        description='言語:',
+        ensure_option=True,  # 入力されたテキストをオプションに追加
+        disabled=False
+    )
+    translation_input = widgets.Text(
+        value='',
+        description='翻訳:',
+        disabled=False
+    )
+
+    register_button = widgets.Button(description="登録")
+    output = widgets.Output()
+
+    def update_type_dropdown(change):
+        new_format = change['new']
+        new_types = [('', None)] + [(t, t) for t in tagsearcher.get_tag_types(new_format)]
+        type_dropdown.options = new_types
+        type_dropdown.value = None
+
+    format_dropdown.observe(update_type_dropdown, names='value')
+
+    def on_register_click(b):
+        with output:
+            clear_output()
+            try:
+                if not tag_input.value and not source_tag_input.value:
+                    raise ValueError("タグまたは元タグは必須です。")
+                if ',' in tag_input.value or ',' in source_tag_input.value:
+                    raise ValueError("登録するタグは単一のタグである必要があります。")
+
+                if not source_tag_input.value:
+                    source_tag_input.value = tag_input.value
+
+                normalized_tag = CSVToDatabaseProcessor.normalize_tag(tag_input.value)
+
+                tag_info = {
+                    'normalized_tag': normalized_tag,
+                    'source_tag': source_tag_input.value,
+                    'format_name': format_dropdown.value,
+                    'type_name': type_dropdown.value,
+                    'use_count': use_count_input.value,
+                    'language': language_combobox.value,
+                    'translation': translation_input.value
+                }
+                tag_id = tagsearcher.register_tag_in_db(tag_info)
+                print(f"タグが正常に登録されました。Tag ID: {tag_id}")
+            except Exception as e:
+                print(f"エラー: {str(e)}")
+
+    register_button.on_click(on_register_click)
+
+    widget_box = widgets.VBox([
+        tag_input,
+        source_tag_input,
+        format_dropdown,
+        type_dropdown,
+        use_count_input,
+        language_combobox,
+        translation_input,
+        register_button,
+        output
+    ])
+
+    return widget_box
 
 if __name__ == '__main__':
     # word = "1boy"
     # match_mode = "partial"
-    # search_and_display(word, match_mode, "全て")
-    prompt = "1boy, 1girl, 2boys, 2girls, 3boys, 3girls, 4boys, 4girls, 5boys"
-    format_name = "e621"
+    # search_and_display(word, match_mode, "All")
+    # prompt = "1boy, 1girl, 2boys, 2girls, 3boys, 3girls, 4boys, 4girls, 5boys"
+    # format_name = "e621"
     tagsearcher = initialize_tag_searcher()
-    cleanprompt = tagsearcher.prompt_convert(prompt, format_name)
-    print(prompt)
-    print(cleanprompt)
+    # cleanprompt = tagsearcher.prompt_convert(prompt, format_name)
+    # print(prompt)
+    # print(cleanprompt)
+    # types = tagsearcher.get_tag_types('e621')
+    # print(types)
+    langs = tagsearcher.get_tag_langs()
+    print(langs)
