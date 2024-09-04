@@ -151,30 +151,28 @@ class TagSearcher:
             return None
 
     def get_tag_details(self, tag_id):
-        """
-        指定されたタグIDに基づいてタグの詳細を取得します。
-
-        Args:
-            tag_id (int): 詳細を取得するタグのID。
-
-        Returns:
-            pandas.DataFrame: タグの詳細を含むDataFrame。
-
-        """
         query = """
+        WITH RECURSIVE
+        preferred_chain(tag_id, preferred_tag_id, level) AS (
+            SELECT tag_id, preferred_tag_id, 0
+            FROM TAG_STATUS
+            WHERE tag_id = ?
+            UNION ALL
+            SELECT ts.tag_id, ts.preferred_tag_id, pc.level + 1
+            FROM TAG_STATUS ts
+            JOIN preferred_chain pc ON ts.tag_id = pc.preferred_tag_id
+            WHERE ts.tag_id != ts.preferred_tag_id AND pc.level < 10
+        )
         SELECT
             t.*,
-            tt.language,
-            tt.translation,
+            GROUP_CONCAT(DISTINCT tt.language || ':' || tt.translation) AS translations,
             ts.alias,
             pt.tag AS preferred_tag,
-            ts.format_id,
-            ts.type_id,
-            tf.format_name,
-            tf.description AS format_description,
-            tuc.count AS usage_count,
-            ttfm.description AS type_description,
-            ttn.type_name
+            pc.level AS alias_level,
+            GROUP_CONCAT(DISTINCT tf.format_name) AS formats,
+            GROUP_CONCAT(DISTINCT ttn.type_name) AS types,
+            SUM(tuc.count) AS total_usage_count,
+            GROUP_CONCAT(DISTINCT tf.format_name || ':' || tuc.count) AS usage_counts_by_format
         FROM TAGS t
         LEFT JOIN TAG_TRANSLATIONS tt ON t.tag_id = tt.tag_id
         LEFT JOIN TAG_STATUS ts ON t.tag_id = ts.tag_id
@@ -182,10 +180,21 @@ class TagSearcher:
         LEFT JOIN TAG_USAGE_COUNTS tuc ON t.tag_id = tuc.tag_id AND ts.format_id = tuc.format_id
         LEFT JOIN TAG_TYPE_FORMAT_MAPPING ttfm ON ts.format_id = ttfm.format_id AND ts.type_id = ttfm.type_id
         LEFT JOIN TAG_TYPE_NAME ttn ON ttfm.type_name_id = ttn.type_name_id
-        LEFT JOIN TAGS pt ON ts.preferred_tag_id = pt.tag_id  -- preferred_tag_id をタグ名に変換するための結合
+        LEFT JOIN preferred_chain pc ON t.tag_id = pc.tag_id
+        LEFT JOIN TAGS pt ON pc.preferred_tag_id = pt.tag_id
         WHERE t.tag_id = ?
+        GROUP BY t.tag_id
         """
-        return self.execute_sql_query(query, params=(tag_id,))
+        return self.execute_sql_query(query, params=(tag_id, tag_id))
+
+    def get_all_tag_ids(self):
+        """すべてのタグIDを取得する関数です。
+        Returns:
+            list: すべてのタグIDのリスト。
+        """
+        query = "SELECT tag_id FROM TAGS"
+        tag_ids = self.execute_sql_query(query)
+        return tag_ids['tag_id'].tolist()
 
     def get_tag_formats(self):
         """
@@ -207,7 +216,7 @@ class TagSearcher:
         """
         query = "SELECT DISTINCT language FROM TAG_TRANSLATIONS"
         langs = self.execute_sql_query(query)
-        return langs['language'].tolist()
+        return ['All'] + langs['language'].tolist()
 
     def get_tag_types(self, format_name: str= None):
         """フォーマットごとに設定されたタグのタイプを取得する関数
@@ -250,11 +259,25 @@ class TagSearcher:
             pandas.DataFrame: 検索結果のタグデータを含むデータフレーム
         """
         base_query = """
-        SELECT DISTINCT T.*
+        SELECT
+            T.tag_id,
+            T.tag,
+            T.source_tag,
+            TT.language,
+            TT.translation,
+            TS.alias,
+            PT.tag AS preferred_tag,
+            TF.format_name,
+            TUC.count AS usage_count,
+            TTN.type_name
         FROM TAGS AS T
-        JOIN TAG_TRANSLATIONS AS TT ON T.tag_id = TT.tag_id
-        JOIN TAG_STATUS AS TS ON T.tag_id = TS.tag_id
-        JOIN TAG_FORMATS AS TF ON TS.format_id = TF.format_id
+        LEFT JOIN TAG_TRANSLATIONS AS TT ON T.tag_id = TT.tag_id
+        LEFT JOIN TAG_STATUS AS TS ON T.tag_id = TS.tag_id
+        LEFT JOIN TAG_FORMATS AS TF ON TS.format_id = TF.format_id
+        LEFT JOIN TAG_USAGE_COUNTS AS TUC ON T.tag_id = TUC.tag_id AND TS.format_id = TUC.format_id
+        LEFT JOIN TAGS AS PT ON TS.preferred_tag_id = PT.tag_id
+        LEFT JOIN TAG_TYPE_FORMAT_MAPPING AS TTFM ON TS.format_id = TTFM.format_id AND TS.type_id = TTFM.type_id
+        LEFT JOIN TAG_TYPE_NAME AS TTN ON TTFM.type_name_id = TTN.type_name_id
         WHERE (T.tag {match_operator} ? OR TT.translation {match_operator} ?)
         """.replace("{match_operator}", "=" if match_mode == 'exact' else "LIKE")
 
@@ -264,7 +287,19 @@ class TagSearcher:
             base_query += " AND TF.format_name = ?"
             params += (format_name,)
 
-        return self.execute_sql_query(base_query, params=params)
+        df = self.execute_sql_query(base_query, params=params)
+
+        # usage_count NaN値を0に設定
+        df['usage_count'] = df['usage_count'].fillna(0).astype(int)
+
+        # 列の順序を整理
+        column_order = [
+            'tag_id', 'tag', 'source_tag', 'language', 'translation',
+            'alias', 'preferred_tag', 'format_name', 'usage_count', 'type_name'
+        ]
+        df = df[column_order]
+
+        return df
 
     def search_and_display(self, keyword, match_mode, format_name, columns=None):
         keyword = keyword.strip().lower()
