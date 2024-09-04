@@ -56,7 +56,7 @@ class TagSearcher:
         elif len(df) > 1:
             print(f"タグ '{keyword}' に対して複数のIDが見つかりました。\n {df}")
         else:
-            return df['tag_id'].iloc[0]  # 最初の要素の値を取得
+            return int(df['tag_id'].iloc[0])  # 最初の要素の値を取得
 
     def _get_format_id_by_name(self, format_name: str) -> int:
         """フォーマット名からフォーマットIDを取得します。
@@ -70,7 +70,7 @@ class TagSearcher:
         query = "SELECT format_id FROM TAG_FORMATS WHERE format_name = ?"
         df = self.execute_sql_query(query, params=(format_name,))
         if not df.empty:
-            return df['format_id'].iloc[0]
+            return int(df['format_id'].iloc[0])
         else:
             return -1
 
@@ -83,38 +83,73 @@ class TagSearcher:
         else:
             return -1
 
+    def _query_preferred_tags(self, tag_id: int, format_id: Optional[int] = None) -> pd.DataFrame:
+        """
+        指定されたタグIDとオプションのフォーマットIDに基づいて、推奨タグを検索します。
+
+        Args:
+            tag_id (int): タグID。
+            format_id (Optional[int]): フォーマットID。指定しない場合は全フォーマットで検索。
+
+        Returns:
+            pd.DataFrame: 推奨タグの検索結果。
+        """
+        base_query = """
+        SELECT T2.tag AS preferred_tag, TF.format_name, TF.format_id
+        FROM TAG_STATUS AS T1
+        JOIN TAGS AS T2 ON T1.preferred_tag_id = T2.tag_id
+        JOIN TAG_FORMATS AS TF ON T1.format_id = TF.format_id
+        WHERE T1.tag_id = ?
+        """
+
+        if format_id is not None:
+            query = base_query + " AND T1.format_id = ?"
+            return self.execute_sql_query(query, params=(tag_id, format_id))
+        else:
+            return self.execute_sql_query(base_query, params=(tag_id,))
+
     def get_preferred_tag(self, tag_id: int, format_name: str) -> Optional[str]:
-        """指定されたタグIDとフォーマット名に基づいて、推奨タグを取得します。
+        """
+        指定されたタグIDとフォーマット名に基づいて、推奨タグを取得します。
+        指定フォーマットで見つからない場合、全フォーマットで検索します。
 
         Args:
             tag_id (int): タグID。
             format_name (str): フォーマット名。
 
         Returns:
-            str: 推奨タグ。見つからない場合は None を返します。
+            Optional[str]: 推奨タグ。見つからない場合はNoneを返します。
         """
-        # format_id を取得
         format_id = self._get_format_id_by_name(format_name)
-        if format_id == -1:
-            return None  # フォーマットIDが見つからない場合は None を返す
 
-        query = f"""
-        SELECT T2.tag AS preferred_tag
-        FROM TAG_STATUS AS T1
-        JOIN TAGS AS T2 ON T1.preferred_tag_id = T2.tag_id
-        WHERE T1.tag_id = {tag_id} AND T1.format_id = {format_id}
-        """
-        df = self.execute_sql_query(query)
-        if not df.empty:
+        # 指定フォーマットで検索
+        if format_id != -1:
+            df = self._query_preferred_tags(tag_id, format_id)
+            if not df.empty:
+                return df['preferred_tag'].iloc[0]
+
+        # 全フォーマットで検索
+        df = self._query_preferred_tags(tag_id)
+
+        if df.empty:
+            return None  # 推奨タグが見つからない場合
+
+        # 結果の処理
+        if len(df) == 1:
             return df['preferred_tag'].iloc[0]
         else:
-            # 推奨タグが見つからない場合はformat_idをDanbooruの"1"として再検索
-            format_id = 1
-            df_1 = self.execute_sql_query(query)
-            if not df_1.empty:
-                return df_1['preferred_tag'].iloc[0]
-            else:
-                return None
+            # 複数の結果がある場合の処理
+            print(f"タグID {tag_id} に対して複数の推奨タグが見つかりました:")
+            for _, row in df.iterrows():
+                print(f"フォーマット: {row['format_name']}, 推奨タグ: {row['preferred_tag']}")
+
+            # Danbooruのフォーマット（ID: 1）を優先
+            danbooru_result = df[df['format_id'] == 1]
+            if not danbooru_result.empty:
+                return danbooru_result['preferred_tag'].iloc[0]
+
+            # Danbooruのフォーマットがない場合、最初の結果を返す
+            return df['preferred_tag'].iloc[0]
 
     def prompt_convert(self, keyword: str, format_name: str):
         """タグをフォーマット推奨の形式に変換して表示する
@@ -127,6 +162,7 @@ class TagSearcher:
             converted_tags = []
             for tag in keyword.split(","):
                 tag = tag.strip().lower()
+                tag = CSVToDatabaseProcessor.normalize_tag(tag)
 
                 try:
                     tag_id = self.search_tag_id(tag)
@@ -136,16 +172,18 @@ class TagSearcher:
 
                 if tag_id is not None:
                     preferred_tag = self.get_preferred_tag(tag_id, format_name)
-                    if preferred_tag:
+                    if preferred_tag and preferred_tag != 'invalid tag': # TODO: preferred_tagにinvalid tag があるのは問題なのであとでなおす
                         if tag != preferred_tag:
                             print(f"タグ '{tag}' は '{preferred_tag}' に変換されました")
-                        converted_tags.append(preferred_tag)  # preferred_tag を追加
+                        converted_tags.append(preferred_tag)
                     else:
                         converted_tags.append(tag)  # 元のタグを追加
                 else:
                     converted_tags.append(tag)  # tag_id が None の場合も元のタグを追加
 
-            return ", ".join(converted_tags)  # 変換されたタグをカンマ区切りで返す
+            unique_tags = list(set(converted_tags))
+
+            return ", ".join(unique_tags)
         except Exception as e:
             print(f"エラーが発生しました: {str(e)}")
             return None
