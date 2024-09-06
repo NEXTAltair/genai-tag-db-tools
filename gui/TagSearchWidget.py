@@ -74,7 +74,7 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
     def initialize_ui(self):
         # コンボボックスの初期化
         self.comboBoxFormat.addItems(self.tag_searcher.get_tag_formats())
-        self.comboBoxLanguage.addItems(self.tag_searcher.get_tag_langs())
+        self.comboBoxLanguage.addItems(self.tag_searcher.get_tag_languages())
 
         # 使用回数スライダーの初期化
         self.setup_range_slider()

@@ -2,9 +2,6 @@ from typing import Optional
 import sqlite3
 from pathlib import Path
 import pandas as pd
-import ipywidgets as widgets
-from IPython.display import clear_output
-
 from CSVToDatabaseProcessor import CSVToDatabaseProcessor
 
 db_path = Path(__file__).parent / "tags_v3.db"
@@ -554,156 +551,9 @@ class TagSearcher:
 
         return tag_id
 
-def create_widgets(tagsearcher):
-    search_input = widgets.Text(description="タグ検索:")
-    search_button = widgets.Button(description="検索")
-    match_mode_radio = widgets.RadioButtons(
-        options=['部分一致', '完全一致'],
-        description='検索モード:',
-        disabled=False
-    )
-
-    # フォーマット選択用のドロップダウンを追加
-    format_dropdown = widgets.Dropdown(
-        options=tagsearcher.get_tag_formats(),
-        value='All',
-        description='フォーマット:',
-        disabled=False
-    )
-
-    # カラム選択用のCheckboxを作成
-    column_options = ['tag_id', 'tag', 'source_tag', 'language', 'translation', 'alias', 'preferred_tag', 'format_name', 'usage_count', 'type_name']
-    column_checkboxes = [widgets.Checkbox(value=True, description=col) for col in column_options]
-    column_box = widgets.VBox(column_checkboxes, description='表示カラム:')
-
-    def on_button_clicked(b):
-        match_mode = 'partial' if match_mode_radio.value == '部分一致' else 'exact'
-        selected_columns = [cb.description for cb in column_checkboxes if cb.value]
-        tagsearcher.search_and_display(search_input.value, match_mode, format_dropdown.value, columns=selected_columns)
-
-    search_button.on_click(on_button_clicked)
-
-    vbox = widgets.VBox([search_input, match_mode_radio, format_dropdown, column_box, search_button])
-    return vbox
-
-def create_cleaning_widgets(tagsearcher):
-    """カンマ区切りのタグを受け取って指定フォーマット形式へ変換するウィジェットを作成する
-    """
-    input_prompt = widgets.Text(description="Prompt:")
-    convert_button = widgets.Button(description="変換")
-    format_dropdown = widgets.Dropdown(
-        options=tagsearcher.get_tag_formats(),
-        value='All',
-        description='フォーマット:',
-        disabled=False
-    )
-
-    def on_button_clicked(b):
-        converted_tags = tagsearcher.prompt_convert(input_prompt.value, format_dropdown.value)
-        print(converted_tags)
-
-    convert_button.on_click(on_button_clicked)
-
-    vbox = widgets.VBox([input_prompt, format_dropdown, convert_button])
-    return vbox
-
 def initialize_tag_searcher() -> TagSearcher:
     db_path = Path("tags_v3.db")
     return TagSearcher(db_path)
-
-def register_tag_widgets(tagsearcher):
-    tag_input = widgets.Text(description="タグ:")
-    source_tag_input = widgets.Text(description="元タグ:")
-    format_dropdown = widgets.Dropdown(
-        options=tagsearcher.get_tag_formats(),
-        value='All',
-        description='フォーマット:',
-        disabled=False
-    )
-    # タイプ選択用のドロップダウンを追加
-    type_options = [('', None)] + [(t, t) for t in tagsearcher.get_tag_types(format_dropdown.value)]
-    type_dropdown = widgets.Dropdown(
-        options=type_options,
-        value=None,
-        description='タイプ:',
-        disabled=False,
-        placeholder='タイプを選択'
-    )
-
-    # カウント入力用のテキストボックスを追加
-    use_count_input = widgets.IntText(
-        value=0,
-        description='使用回数:',
-        disabled=False
-    )
-
-    language_combobox = widgets.Combobox(
-        options=tagsearcher.get_tag_langs(),
-        value='japanese',
-        description='言語:',
-        ensure_option=True,  # 入力されたテキストをオプションに追加
-        disabled=False
-    )
-    translation_input = widgets.Text(
-        value='',
-        description='翻訳:',
-        disabled=False
-    )
-
-    register_button = widgets.Button(description="登録")
-    output = widgets.Output()
-
-    def update_type_dropdown(change):
-        new_format = change['new']
-        new_types = [('', None)] + [(t, t) for t in tagsearcher.get_tag_types(new_format)]
-        type_dropdown.options = new_types
-        type_dropdown.value = None
-
-    format_dropdown.observe(update_type_dropdown, names='value')
-
-    def on_register_click(b):
-        with output:
-            clear_output()
-            try:
-                if not tag_input.value and not source_tag_input.value:
-                    raise ValueError("タグまたは元タグは必須です。")
-                if ',' in tag_input.value or ',' in source_tag_input.value:
-                    raise ValueError("登録するタグは単一のタグである必要があります。")
-
-                if not source_tag_input.value:
-                    source_tag_input.value = tag_input.value
-
-                normalized_tag = CSVToDatabaseProcessor.normalize_tag(tag_input.value)
-
-                tag_info = {
-                    'normalized_tag': normalized_tag,
-                    'source_tag': source_tag_input.value,
-                    'format_name': format_dropdown.value,
-                    'type_name': type_dropdown.value,
-                    'use_count': use_count_input.value,
-                    'language': language_combobox.value,
-                    'translation': translation_input.value
-                }
-                tag_id = tagsearcher.register_tag_in_db(tag_info)
-                print(f"タグが正常に登録されました。Tag ID: {tag_id}")
-            except Exception as e:
-                print(f"エラー: {str(e)}")
-
-    register_button.on_click(on_register_click)
-
-    widget_box = widgets.VBox([
-        tag_input,
-        source_tag_input,
-        format_dropdown,
-        type_dropdown,
-        use_count_input,
-        language_combobox,
-        translation_input,
-        register_button,
-        output
-    ])
-
-    return widget_box
 
 if __name__ == '__main__':
     # word = "1boy"
