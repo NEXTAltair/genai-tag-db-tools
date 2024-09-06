@@ -3,7 +3,7 @@ import sqlite3
 from pathlib import Path
 import pandas as pd
 import ipywidgets as widgets
-from IPython.display import display, clear_output
+from IPython.display import clear_output
 
 from CSVToDatabaseProcessor import CSVToDatabaseProcessor
 
@@ -14,7 +14,7 @@ class TagSearcher:
     def __init__(self, db_path: Path):
         self.db_path = db_path
 
-    def execute_sql_query(self, query: str, params: tuple = None) -> pd.DataFrame:
+    def execute_query(self, query: str, params: tuple = None) -> pd.DataFrame:
         """SQLクエリを実行し、結果をDataFrameとして返します。
 
         Args:
@@ -26,7 +26,7 @@ class TagSearcher:
         """
         return pd.read_sql_query(query, conn, params=params)
 
-    def execute_insert_query(self, query: str, params: tuple = None):
+    def execute_insert(self, query: str, params: tuple = None):
         """
         SQL INSERT クエリを実行します。
 
@@ -38,7 +38,7 @@ class TagSearcher:
             cursor = conn.cursor()
             cursor.execute(query, params)
 
-    def search_tag_id(self, keyword: str) -> Optional[int]:
+    def find_tag_id(self, keyword: str) -> Optional[int]:
         """TAGSテーブルからタグを完全一致で検索
 
         Args:
@@ -49,7 +49,7 @@ class TagSearcher:
             ValueError: 複数または0件のタグが見つかった場合
         """
         query = "SELECT tag_id FROM TAGS WHERE tag = ?"
-        df = self.execute_sql_query(query, params=(keyword,))
+        df = self.execute_query(query, params=(keyword,))
 
         if df.empty:
             return None
@@ -57,232 +57,6 @@ class TagSearcher:
             print(f"タグ '{keyword}' に対して複数のIDが見つかりました。\n {df}")
         else:
             return int(df['tag_id'].iloc[0])  # 最初の要素の値を取得
-
-    def _get_format_id_by_name(self, format_name: str) -> int:
-        """フォーマット名からフォーマットIDを取得します。
-
-        Args:
-            format_name (str): フォーマット名。
-
-        Returns:
-            int: フォーマットID。見つからない場合は -1 を返します。
-        """
-        query = "SELECT format_id FROM TAG_FORMATS WHERE format_name = ?"
-        df = self.execute_sql_query(query, params=(format_name,))
-        if not df.empty:
-            return int(df['format_id'].iloc[0])
-        else:
-            return -1
-
-    def _get_type_id_by_name(self, type_name: str) -> int:
-        """タイプ名からタイプIDを取得します。"""
-        query = "SELECT type_name_id FROM TAG_TYPE_NAME WHERE type_name = ?"
-        df = self.execute_sql_query(query, params=(type_name,))
-        if not df.empty:
-            return df['type_name_id'].iloc[0]
-        else:
-            return -1
-
-    def _query_preferred_tags(self, tag_id: int, format_id: Optional[int] = None) -> pd.DataFrame:
-        """
-        指定されたタグIDとオプションのフォーマットIDに基づいて、推奨タグを検索します。
-
-        Args:
-            tag_id (int): タグID。
-            format_id (Optional[int]): フォーマットID。指定しない場合は全フォーマットで検索。
-
-        Returns:
-            pd.DataFrame: 推奨タグの検索結果。
-        """
-        base_query = """
-        SELECT T2.tag AS preferred_tag, TF.format_name, TF.format_id
-        FROM TAG_STATUS AS T1
-        JOIN TAGS AS T2 ON T1.preferred_tag_id = T2.tag_id
-        JOIN TAG_FORMATS AS TF ON T1.format_id = TF.format_id
-        WHERE T1.tag_id = ?
-        """
-
-        if format_id is not None:
-            query = base_query + " AND T1.format_id = ?"
-            return self.execute_sql_query(query, params=(tag_id, format_id))
-        else:
-            return self.execute_sql_query(base_query, params=(tag_id,))
-
-    def get_preferred_tag(self, tag_id: int, format_name: str) -> Optional[str]:
-        """
-        指定されたタグIDとフォーマット名に基づいて、推奨タグを取得します。
-        指定フォーマットで見つからない場合、全フォーマットで検索します。
-
-        Args:
-            tag_id (int): タグID。
-            format_name (str): フォーマット名。
-
-        Returns:
-            Optional[str]: 推奨タグ。見つからない場合はNoneを返します。
-        """
-        format_id = self._get_format_id_by_name(format_name)
-
-        # 指定フォーマットで検索
-        if format_id != -1:
-            df = self._query_preferred_tags(tag_id, format_id)
-            if not df.empty:
-                return df['preferred_tag'].iloc[0]
-
-        # 全フォーマットで検索
-        df = self._query_preferred_tags(tag_id)
-
-        if df.empty:
-            return None  # 推奨タグが見つからない場合
-
-        # 結果の処理
-        if len(df) == 1:
-            return df['preferred_tag'].iloc[0]
-        else:
-            # 複数の結果がある場合の処理
-            print(f"タグID {tag_id} に対して複数の推奨タグが見つかりました:")
-            for _, row in df.iterrows():
-                print(f"フォーマット: {row['format_name']}, 推奨タグ: {row['preferred_tag']}")
-
-            # Danbooruのフォーマット（ID: 1）を優先
-            danbooru_result = df[df['format_id'] == 1]
-            if not danbooru_result.empty:
-                return danbooru_result['preferred_tag'].iloc[0]
-
-            # Danbooruのフォーマットがない場合、最初の結果を返す
-            return df['preferred_tag'].iloc[0]
-
-    def prompt_convert(self, keyword: str, format_name: str):
-        """タグをフォーマット推奨の形式に変換して表示する
-
-        Args:
-            keyword (str): 検索するタグ (カンマ区切りも可)
-            format_name (str): 変換先のフォーマット名
-        """
-        try:
-            converted_tags = []
-            for tag in keyword.split(","):
-                tag = tag.strip().lower()
-                tag = CSVToDatabaseProcessor.normalize_tag(tag)
-
-                try:
-                    tag_id = self.search_tag_id(tag)
-                except ValueError:
-                    converted_tags.append(tag)  # 元のタグを追加
-                    continue
-
-                if tag_id is not None:
-                    preferred_tag = self.get_preferred_tag(tag_id, format_name)
-                    if preferred_tag and preferred_tag != 'invalid tag': # TODO: preferred_tagにinvalid tag があるのは問題なのであとでなおす
-                        if tag != preferred_tag:
-                            print(f"タグ '{tag}' は '{preferred_tag}' に変換されました")
-                        converted_tags.append(preferred_tag)
-                    else:
-                        converted_tags.append(tag)  # 元のタグを追加
-                else:
-                    converted_tags.append(tag)  # tag_id が None の場合も元のタグを追加
-
-            unique_tags = list(set(converted_tags))
-
-            return ", ".join(unique_tags)
-        except Exception as e:
-            print(f"エラーが発生しました: {str(e)}")
-            return None
-
-    def get_tag_details(self, tag_id):
-        query = """
-        WITH RECURSIVE
-        preferred_chain(tag_id, preferred_tag_id, level) AS (
-            SELECT tag_id, preferred_tag_id, 0
-            FROM TAG_STATUS
-            WHERE tag_id = ?
-            UNION ALL
-            SELECT ts.tag_id, ts.preferred_tag_id, pc.level + 1
-            FROM TAG_STATUS ts
-            JOIN preferred_chain pc ON ts.tag_id = pc.preferred_tag_id
-            WHERE ts.tag_id != ts.preferred_tag_id AND pc.level < 10
-        )
-        SELECT
-            t.*,
-            GROUP_CONCAT(DISTINCT tt.language || ':' || tt.translation) AS translations,
-            ts.alias,
-            pt.tag AS preferred_tag,
-            pc.level AS alias_level,
-            GROUP_CONCAT(DISTINCT tf.format_name) AS formats,
-            GROUP_CONCAT(DISTINCT ttn.type_name) AS types,
-            SUM(tuc.count) AS total_usage_count,
-            GROUP_CONCAT(DISTINCT tf.format_name || ':' || tuc.count) AS usage_counts_by_format
-        FROM TAGS t
-        LEFT JOIN TAG_TRANSLATIONS tt ON t.tag_id = tt.tag_id
-        LEFT JOIN TAG_STATUS ts ON t.tag_id = ts.tag_id
-        LEFT JOIN TAG_FORMATS tf ON ts.format_id = tf.format_id
-        LEFT JOIN TAG_USAGE_COUNTS tuc ON t.tag_id = tuc.tag_id AND ts.format_id = tuc.format_id
-        LEFT JOIN TAG_TYPE_FORMAT_MAPPING ttfm ON ts.format_id = ttfm.format_id AND ts.type_id = ttfm.type_id
-        LEFT JOIN TAG_TYPE_NAME ttn ON ttfm.type_name_id = ttn.type_name_id
-        LEFT JOIN preferred_chain pc ON t.tag_id = pc.tag_id
-        LEFT JOIN TAGS pt ON pc.preferred_tag_id = pt.tag_id
-        WHERE t.tag_id = ?
-        GROUP BY t.tag_id
-        """
-        return self.execute_sql_query(query, params=(tag_id, tag_id))
-
-    def get_all_tag_ids(self):
-        """すべてのタグIDを取得する関数です。
-        Returns:
-            list: すべてのタグIDのリスト。
-        """
-        query = "SELECT tag_id FROM TAGS"
-        tag_ids = self.execute_sql_query(query)
-        return tag_ids['tag_id'].tolist()
-
-    def get_tag_formats(self):
-        """
-        データベースからタグのフォーマットを取得する関数です。
-
-        Returns:
-            list: タグのフォーマットのリスト。'All' を含みます。
-        """
-        query = "SELECT DISTINCT format_name FROM TAG_FORMATS"
-        formats = self.execute_sql_query(query)
-        return ['All'] + formats['format_name'].tolist()
-
-    def get_tag_langs(self):
-        """
-        データベースからタグの言語を取得する関数です。
-
-        Returns:
-            list: タグの言語のリスト。
-        """
-        query = "SELECT DISTINCT language FROM TAG_TRANSLATIONS"
-        langs = self.execute_sql_query(query)
-        return ['All'] + langs['language'].tolist()
-
-    def get_tag_types(self, format_name: str= None):
-        """フォーマットごとに設定されたタグのタイプを取得する関数
-
-        Args:
-            format_name (str): danbooru, e621, etc. または空文字列
-
-        Returns:
-            list: 指定されたフォーマットに対応するタグタイプのリスト。
-                フォーマットが指定されていない場合は空のリスト。
-        """
-        if not format_name:
-            return []
-
-        format_id = self._get_format_id_by_name(format_name)
-
-        if format_id is None:
-            return []
-
-        query = f"""
-        SELECT DISTINCT ttn.type_name
-        FROM TAG_TYPE_FORMAT_MAPPING AS ttfm
-        JOIN TAG_TYPE_NAME AS ttn ON ttfm.type_name_id = ttn.type_name_id
-        WHERE ttfm.format_id = {format_id}
-        """
-        types = self.execute_sql_query(query)
-
-        return types['type_name'].tolist()
 
     def search_tags(self, keyword, match_mode='partial', format_name='All'):
         """
@@ -325,7 +99,7 @@ class TagSearcher:
             base_query += " AND TF.format_name = ?"
             params += (format_name,)
 
-        df = self.execute_sql_query(base_query, params=params)
+        df = self.execute_query(base_query, params=params)
 
         # usage_count NaN値を0に設定
         df['usage_count'] = df['usage_count'].fillna(0).astype(int)
@@ -339,97 +113,444 @@ class TagSearcher:
 
         return df
 
-    def search_and_display(self, keyword, match_mode, format_name, columns=None):
-        keyword = keyword.strip().lower()
-        print("search_and_display関数が呼び出されました")
-        clear_output(wait=True)
-        try:
-            print(f"キーワード '{keyword}' で検索中... モード: {match_mode}, フォーマット: {format_name}")
-            search_results = self.search_tags(keyword, match_mode, format_name)
-
-            if search_results.empty:
-                print(f"'{keyword}' に関する結果は見つかりませんでした")
-                return
-
-            all_details = []
-            processed_tag_ids = set()
-            for _, row in search_results.iterrows():
-                tag_id = row['tag_id']
-                if tag_id in processed_tag_ids:
-                    continue
-                processed_tag_ids.add(tag_id)
-
-                print(f"タグID {tag_id} の詳細情報を取得中...")
-                details = self.get_tag_details(tag_id)
-
-                detail_dict = {}
-                if not details.empty:
-                    for col in details.columns:
-                        value = details[col].iloc[0]
-                        detail_dict[col] = str(value) if value is not None else "NULL"
-                else:
-                    detail_dict = {col: "NULL" for col in details.columns}
-
-                all_details.append(detail_dict)
-
-            df = pd.DataFrame(all_details)
-
-            if columns:
-                df = df[columns]
-                print(f"選択されたカラム: {', '.join(columns)}")
-
-            display(df)
-
-        except Exception as e:
-            print(f"エラーが発生しました: {str(e)}")
-        print("search_and_display関数が完了しました")
-
-    def register_tag_in_db(self, tag_info: dict) -> int:
+    def get_tag_details(self, tag_id):
+        query = """
+        WITH RECURSIVE
+        preferred_chain(tag_id, preferred_tag_id, level) AS (
+            SELECT tag_id, preferred_tag_id, 0
+            FROM TAG_STATUS
+            WHERE tag_id = ?
+            UNION ALL
+            SELECT ts.tag_id, ts.preferred_tag_id, pc.level + 1
+            FROM TAG_STATUS ts
+            JOIN preferred_chain pc ON ts.tag_id = pc.preferred_tag_id
+            WHERE ts.tag_id != ts.preferred_tag_id AND pc.level < 10
+        )
+        SELECT
+            t.*,
+            GROUP_CONCAT(DISTINCT tt.language || ':' || tt.translation) AS translations,
+            ts.alias,
+            pt.tag AS preferred_tag,
+            pc.level AS alias_level,
+            GROUP_CONCAT(DISTINCT tf.format_name) AS formats,
+            GROUP_CONCAT(DISTINCT ttn.type_name) AS types,
+            SUM(tuc.count) AS total_usage_count,
+            GROUP_CONCAT(DISTINCT tf.format_name || ':' || tuc.count) AS usage_counts_by_format
+        FROM TAGS t
+        LEFT JOIN TAG_TRANSLATIONS tt ON t.tag_id = tt.tag_id
+        LEFT JOIN TAG_STATUS ts ON t.tag_id = ts.tag_id
+        LEFT JOIN TAG_FORMATS tf ON ts.format_id = tf.format_id
+        LEFT JOIN TAG_USAGE_COUNTS tuc ON t.tag_id = tuc.tag_id AND ts.format_id = tuc.format_id
+        LEFT JOIN TAG_TYPE_FORMAT_MAPPING ttfm ON ts.format_id = ttfm.format_id AND ts.type_id = ttfm.type_id
+        LEFT JOIN TAG_TYPE_NAME ttn ON ttfm.type_name_id = ttn.type_name_id
+        LEFT JOIN preferred_chain pc ON t.tag_id = pc.tag_id
+        LEFT JOIN TAGS pt ON pc.preferred_tag_id = pt.tag_id
+        WHERE t.tag_id = ?
+        GROUP BY t.tag_id
         """
-        検証済みのタグ情報をデータベースに登録します。
+        return self.execute_query(query, params=(tag_id, tag_id))
+
+    def get_tag_status(self, tag_id: int, format_id: int) -> Optional[dict]:
+        query = """
+        SELECT ts.*, t.tag, t.source_tag
+        FROM TAG_STATUS ts
+        JOIN TAGS t ON ts.tag_id = t.tag_id
+        WHERE ts.tag_id = ? AND ts.format_id = ?
+        """
+        df = pd.read_sql_query(query, self.conn, params=(tag_id, format_id))
+        return df.to_dict('records')[0] if not df.empty else None
+
+    def update_tag_status(self, tag_id: int, format_id: int, type_id: int, alias: bool, preferred_tag_id: Optional[int]) -> int:
+        """
+        タグの状態を更新または新規作成します。
 
         Args:
-            tag_info (dict): register_tag_widget関数から返された検証済みタグ情報
+            tag_id (int):
+            formt_id (int);
+            type_id (int):
+            alias (bool):
+            preferred_tag_id (Optional[int]):
 
         Returns:
-            int: 登録されたタグのID
+            int: 更新または作成されたタグのID
+        """
 
+        if alias and preferred_tag_id is None: #TODO :後で考える
+            raise ValueError("エイリアスタグには推奨タグの指定が必要です。")
+        elif not alias:
+            preferred_tag_id = tag_id
 
+        # タグステータスの更新または挿入用のDataFrameを作成
+        status_data = pd.DataFrame({
+            'tag_id': [tag_id],
+            'format_id': [format_id],
+            'type_id': [type_id],
+            'alias': [int(alias)],
+            'preferred_tag_id': [preferred_tag_id]
+        })
+
+        try:
+            # to_sqlメソッドを使用してUPSERT操作を実行
+            status_data.to_sql('TAG_STATUS', conn, if_exists='append', index=False,
+                            method='multi',
+                            dtype={
+                                'tag_id': 'INTEGER',
+                                'format_id': 'INTEGER',
+                                'type_id': 'INTEGER',
+                                'alias': 'INTEGER',
+                                'preferred_tag_id': 'INTEGER'
+                            })
+            print(f"タグステータスが正常に更新されました: {tag_id}, {format_id}")
+            return tag_id
+        except sqlite3.IntegrityError:
+            # 既存のレコードが存在する場合は更新
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE TAG_STATUS
+                    SET type_id = ?, alias = ?, preferred_tag_id = ?
+                    WHERE tag_id = ? AND format_id = ?
+                """, (type_id, int(alias), preferred_tag_id, tag_id, format_id))
+            print(f"タグのステータスが更新された: {tag_id}, {format_id}")
+            return tag_id
+        except Exception as e:
+            print(f"タグのステータス更新エラー: {e}")
+            raise
+
+    def create_tag(self, tag: str, source_tag: str) -> int:
+        """
+        タグを検索し、存在しない場合は新規作成します。
+
+        Args:
+            tag (str): 検索または作成するタグ
+
+        Returns:
+            int: タグのID
+        """
+        new_tag_df = pd.DataFrame({'tag': [tag],
+                                    'source_tag': [source_tag]
+                                    })
+        try:
+            new_tag_df.to_sql('TAGS', conn, if_exists='append', index=False)
+            tag_id = self.find_tag_id(tag)  # 新しく作成されたタグのIDを取得
+            print(f"新規タグが作成されました: {tag}")
+        except Exception as e:
+            print(f"新規タグ作成中にエラーが発生しました: {e}")
+            raise
+        return tag_id
+
+    def update_tag_usage_count(self, tag_id: int, format_id: int, use_count: int):
+        current_count = self._get_current_usage_count(tag_id, format_id)
+        if current_count:
+            new_count = current_count
+        else:
+            new_count = use_count
+        df = pd.DataFrame({
+            'tag_id': [tag_id],
+            'format_id': [format_id],
+            'count': [new_count]
+        })
+        try:
+            df.to_sql('TAG_USAGE_COUNTS', conn, if_exists='append', index=False)
+        except sqlite3.IntegrityError:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE TAG_USAGE_COUNTS
+                    SET count = ?
+                    WHERE tag_id = ? AND format_id = ?
+                """, (new_count, tag_id, format_id))
+        except Exception as e:
+            print(f'タグカウントにエラーが発生しました: {e}')
+
+    def update_tag_translation(self, tag_id: int, language: str, translation: str):
+        df = pd.DataFrame({
+            'tag_id': [tag_id],
+            'language': [language],
+            'translation': [translation]
+        })
+        df.to_sql('TAG_TRANSLATIONS', conn, if_exists='append', index=False)
+
+    def convert_prompt(self, prompt: str, format_name: str):
+        """タグをフォーマット推奨の形式に変換して表示する
+
+        Args:
+            prompt (str): 検索するタグ (カンマ区切りも可)
+            format_name (str): 変換先のフォーマット名
+        """
+        try:
+            converted_tags = []
+            format_id = self.get_format_id(format_name)
+            for tag in prompt.split(","):
+                tag = tag.strip().lower()
+                tag = CSVToDatabaseProcessor.normalize_tag(tag)
+
+                try:
+                    tag_id = self.find_tag_id(tag)
+                except ValueError:
+                    converted_tags.append(tag)  # 元のタグを追加
+                    continue
+
+                if tag_id is not None:
+                    preferred_tag = self.get_preferred_tag(tag_id, format_id)
+                    if preferred_tag and preferred_tag != 'invalid tag': # TODO: preferred_tagにinvalid tag があるのは問題なのであとでなおす
+                        if tag != preferred_tag:
+                            print(f"タグ '{tag}' は '{preferred_tag}' に変換されました")
+                        converted_tags.append(preferred_tag)
+                    else:
+                        converted_tags.append(tag)  # 元のタグを追加
+                else:
+                    converted_tags.append(tag)  # tag_id が None の場合も元のタグを追加
+
+            unique_tags = list(set(converted_tags))
+
+            return ", ".join(unique_tags)
+        except Exception as e:
+            print(f"エラーが発生しました: {str(e)}")
+            return None
+
+    def get_all_tag_ids(self):
+        """すべてのタグIDを取得する関数です。
+        Returns:
+            list: すべてのタグIDのリスト。
+        """
+        query = "SELECT tag_id FROM TAGS"
+        tag_ids = self.execute_query(query)
+        return tag_ids['tag_id'].tolist()
+
+    def get_tag_formats(self):
+        """
+        データベースからタグのフォーマットを取得する関数です。
+
+        Returns:
+            list: タグのフォーマットのリスト。'All' を含みます。
+        """
+        query = "SELECT DISTINCT format_name FROM TAG_FORMATS"
+        formats = self.execute_query(query)
+        return ['All'] + formats['format_name'].tolist()
+
+    def get_tag_languages(self):
+        """
+        データベースからタグの言語を取得する関数です。
+
+        Returns:
+            list: タグの言語のリスト。
+        """
+        query = "SELECT DISTINCT language FROM TAG_TRANSLATIONS"
+        langs = self.execute_query(query)
+        return ['All'] + langs['language'].tolist()
+
+    def get_tag_types(self, format_name: str= None):
+        """フォーマットごとに設定されたタグのタイプを取得する関数
+
+        Args:
+            format_name (str): danbooru, e621, etc. または空文字列
+
+        Returns:
+            list: 指定されたフォーマットに対応するタグタイプのリスト。
+                フォーマットが指定されていない場合は空のリスト。
+        """
+        if not format_name:
+            return []
+
+        format_id = self.get_format_id(format_name)
+
+        if format_id is None:
+            return []
+
+        query = f"""
+        SELECT DISTINCT ttn.type_name
+        FROM TAG_TYPE_FORMAT_MAPPING AS ttfm
+        JOIN TAG_TYPE_NAME AS ttn ON ttfm.type_name_id = ttn.type_name_id
+        WHERE ttfm.format_id = {format_id}
+        """
+        types = self.execute_query(query)
+
+        return types['type_name'].tolist()
+
+    def get_format_id(self, format_name: str) -> int:
+        """フォーマット名からフォーマットIDを取得します。
+
+        Args:
+            format_name (str): フォーマット名。
+
+        Returns:
+            int: フォーマットID。見つからない場合は -1 を返します。
+        """
+        query = "SELECT format_id FROM TAG_FORMATS WHERE format_name = ?"
+        df = self.execute_query(query, params=(format_name,))
+        if not df.empty:
+            return int(df['format_id'].iloc[0])
+        else:
+            return -1
+
+    def get_type_id(self, type_name: str) -> int:
+        """タイプ名からタイプIDを取得します。"""
+        query = "SELECT type_name_id FROM TAG_TYPE_NAME WHERE type_name = ?"
+        df = self.execute_query(query, params=(type_name,))
+        if not df.empty:
+            return int(df['type_name_id'].iloc[0])
+        else:
+            return -1
+
+    def get_preferred_tag(self, tag_id: int, format_name: Optional[str] = None) -> Optional[str]:
+        """
+        指定されたタグIDに対して、フォーマットに基づいた推奨タグを取得します。
+        フォーマット名が指定されていない場合は、全フォーマットで検索します。
+
+        Args:
+            tag_id (int): タグID。
+            format_name (Optional[str]): フォーマット名。指定しない場合は全フォーマットで検索。
+
+        Returns:
+            Optional[str]: 推奨タグ。見つからない場合はNoneを返します。
+        """
+        format_id = self.get_format_id(format_name) if format_name else None
+        return self._find_preferred_tag(tag_id, format_id)
+
+    def _find_preferred_tag(self, tag_id: int, format_id: Optional[int] = None) -> Optional[str]:
+        """
+        タグIDとオプションのフォーマットIDに基づいて、最適な推奨タグを検索します。
+
+        Args:
+            tag_id (int): タグID。
+            format_id (Optional[int]): フォーマットID。指定しない場合は全フォーマットで検索。
+
+        Returns:
+            Optional[str]: 推奨タグ。見つからない場合はNoneを返します。
+        """
+        df = self._query_preferred_tags(tag_id, format_id)
+
+        if df.empty:
+            return None  # 推奨タグが見つからない場合
+
+        if len(df) == 1:
+            return df['preferred_tag'].iloc[0]
+
+        # 複数の結果がある場合、Danbooru（ID: 1）のフォーマットを優先
+        return self._select_preferred_tag(df)
+
+    def _select_preferred_tag(self, df: pd.DataFrame) -> str:
+        """
+        与えられたデータフレームから、優先すべき推奨タグを選択します。
+
+        Args:
+            df (pd.DataFrame): 推奨タグの検索結果。
+
+        Returns:
+            str: 優先する推奨タグ。
+        """
+        danbooru_format_id = 1
+        danbooru_result = df[df['format_id'] == danbooru_format_id]
+
+        if not danbooru_result.empty:
+            return danbooru_result['preferred_tag'].iloc[0]
+
+        # Danbooruのフォーマットがない場合、最初の結果を返す
+        return df['preferred_tag'].iloc[0]
+
+    def _query_preferred_tags(self, tag_id: int, format_id: Optional[int] = None) -> pd.DataFrame:
+        """
+        指定されたタグIDとオプションのフォーマットIDに基づいて、推奨タグを検索します。
+
+        Args:
+            tag_id (int): タグID。
+            format_id (Optional[int]): フォーマットID。指定しない場合は全フォーマットで検索。
+
+        Returns:
+            pd.DataFrame: 推奨タグの検索結果。
+        """
+        base_query = """
+        SELECT T2.tag AS preferred_tag, TF.format_name, TF.format_id
+        FROM TAG_STATUS AS T1
+        JOIN TAGS AS T2 ON T1.preferred_tag_id = T2.tag_id
+        JOIN TAG_FORMATS AS TF ON T1.format_id = TF.format_id
+        WHERE T1.tag_id = ?
+        """
+
+        if format_id is not None:
+            query = base_query + " AND T1.format_id = ?"
+            return self.execute_query(query, params=(tag_id, format_id))
+        else:
+            return self.execute_query(base_query, params=(tag_id,))
+
+    def _get_current_usage_count(self, tag_id: int, format_id: int) -> int:
+        query = "SELECT count FROM TAG_USAGE_COUNTS WHERE tag_id = ? AND format_id = ?"
+        df = pd.read_sql_query(query, conn, params=(tag_id, format_id))
+        return int(df['count'].iloc[0] if not df.empty else 0)
+
+    def register_or_update_tag(self, tag_info: dict) -> int:
+        """
+        タグ情報をデータベースに登録または更新します。
+        to_sqlメソッドを使用して効率的にデータを操作します。
+
+        Args:
+            tag_info (dict): 登録するタグの情報を含む辞書
+
+        Returns:
+            int: 登録または更新されたタグのID
+
+        Raises:
+            Exception: データベース操作中にエラーが発生した場合
         """
         normalized_tag = tag_info['normalized_tag']
         source_tag = tag_info['source_tag']
         format_name = tag_info['format_name']
         type_name = tag_info['type_name']
-        use_count = tag_info.get('use_count', 0)
+        alias = tag_info.get('alias', False)
+        count = tag_info.get('use_count', 0)
         language = tag_info.get('language', '')
         translation = tag_info.get('translation', '')
 
-        format_id = self._get_format_id_by_name(format_name)
-        type_id = self._get_type_id_by_name(type_name)
+        existing_tag_id = self.find_tag_id(normalized_tag)
+        format_id = self.get_format_id(format_name)
+        type_id = self.get_type_id(type_name)
 
         if source_tag == normalized_tag:
             source_tag = normalized_tag
-
-        # タグの存在確認
-        existing_tag = self.search_tag_id(normalized_tag)
-
-        if existing_tag is not None:
-            tag_id = existing_tag
         else:
-            # 新しいタグの挿入
-            new_tag_df = pd.DataFrame([{'tag': normalized_tag, 'source_tag': source_tag}])
-            new_tag_df.to_sql('TAGS', conn, if_exists='append', index=False)
-            tag_id = self.search_tag_id(normalized_tag)
+            normalized_tag = CSVToDatabaseProcessor.normalize_tag(source_tag)
 
-            # TAG_STATUSの挿入
-            status_df = pd.DataFrame([{'tag_id': tag_id, 'format_id': format_id, 'type_id': type_id, 'alias': 0, 'preferred_tag_id': tag_id}])
-            status_df.to_sql('TAG_STATUS', conn, if_exists='append', index=False)
-            # TAG_USAGE_COUNTSの挿入
-            usage_df = pd.DataFrame([{'tag_id': tag_id, 'format_id': format_id, 'count': use_count}])
-            usage_df.to_sql('TAG_USAGE_COUNTS', conn, if_exists='append', index=False)
-            # TAG_TRANSLATIONSの挿入
-            translations_df = pd.DataFrame([{'tag_id': tag_id, 'language': language, 'translation': translation}])
-            translations_df.to_sql('TAG_TRANSLATIONS', conn, if_exists='append', index=False)
+        if existing_tag_id is None:
+            # 新しいタグを挿入
+            tag_id = self.create_tag(normalized_tag, source_tag)
+        else:
+            tag_id = existing_tag_id
+
+        preferred_tag_id = self.get_preferred_tag(tag_id, format_id)
+
+        # TAG_STATUSの更新または挿入
+        self.update_tag_status(tag_id, format_id, type_id, alias, preferred_tag_id)
+
+        # TAG_USAGE_COUNTSの更新
+        self.update_tag_usage_count(tag_id, format_id, count)
+
+        # TAG_TRANSLATIONSの更新または挿入
+        if language and translation:
+            self.update_tag_translation(tag_id, language, translation)
+
+        return tag_id
+
+    def _update_existing_tag(self, tag_id: int, source_tag: str, format_id: int, type_id: int, use_count: int, language: str, translation: str) -> int:
+        """既存のタグ情報を更新します。"""
+        # TAGSテーブルの更新
+        tags_df = pd.DataFrame({'tag_id': [tag_id], 'source_tag': [source_tag]})
+        tags_df.to_sql('TAGS', conn, if_exists='replace', index=False)
+
+        # TAG_STATUSの更新または挿入
+        status_df = pd.DataFrame({'tag_id': [tag_id], 'format_id': [format_id], 'type_id': [type_id], 'alias': [0], 'preferred_tag_id': [tag_id]})
+        status_df.to_sql('TAG_STATUS', conn, if_exists='replace', index=False)
+
+        # TAG_USAGE_COUNTSの更新
+        current_count_df = pd.read_sql_query(f"SELECT count FROM TAG_USAGE_COUNTS WHERE tag_id = {tag_id} AND format_id = {format_id}", conn)
+        current_count = current_count_df['count'].iloc[0] if not current_count_df.empty else 0
+        usage_df = pd.DataFrame({'tag_id': [tag_id], 'format_id': [format_id], 'count': [current_count + use_count]})
+        usage_df.to_sql('TAG_USAGE_COUNTS', conn, if_exists='replace', index=False)
+
+        # TAG_TRANSLATIONSの更新または挿入
+        if language and translation:
+            translations_df = pd.DataFrame({'tag_id': [tag_id], 'language': [language], 'translation': [translation]})
+            translations_df.to_sql('TAG_TRANSLATIONS', conn, if_exists='replace', index=False)
 
         return tag_id
 
