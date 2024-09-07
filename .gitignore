@@ -1,4 +1,5 @@
 __pycache__/
+venv/
 *.ui
 genai-tag-db-tools.pyproject
 genai-tag-db-tools.pyproject.user

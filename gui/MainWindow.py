@@ -1,16 +1,17 @@
 import sys
-from PySide6.QtWidgets import QApplication, QMainWindow, QTabWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QMainWindow
 from MainWindow_ui import Ui_MainWindow
-
 class MainWindow(QMainWindow, Ui_MainWindow):
     def __init__(self):
         super().__init__()
         self.setupUi(self)
-        self.init_widgets()
         self.setWindowTitle("タグデータベースツール")
 
+    def initialize(self, tag_searcher):
+        self.tag_searcher = tag_searcher
+        self.init_widgets()
+
     def init_widgets(self):
-        self.tag_searcher = initialize_tag_searcher()
         self.tagSearch.initialize(self.tag_searcher)
         self.tagClesner.initialize(self.tag_searcher)
         self.tagRegister.initialize(self.tag_searcher)
@@ -25,6 +26,8 @@ if __name__ == "__main__":
     from tag_search import initialize_tag_searcher
 
     app = QApplication(sys.argv)
+    tag_searcher = initialize_tag_searcher()
     window = MainWindow()
+    window.initialize(tag_searcher)
     window.show()
     sys.exit(app.exec())

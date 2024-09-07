@@ -3,17 +3,16 @@ import csv
 import re
 from pathlib import Path
 from collections import defaultdict
-from typing import Dict, List, Tuple, Set
 
 class CSVToDatabaseProcessor:
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self.current_id: int = 0
-        self.tags: Dict[int, Tuple[str, str]] = {}  # {tag_id: (source_tag, normalized_tag)}
-        self.tag_id_map: Dict[Tuple[str, str], int] = {}  # {(source_tag, normalized_tag): tag_id}
-        self.translations: Dict[int, Set[Tuple[str, str]]] = defaultdict(set)  # {tag_id: {(language, translation)}}
-        self.usage_counts: Dict[Tuple[int, int], int] = defaultdict(int)  # {(tag_id, format_id): count}
-        self.tag_status: Dict[Tuple[int, int], Tuple[int, bool, int]] = {}  # {(tag_id, format_id): (type_id, alias, preferred_tag_id)}    
+        self.tags: dict[int, tuple[str, str]] = {}  # {tag_id: (source_tag, normalized_tag)}
+        self.tag_id_map: dict[tuple[str, str], int] = {}  # {(source_tag, normalized_tag): tag_id}
+        self.translations: dict[int, set[tuple[str, str]]] = defaultdict(set)  # {tag_id: {(language, translation)}}
+        self.usage_counts: dict[tuple[int, int], int] = defaultdict(int)  # {(tag_id, format_id): count}
+        self.tag_status: dict[tuple[int, int], tuple[int, bool, int]] = {}  # {(tag_id, format_id): (type_id, alias, preferred_tag_id)}    
 
     def process_csv_files(self, csv_dir: Path):
         for file_path in csv_dir.rglob('*.csv'):
@@ -33,27 +32,27 @@ class CSVToDatabaseProcessor:
         format_id = self.get_format_id(file_path.stem)
         default_type_id = self.get_default_type_id(file_path.stem)
         with file_path.open('r', newline='', encoding='utf-8') as csvfile:
-            csv_reader = csv.DictReader(csvfile)
+            csv_reader = csv.dictReader(csvfile)
             for row in csv_reader:
                 self.process_row(row, format_id, default_type_id)
 
     def process_row(self, row: dict, format_id: int, default_type_id: int):
         source_tag = row['source_tag']
         normalized_tag = CSVToDatabaseProcessor.normalize_tag(source_tag)
-        
+
         # タグの処理とIDの取得
         tag_id = self.get_tag_id(source_tag, normalized_tag)
-        
+
         # 使用回数の処理
         count = self.safe_int_convert(row.get('count', '0'))
         self.usage_counts[(tag_id, format_id)] += count
-        
+
         # 翻訳の処理
         self.process_translations(tag_id, row)
-        
+
         # deprecated_tags の処理
         self.process_deprecated_tags(tag_id, format_id, row)
-        
+
         # タグステータスの処理
         type_id = self.safe_int_convert(row.get('type_id', ''), default_type_id)
         current_status = self.tag_status.get((tag_id, format_id), (type_id, False, tag_id))
@@ -81,16 +80,16 @@ class CSVToDatabaseProcessor:
             for deprecated_tag in deprecated_tags:
                 normalized_deprecated_tag = CSVToDatabaseProcessor.normalize_tag(deprecated_tag)
                 deprecated_tag_id = self.get_tag_id(deprecated_tag, normalized_deprecated_tag)
-                
+
                 # 元のタグのステータスを更新
                 original_type_id = self.tag_status.get((tag_id, format_id), (0, False, tag_id))[0]
                 self.tag_status[(tag_id, format_id)] = (original_type_id, False, tag_id)
-                
+
                 # エイリアスに対してエントリを作成または更新
                 self.tag_status[(deprecated_tag_id, format_id)] = (original_type_id, True, tag_id)
 
-                    
-    def split_compound_field(self, field: str) -> Set[str]:
+
+    def split_compound_field(self, field: str) -> set[str]:
         if not field:
             return set()
         return {item.strip() for item in field.split(',')}
@@ -104,7 +103,7 @@ class CSVToDatabaseProcessor:
 
     @staticmethod
     def normalize_tag(tag: str) -> str:
-        tag = tag.lower() 
+        tag = tag.lower()
         tag = re.sub(r'_\(', r' (', tag)
         tag = tag.replace('(', r'\(').replace(')', r'\)')
         tag = re.sub(r'_', ' ', tag)
@@ -314,10 +313,10 @@ class CSVToDatabaseProcessor:
     def insert_into_final_tables(self):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         try:
             cursor.execute("BEGIN TRANSACTION")
-            
+
             # TAGSテーブルにデータを挿入
             cursor.executemany('''
             INSERT OR IGNORE INTO TAGS (tag_id, source_tag, tag)
@@ -396,7 +395,7 @@ class CSVToDatabaseProcessor:
                 inconsistencies.append(f"Inconsistent tag status: {tag} (format_id: {format_id}) is not an alias but has preferred_tag {preferred_tag}")
                 # 自己参照に修正
                 self.tag_status[(tag, format_id)] = (type_id, alias, tag)
-            
+
             # エイリアスのタグの preferred_tag が存在するかチェック
             if alias and (preferred_tag, format_id) not in self.tag_status:
                 inconsistencies.append(f"Missing preferred tag: {preferred_tag} for alias {tag} (format_id: {format_id})")
@@ -417,7 +416,7 @@ class CSVToDatabaseProcessor:
         """
         # クラス変数 データの重複を削除
         self.deduplicate_data()
-        
+
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # TAGSのエクスポート
@@ -489,7 +488,6 @@ def main():
     output_dir = Path('')
     processor = CSVToDatabaseProcessor(db_path)
     processor.run(csv_dir, output_dir)
-    
 
 if __name__ == "__main__":
     main()
