@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (QWidget, QTableWidgetItem, QApplication, 
-                               QSlider, QHBoxLayout, QLabel, QVBoxLayout)
+                               QHBoxLayout, QLabel, QVBoxLayout)
 from PySide6.QtCore import Qt, Slot
 from superqt import QRangeSlider
 
@@ -144,12 +144,13 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         self.display_results(results)
 
     def display_results(self, results: pd.DataFrame):
+        columns = [col for col in results.columns if col not in ['alias', 'preferred_tag']]
         self.tableWidgetResults.setRowCount(len(results))
-        self.tableWidgetResults.setColumnCount(len(results.columns))
-        self.tableWidgetResults.setHorizontalHeaderLabels(results.columns)
+        self.tableWidgetResults.setColumnCount(len(columns))
+        self.tableWidgetResults.setHorizontalHeaderLabels(columns)
 
         for row in range(len(results)):
-            for col, column_name in enumerate(results.columns):
+            for col, column_name in enumerate(columns):
                 item = QTableWidgetItem(str(results.iloc[row][column_name]))
                 self.tableWidgetResults.setItem(row, col, item)
 
