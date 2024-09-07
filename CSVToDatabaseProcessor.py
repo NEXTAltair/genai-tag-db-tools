@@ -32,7 +32,7 @@ class CSVToDatabaseProcessor:
         format_id = self.get_format_id(file_path.stem)
         default_type_id = self.get_default_type_id(file_path.stem)
         with file_path.open('r', newline='', encoding='utf-8') as csvfile:
-            csv_reader = csv.dictReader(csvfile)
+            csv_reader = csv.DictReader(csvfile)
             for row in csv_reader:
                 self.process_row(row, format_id, default_type_id)
 
@@ -483,7 +483,7 @@ class CSVToDatabaseProcessor:
 
 # メイン処理
 def main():
-    db_path = Path('tsgs_v3.db')
+    db_path = Path('tags_v3.db')
     csv_dir = Path('tags')
     output_dir = Path('')
     processor = CSVToDatabaseProcessor(db_path)
