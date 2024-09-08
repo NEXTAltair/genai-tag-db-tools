@@ -83,12 +83,6 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         self.update_type_combo_box()
 
     def setup_range_slider(self):
-        # 既存のスライダーを削除
-        if hasattr(self, 'sliderUsageCount'):
-            self.verticalLayout_2.removeWidget(self.sliderUsageCount)
-            self.sliderUsageCount.deleteLater()
-            self.sliderUsageCount = None
-
         # 新しいカスタムレンジスライダーを作成
         self.usage_count_slider = CustomLogScaleSlider()
         self.verticalLayout_2.insertWidget(self.verticalLayout_2.indexOf(self.labelUsageCount) + 1, self.usage_count_slider)
