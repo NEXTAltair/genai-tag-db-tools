@@ -17,9 +17,9 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QApplication, QComboBox, QGridLayout, QGroupBox,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QPushButton, QRadioButton, QSizePolicy, QSlider,
-    QSplitter, QTabWidget, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget)
+    QPushButton, QRadioButton, QSizePolicy, QSplitter,
+    QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout,
+    QWidget)
 
 class Ui_TagSearchWidget(object):
     def setupUi(self, TagSearchWidget):
@@ -107,11 +107,10 @@ class Ui_TagSearchWidget(object):
 
         self.verticalLayout_2.addWidget(self.labelUsageCount)
 
-        self.sliderUsageCount = QSlider(self.groupBoxSearchCriteria)
-        self.sliderUsageCount.setObjectName(u"sliderUsageCount")
-        self.sliderUsageCount.setOrientation(Qt.Orientation.Horizontal)
+        self.usageCountSlider = QWidget(self.groupBoxSearchCriteria)
+        self.usageCountSlider.setObjectName(u"usageCountSlider")
 
-        self.verticalLayout_2.addWidget(self.sliderUsageCount)
+        self.verticalLayout_2.addWidget(self.usageCountSlider)
 
         self.pushButtonSearch = QPushButton(self.groupBoxSearchCriteria)
         self.pushButtonSearch.setObjectName(u"pushButtonSearch")
