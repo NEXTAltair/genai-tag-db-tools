@@ -47,17 +47,26 @@ genai-tag-db-tools/
 ## セットアップと実行
 
 1. リポジトリをクローンします：
+
    ```bash
    git clone https://github.com/yourusername/genai-tag-db-tools.git
    cd genai-tag-db-tools
    ```
 
 2. 必要な依存関係をインストールします：
+
    ```bash
    pip install -r requirements.txt
    ```
 
+2.5 (未テスト)日本語で検索精度を上げるためにhf_to_sqlite_tag_transfer.pyを実行します：
+
+   ```bash
+   python hf_to_sqlite_tag_transfer.py
+   ```
+
 3. メインアプリケーションを実行します：
+
    ```bash
    python main.py
    ```
@@ -80,12 +89,13 @@ genai-tag-db-tools/
 3. としあき製作のCSVタグデータの日本語翻訳
 4. [AngelBottomless/danbooru-2023-sqlite-fixed-7110548](https://huggingface.co/datasets/KBlueLeaf/danbooru2023-sqlite): danbooruタグのデータベース
 5. [hearmeneigh/e621-rising-v3-preliminary-data](https://huggingface.co/datasets/hearmeneigh/e621-rising-v3-preliminary-data): e621およびrule34タグのデータベース
+6. [p1atdev/danbooru-ja-tag-pair-20241015](https://huggingface.co/datasets/p1atdev/danbooru-ja-tag-pair-20241015): danbooruタグの日本語翻訳データベース
 
 ## ライセンス
 
 このプロジェクトはMITライセンスの下で公開されています。詳細は[LICENSE](LICENSE)ファイルを参照してください。
 
-# V3
+## V3
 
 ```mermaid
 erDiagram
