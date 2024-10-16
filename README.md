@@ -16,7 +16,7 @@ genai-tag-db-toolsは、異なるプラットフォーム間でタグ、その�
 
 ## プロジェクト構造
 
-```
+```bash
 genai-tag-db-tools/
 ├── CSVToDatabaseProcessor.py
 ├── gui/
@@ -47,18 +47,18 @@ genai-tag-db-tools/
 ## セットアップと実行
 
 1. リポジトリをクローンします：
-   ```
+   ```bash
    git clone https://github.com/yourusername/genai-tag-db-tools.git
    cd genai-tag-db-tools
    ```
 
 2. 必要な依存関係をインストールします：
-   ```
+   ```bash
    pip install -r requirements.txt
    ```
 
 3. メインアプリケーションを実行します：
-   ```
+   ```bash
    python main.py
    ```
 
@@ -84,20 +84,6 @@ genai-tag-db-tools/
 ## ライセンス
 
 このプロジェクトはMITライセンスの下で公開されています。詳細は[LICENSE](LICENSE)ファイルを参照してください。
-
-## データソース
-
-このプロジェクトは以下の主要なデータソースを使用しています：
-
-1. [DominikDoom/a1111-sd-webui-tagcomplete](https://github.com/DominikDoom/a1111-sd-webui-tagcomplete): tags.dbの基となったCSVタグデータ
-2. [applemango氏による日本語翻訳](https://github.com/DominikDoom/a1111-sd-webui-tagcomplete/discussions/265): CSVタグデータの日本語翻訳
-3. としあき製作のCSVタグデータの日本語翻訳
-4. [AngelBottomless/danbooru-2023-sqlite-fixed-7110548](https://huggingface.co/datasets/KBlueLeaf/danbooru2023-sqlite): danbooruタグのデータベース
-5. [hearmeneigh/e621-rising-v3-preliminary-data](https://huggingface.co/datasets/hearmeneigh/e621-rising-v3-preliminary-data): e621およびrule34タグのデータベース
-
-これらのデータソースを統合し、整理することで、包括的かつ多言語対応のタグデータベースを構築しています。
-
-
 
 # V3
 
