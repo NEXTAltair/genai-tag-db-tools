@@ -19,7 +19,7 @@ class TagCleanerWidget(QWidget, Ui_TagCleanerWidget):
     @Slot()
     def on_pushButtonConvert_clicked(self):
         plain_text = self.plainTextEditPrompt.toPlainText()
-        converted_tags = self.tag_searcher.prompt_convert(plain_text, self.comboBoxFormat.currentText())
+        converted_tags = self.tag_searcher.convert_prompt(plain_text, self.comboBoxFormat.currentText())
         self.plainTextEditResult.setPlainText(converted_tags)
 
 if __name__ == "__main__":
