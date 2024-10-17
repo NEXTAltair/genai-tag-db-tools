@@ -178,6 +178,7 @@ class CSVToDatabaseProcessor:
         ''')
 
         # TAG_TRANSLATIONSテーブルの作成
+        # NOTE: UNIQUE制約 類語の重複は許すが同じ文字列は許さない
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS TAG_TRANSLATIONS (
             translation_id INTEGER PRIMARY KEY,
@@ -185,6 +186,7 @@ class CSVToDatabaseProcessor:
             language TEXT NOT NULL,
             translation TEXT NOT NULL,
             FOREIGN KEY (tag_id) REFERENCES TAGS(tag_id)
+            UNIQUE(tag_id, language, translation)
         )
         ''')
 

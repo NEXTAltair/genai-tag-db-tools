@@ -59,12 +59,6 @@ genai-tag-db-tools/
    pip install -r requirements.txt
    ```
 
-2.5 (未テスト)日本語で検索精度を上げるためにhf_to_sqlite_tag_transfer.pyを実行します：
-
-   ```bash
-   python hf_to_sqlite_tag_transfer.py
-   ```
-
 3. メインアプリケーションを実行します：
 
    ```bash
