@@ -479,7 +479,8 @@ class TagSearcher:
     def register_or_update_tag(self, tag_info: dict) -> int:
         """
         タグ情報をデータベースに登録または更新します。
-        to_sqlメソッドを使用して効率的にデータを操作します。
+        引数に normalized_tag が存在する場合はそれを使用し、
+        存在しない場合は source_tag から生成します。
 
         Args:
             tag_info (dict): 登録するタグの情報を含む辞書
@@ -490,8 +491,11 @@ class TagSearcher:
         Raises:
             Exception: データベース操作中にエラーが発生した場合
         """
-        normalized_tag = tag_info['normalized_tag']
         source_tag = tag_info['source_tag']
+        normalized_tag = tag_info.get('normalized_tag')
+        if normalized_tag is None:
+            normalized_tag = CSVToDatabaseProcessor.normalize_tag(source_tag)
+
         format_name = tag_info['format_name']
         type_name = tag_info['type_name']
         alias = tag_info.get('alias', False)
@@ -502,11 +506,6 @@ class TagSearcher:
         existing_tag_id = self.find_tag_id(normalized_tag)
         format_id = self.get_format_id(format_name)
         type_id = self.get_type_id(type_name)
-
-        if source_tag == normalized_tag:
-            source_tag = normalized_tag
-        else:
-            normalized_tag = CSVToDatabaseProcessor.normalize_tag(source_tag)
 
         if existing_tag_id is None:
             # 新しいタグを挿入
