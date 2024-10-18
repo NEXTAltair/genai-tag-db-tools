@@ -173,7 +173,8 @@ class CSVToDatabaseProcessor:
         CREATE TABLE IF NOT EXISTS TAGS (
             tag_id INTEGER PRIMARY KEY,
             source_tag TEXT,
-            tag TEXT NOT NULL
+            tag TEXT NOT NULL,
+            UNIQUE(tag, source_tag)
         )
         ''')
 
@@ -185,7 +186,9 @@ class CSVToDatabaseProcessor:
             tag_id INTEGER,
             language TEXT NOT NULL,
             translation TEXT NOT NULL,
-            FOREIGN KEY (tag_id) REFERENCES TAGS(tag_id)
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP,
+            FOREIGN KEY (tag_id) REFERENCES TAGS(tag_id),
             UNIQUE(tag_id, language, translation)
         )
         ''')
@@ -196,6 +199,7 @@ class CSVToDatabaseProcessor:
             format_id INTEGER PRIMARY KEY,
             format_name TEXT NOT NULL,
             description TEXT
+            UNIQUE(format_name)
         )
         ''')
         cursor.executemany('''
@@ -220,6 +224,7 @@ class CSVToDatabaseProcessor:
         INSERT OR IGNORE INTO TAG_TYPE_NAME (type_name_id, type_name, description)
         VALUES (?, ?, ?)
         ''', [
+            (0, 'unknown', ''),
             (1, 'general', ''),
             (2, 'artist', ''),
             (3, 'copyright', ''),
@@ -254,6 +259,7 @@ class CSVToDatabaseProcessor:
         INSERT OR IGNORE INTO TAG_TYPE_FORMAT_MAPPING (format_id, type_id, type_name_id, description)
         VALUES (?, ?, ?, ?)
         ''', [
+            (0, 0, 0, 'unknown'),
             (1, 0, 1, 'Danbooru general'),
             (1, 1, 2, 'Danbooru artist'),
             (1, 3, 3, 'Danbooru copyright'),
@@ -304,7 +310,7 @@ class CSVToDatabaseProcessor:
             PRIMARY KEY (tag_id, format_id),
             FOREIGN KEY (tag_id) REFERENCES TAGS(tag_id),
             FOREIGN KEY (format_id) REFERENCES TAG_FORMATS(format_id),
-            FOREIGN KEY (type_id) REFERENCES TAG_TYPE_FORMAT_MAPPING(type_id),
+            FOREIGN KEY (format_id, type_id) REFERENCES TAG_TYPE_FORMAT_MAPPING(format_id, type_id),
             FOREIGN KEY (preferred_tag_id) REFERENCES TAGS(tag_id)
         )
         ''')
