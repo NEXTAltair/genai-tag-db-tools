@@ -289,7 +289,7 @@ class TagSearcher:
                     continue
 
                 if tag_id is not None:
-                    preferred_tag = self.get_preferred_tag(tag_id, format_id)
+                    preferred_tag = self.find_preferred_tag(tag_id, format_id)
                     if preferred_tag and preferred_tag != 'invalid tag': # TODO: preferred_tagにinvalid tag があるのは問題なのであとでなおす
                         if tag != preferred_tag:
                             print(f"タグ '{tag}' は '{preferred_tag}' に変換されました")
@@ -390,22 +390,8 @@ class TagSearcher:
         else:
             return -1
 
-    def get_preferred_tag(self, tag_id: int, format_name: Optional[str] = None) -> Optional[str]:
-        """
-        指定されたタグIDに対して、フォーマットに基づいた推奨タグを取得します。
-        フォーマット名が指定されていない場合は、全フォーマットで検索します。
 
-        Args:
-            tag_id (int): タグID。
-            format_name (Optional[str]): フォーマット名。指定しない場合は全フォーマットで検索。
-
-        Returns:
-            Optional[str]: 推奨タグ。見つからない場合はNoneを返します。
-        """
-        format_id = self.get_format_id(format_name) if format_name else None
-        return self._find_preferred_tag(tag_id, format_id)
-
-    def _find_preferred_tag(self, tag_id: int, format_id: Optional[int] = None) -> Optional[str]:
+    def find_preferred_tag(self, tag_id: int, format_id: Optional[int] = None) -> Optional[str]:
         """
         タグIDとオプションのフォーマットIDに基づいて、最適な推奨タグを検索します。
 
