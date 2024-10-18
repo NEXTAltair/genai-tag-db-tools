@@ -56,24 +56,34 @@ def test_foreign_key_constraints(db_connection):
     # TAG_STATUS の各外部キーの整合性を確認する
     # TAG_STATUS の tag_id が TAGS に存在するかチェック
     cursor.execute("""
-        SELECT tag_id FROM TAG_STATUS
-        WHERE tag_id NOT IN (SELECT tag_id FROM TAGS)
+        SELECT TS.tag_id, T.source_tag, TF.format_name, TT.translation, TT.language, TS.type_id, TS.alias
+        FROM TAG_STATUS AS TS
+        LEFT JOIN TAGS AS T ON TS.tag_id = T.tag_id
+        LEFT JOIN TAG_FORMATS AS TF ON TS.format_id = TF.format_id
+        LEFT JOIN TAG_TRANSLATIONS AS TT ON TS.tag_id = TT.tag_id
+        WHERE TS.tag_id NOT IN (SELECT tag_id FROM TAGS)
     """)
     missing_tags = cursor.fetchall()
     assert len(missing_tags) == 0, f"TAG_STATUS の tag_id が TAGS に存在しません: {missing_tags}"
 
     # TAG_STATUS の format_id が TAG_FORMATS に存在するかチェック
     cursor.execute("""
-        SELECT format_id FROM TAG_STATUS
-        WHERE format_id NOT IN (SELECT format_id FROM TAG_FORMATS)
+        SELECT TS.format_id, TF.format_name, TS.type_id, TS.alias
+        FROM TAG_STATUS AS TS
+        LEFT JOIN TAG_FORMATS AS TF ON TS.format_id = TF.format_id
+        WHERE TS.format_id NOT IN (SELECT format_id FROM TAG_FORMATS)
     """)
     missing_formats = cursor.fetchall()
     assert len(missing_formats) == 0, f"TAG_STATUS の format_id が TAG_FORMATS に存在しません: {missing_formats}"
 
     # TAG_STATUS の (format_id, type_id) が TAG_TYPE_FORMAT_MAPPING に存在するかチェック
     cursor.execute("""
-        SELECT format_id, type_id FROM TAG_STATUS
-        WHERE (format_id, type_id) NOT IN (
+        SELECT TS.format_id, TS.type_id, TF.format_name, TTN.type_name, TS.alias
+        FROM TAG_STATUS AS TS
+        LEFT JOIN TAG_FORMATS AS TF ON TS.format_id = TF.format_id
+        LEFT JOIN TAG_TYPE_FORMAT_MAPPING AS TTFM ON TS.format_id = TTFM.format_id AND TS.type_id = TTFM.type_id
+        LEFT JOIN TAG_TYPE_NAME AS TTN ON TTFM.type_name_id = TTN.type_name_id
+        WHERE (TS.format_id, TS.type_id) NOT IN (
             SELECT format_id, type_id FROM TAG_TYPE_FORMAT_MAPPING
         )
     """)
@@ -82,8 +92,11 @@ def test_foreign_key_constraints(db_connection):
 
     # TAG_STATUS の preferred_tag_id が TAGS に存在するかチェック
     cursor.execute("""
-        SELECT preferred_tag_id FROM TAG_STATUS
-        WHERE preferred_tag_id IS NOT NULL AND preferred_tag_id NOT IN (SELECT tag_id FROM TAGS)
+        SELECT TS.preferred_tag_id, T.source_tag, TF.format_name, TS.type_id, TS.alias
+        FROM TAG_STATUS AS TS
+        LEFT JOIN TAGS AS T ON TS.preferred_tag_id = T.tag_id
+        LEFT JOIN TAG_FORMATS AS TF ON TS.format_id = TF.format_id
+        WHERE TS.preferred_tag_id IS NOT NULL AND TS.preferred_tag_id NOT IN (SELECT tag_id FROM TAGS)
     """)
     missing_preferred_tags = cursor.fetchall()
     assert len(missing_preferred_tags) == 0, f"TAG_STATUS の preferred_tag_id が TAGS に存在しません: {missing_preferred_tags}"

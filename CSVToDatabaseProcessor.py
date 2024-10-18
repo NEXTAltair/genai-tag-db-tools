@@ -186,6 +186,8 @@ class CSVToDatabaseProcessor:
             tag_id INTEGER,
             language TEXT NOT NULL,
             translation TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP,
             FOREIGN KEY (tag_id) REFERENCES TAGS(tag_id),
             UNIQUE(tag_id, language, translation)
         )
