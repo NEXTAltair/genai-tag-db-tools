@@ -10,3 +10,7 @@ tags_v3.db.*
 #workspace file
 genai-tag-db-tools.code-workspace
 .vscode/settings.json
+
+# Maintenance
+tools
+tags_csv
