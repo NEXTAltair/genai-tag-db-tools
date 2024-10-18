@@ -173,7 +173,7 @@ class CSVToDatabaseProcessor:
         CREATE TABLE IF NOT EXISTS TAGS (
             tag_id INTEGER PRIMARY KEY,
             source_tag TEXT,
-            tag TEXT NOT NULL
+            tag TEXT NOT NULL,
             UNIQUE(tag, source_tag)
         )
         ''')
@@ -186,7 +186,7 @@ class CSVToDatabaseProcessor:
             tag_id INTEGER,
             language TEXT NOT NULL,
             translation TEXT NOT NULL,
-            FOREIGN KEY (tag_id) REFERENCES TAGS(tag_id)
+            FOREIGN KEY (tag_id) REFERENCES TAGS(tag_id),
             UNIQUE(tag_id, language, translation)
         )
         ''')
@@ -257,7 +257,7 @@ class CSVToDatabaseProcessor:
         INSERT OR IGNORE INTO TAG_TYPE_FORMAT_MAPPING (format_id, type_id, type_name_id, description)
         VALUES (?, ?, ?, ?)
         ''', [
-            (0, 0, 0, 'unknown')
+            (0, 0, 0, 'unknown'),
             (1, 0, 1, 'Danbooru general'),
             (1, 1, 2, 'Danbooru artist'),
             (1, 3, 3, 'Danbooru copyright'),
