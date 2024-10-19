@@ -14,3 +14,4 @@ genai-tag-db-tools.code-workspace
 # Maintenance
 tools
 tags_csv
+.pylintrc

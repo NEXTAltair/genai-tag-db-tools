@@ -154,7 +154,7 @@ class TagSearcher:
         JOIN TAGS t ON ts.tag_id = t.tag_id
         WHERE ts.tag_id = ? AND ts.format_id = ?
         """
-        df = pd.read_sql_query(query, self.conn, params=(tag_id, format_id))
+        df = pd.read_sql_query(query, conn, params=(tag_id, format_id))
         return df.to_dict('records')[0] if not df.empty else None
 
     def update_tag_status(self, tag_id: int, format_id: int, type_id: int, alias: bool, preferred_tag_id: Optional[int]) -> int:
@@ -163,7 +163,7 @@ class TagSearcher:
 
         Args:
             tag_id (int):
-            formt_id (int);
+            format_id (int);
             type_id (int):
             alias (bool):
             preferred_tag_id (Optional[int]):
@@ -172,7 +172,7 @@ class TagSearcher:
             int: 更新または作成されたタグのID
         """
 
-        if alias and preferred_tag_id is None: #TODO :後で考える
+        if alias and preferred_tag_id is None:
             raise ValueError("エイリアスタグには推奨タグの指定が必要です。")
         elif not alias:
             preferred_tag_id = tag_id
@@ -275,6 +275,7 @@ class TagSearcher:
             prompt (str): 検索するタグ (カンマ区切りも可)
             format_name (str): 変換先のフォーマット名
         """
+        #TODO: タグ 'fate/grand order' は 'fate/extra' に変換されました げんいんをさがす
         try:
             converted_tags = []
             format_id = self.get_format_id(format_name)
@@ -290,7 +291,7 @@ class TagSearcher:
 
                 if tag_id is not None:
                     preferred_tag = self.find_preferred_tag(tag_id, format_id)
-                    if preferred_tag and preferred_tag != 'invalid tag': # TODO: preferred_tagにinvalid tag があるのは問題なのであとでなおす
+                    if preferred_tag and preferred_tag != 'invalid tag': #TODO: preferred_tagにinvalid tag があるのは問題なのであとでなおす
                         if tag != preferred_tag:
                             print(f"タグ '{tag}' は '{preferred_tag}' に変換されました")
                         converted_tags.append(preferred_tag)
@@ -334,8 +335,8 @@ class TagSearcher:
             list: タグの言語のリスト。
         """
         query = "SELECT DISTINCT language FROM TAG_TRANSLATIONS"
-        langs = self.execute_query(query)
-        return ['All'] + langs['language'].tolist()
+        tag_languages = self.execute_query(query)
+        return ['All'] + tag_languages['language'].tolist()
 
     def get_tag_types(self, format_name: str= None):
         """フォーマットごとに設定されたタグのタイプを取得する関数
@@ -499,7 +500,7 @@ class TagSearcher:
         else:
             tag_id = existing_tag_id
 
-        preferred_tag_id = self.get_preferred_tag(tag_id, format_id)
+        preferred_tag_id = self.find_preferred_tag(tag_id, format_id)
 
         # TAG_STATUSの更新または挿入
         self.update_tag_status(tag_id, format_id, type_id, alias, preferred_tag_id)
