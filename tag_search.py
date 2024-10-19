@@ -3,6 +3,7 @@ import sqlite3
 from pathlib import Path
 import pandas as pd
 from CSVToDatabaseProcessor import CSVToDatabaseProcessor
+from cleanup_str import TagCleaner
 
 db_path = Path(__file__).parent / "tags_v3.db"
 conn = sqlite3.connect(db_path)
@@ -163,7 +164,7 @@ class TagSearcher:
 
         Args:
             tag_id (int):
-            format_id (int);
+            formt_id (int);
             type_id (int):
             alias (bool):
             preferred_tag_id (Optional[int]):
@@ -172,7 +173,7 @@ class TagSearcher:
             int: 更新または作成されたタグのID
         """
 
-        if alias and preferred_tag_id is None:
+        if alias and preferred_tag_id is None: #TODO :後で考える
             raise ValueError("エイリアスタグには推奨タグの指定が必要です。")
         elif not alias:
             preferred_tag_id = tag_id
@@ -275,12 +276,12 @@ class TagSearcher:
             prompt (str): 検索するタグ (カンマ区切りも可)
             format_name (str): 変換先のフォーマット名
         """
-        #TODO: タグ 'fate/grand order' は 'fate/extra' に変換されました げんいんをさがす
         try:
             converted_tags = []
             format_id = self.get_format_id(format_name)
-            for tag in prompt.split(","):
-                tag = tag.strip().lower()
+            clean_prompt = TagCleaner.clean_tags(prompt)
+            for tag in clean_prompt.split(","):
+                tag = tag.strip().lower() # FIXME: 小文字にすると顔文字に対応できないがテキストエンコーダーは大文字小文字区別するの？
                 tag = CSVToDatabaseProcessor.normalize_tag(tag)
 
                 try:
@@ -291,7 +292,7 @@ class TagSearcher:
 
                 if tag_id is not None:
                     preferred_tag = self.find_preferred_tag(tag_id, format_id)
-                    if preferred_tag and preferred_tag != 'invalid tag': #TODO: preferred_tagにinvalid tag があるのは問題なのであとでなおす
+                    if preferred_tag and preferred_tag != 'invalid tag': # FIXME: preferred_tagにinvalid tag があるのは問題なのであとでなおす
                         if tag != preferred_tag:
                             print(f"タグ '{tag}' は '{preferred_tag}' に変換されました")
                         converted_tags.append(preferred_tag)
@@ -335,8 +336,8 @@ class TagSearcher:
             list: タグの言語のリスト。
         """
         query = "SELECT DISTINCT language FROM TAG_TRANSLATIONS"
-        tag_languages = self.execute_query(query)
-        return ['All'] + tag_languages['language'].tolist()
+        langs = self.execute_query(query)
+        return ['All'] + langs['language'].tolist()
 
     def get_tag_types(self, format_name: str= None):
         """フォーマットごとに設定されたタグのタイプを取得する関数
@@ -390,7 +391,6 @@ class TagSearcher:
             return int(df['type_name_id'].iloc[0])
         else:
             return -1
-
 
     def find_preferred_tag(self, tag_id: int, format_id: Optional[int] = None) -> Optional[str]:
         """
