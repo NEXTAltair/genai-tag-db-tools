@@ -1,0 +1,5 @@
+[MASTER]
+init-hook='import sys; sys.path.insert(0, "H:/lora/素材リスト/スクリプト/src/module/genai-tag-db-tools")'
+
+[MESSAGES CONTROL]
+disable=C0301,C0304,C0114,C0115,C0116

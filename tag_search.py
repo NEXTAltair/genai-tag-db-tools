@@ -3,6 +3,7 @@ import sqlite3
 from pathlib import Path
 import pandas as pd
 from CSVToDatabaseProcessor import CSVToDatabaseProcessor
+from cleanup_str import TagCleaner
 
 db_path = Path(__file__).parent / "tags_v3.db"
 conn = sqlite3.connect(db_path)
@@ -154,7 +155,7 @@ class TagSearcher:
         JOIN TAGS t ON ts.tag_id = t.tag_id
         WHERE ts.tag_id = ? AND ts.format_id = ?
         """
-        df = pd.read_sql_query(query, self.conn, params=(tag_id, format_id))
+        df = pd.read_sql_query(query, conn, params=(tag_id, format_id))
         return df.to_dict('records')[0] if not df.empty else None
 
     def update_tag_status(self, tag_id: int, format_id: int, type_id: int, alias: bool, preferred_tag_id: Optional[int]) -> int:
@@ -278,8 +279,9 @@ class TagSearcher:
         try:
             converted_tags = []
             format_id = self.get_format_id(format_name)
-            for tag in prompt.split(","):
-                tag = tag.strip().lower()
+            clean_prompt = TagCleaner.clean_tags(prompt)
+            for tag in clean_prompt.split(","):
+                tag = tag.strip().lower() # FIXME: 小文字にすると顔文字に対応できないがテキストエンコーダーは大文字小文字区別するの？
                 tag = CSVToDatabaseProcessor.normalize_tag(tag)
 
                 try:
@@ -290,7 +292,7 @@ class TagSearcher:
 
                 if tag_id is not None:
                     preferred_tag = self.find_preferred_tag(tag_id, format_id)
-                    if preferred_tag and preferred_tag != 'invalid tag': # TODO: preferred_tagにinvalid tag があるのは問題なのであとでなおす
+                    if preferred_tag and preferred_tag != 'invalid tag': # FIXME: preferred_tagにinvalid tag があるのは問題なのであとでなおす
                         if tag != preferred_tag:
                             print(f"タグ '{tag}' は '{preferred_tag}' に変換されました")
                         converted_tags.append(preferred_tag)
@@ -389,7 +391,6 @@ class TagSearcher:
             return int(df['type_name_id'].iloc[0])
         else:
             return -1
-
 
     def find_preferred_tag(self, tag_id: int, format_id: Optional[int] = None) -> Optional[str]:
         """
@@ -499,7 +500,7 @@ class TagSearcher:
         else:
             tag_id = existing_tag_id
 
-        preferred_tag_id = self.get_preferred_tag(tag_id, format_id)
+        preferred_tag_id = self.find_preferred_tag(tag_id, format_id)
 
         # TAG_STATUSの更新または挿入
         self.update_tag_status(tag_id, format_id, type_id, alias, preferred_tag_id)
