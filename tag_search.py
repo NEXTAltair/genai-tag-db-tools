@@ -282,7 +282,6 @@ class TagSearcher:
             clean_prompt = TagCleaner.clean_tags(prompt)
             for tag in clean_prompt.split(","):
                 tag = tag.strip().lower() # FIXME: 小文字にすると顔文字に対応できないがテキストエンコーダーは大文字小文字区別するの？
-                tag = CSVToDatabaseProcessor.normalize_tag(tag)
 
                 try:
                     tag_id = self.find_tag_id(tag)
@@ -293,6 +292,7 @@ class TagSearcher:
                 if tag_id is not None:
                     preferred_tag = self.find_preferred_tag(tag_id, format_id)
                     if preferred_tag and preferred_tag != 'invalid tag': # FIXME: preferred_tagにinvalid tag があるのは問題なのであとでなおす
+                        #FIXME: \(disambiguation\) を含むタグと original, skeb commission, pixiv commission, hashtag-only commentaryはDBから除去が必要
                         if tag != preferred_tag:
                             print(f"タグ '{tag}' は '{preferred_tag}' に変換されました")
                         converted_tags.append(preferred_tag)
@@ -541,17 +541,17 @@ def initialize_tag_searcher() -> TagSearcher:
     db_path = Path("tags_v3.db")
     return TagSearcher(db_path)
 
-if __name__ == '__main__':
+#if __name__ == '__main__':
     # word = "1boy"
     # match_mode = "partial"
     # search_and_display(word, match_mode, "All")
     # prompt = "1boy, 1girl, 2boys, 2girls, 3boys, 3girls, 4boys, 4girls, 5boys"
     # format_name = "e621"
-    tagsearcher = initialize_tag_searcher()
+    # tagsearcher = initialize_tag_searcher()
     # cleanprompt = tagsearcher.prompt_convert(prompt, format_name)
     # print(prompt)
     # print(cleanprompt)
     # types = tagsearcher.get_tag_types('e621')
     # print(types)
-    langs = tagsearcher.get_tag_langs()
-    print(langs)
+    # langs = tagsearcher.get_tag_languages()
+    # print(langs)
