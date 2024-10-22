@@ -1,8 +1,8 @@
 import sys
 from pathlib import Path
 current_dir = Path(__file__).parent
-project_root = current_dir / "gui"
-sys.path.insert(0, str(project_root))
+gui_file_dir = current_dir / "gui"
+sys.path.insert(0, str(gui_file_dir))
 
 from PySide6.QtWidgets import QApplication
 from gui.MainWindow import MainWindow
@@ -17,5 +17,4 @@ def main():
     sys.exit(app.exec())
 
 if __name__ == "__main__":
-
     main()

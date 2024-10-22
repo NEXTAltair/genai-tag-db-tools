@@ -6,7 +6,7 @@ from CSVToDatabaseProcessor import CSVToDatabaseProcessor
 from cleanup_str import TagCleaner
 
 db_path = Path(__file__).parent / "tags_v3.db"
-conn = sqlite3.connect(db_path)
+conn = sqlite3.connect(db_path, check_same_thread=False)
 
 class TagSearcher:
     def __init__(self, db_path: Path):
