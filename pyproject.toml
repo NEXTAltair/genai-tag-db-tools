@@ -1,0 +1,63 @@
+# ビルドシステムの設定
+[build-system]
+# Pythonパッケージングツールの指定
+requires = ["hatchling"]  # モダンなビルドシステム
+build-backend = "hatchling.build"  # ビルドバックエンドの指定
+
+# プロジェクトの基本情報
+[project]
+name = "genai-tag-db-tools"  # パッケージ名 ハイフン推奨なぜかは知らん
+version = "0.1.0"  # バージョン番号
+description = "AI生成画像のタグ管理ツール"  # プロジェクトの説明
+requires-python = ">=3.12"  # 必要なPythonバージョン
+
+# 必要なパッケージの依存関係
+dependencies = [
+    "PySide6>=6.8.0.2",        # Qt GUIフレームワーク
+    "pandas>=2.2.2",           # データ分析ライブラリ
+    "superqt>=0.6.7",          # PySide6の拡張機能
+    "polars>=1.9.0",           # 高性能データフレームライブラリ
+]
+
+# プロジェクトの分類情報
+classifiers = [
+    "Operating System :: Microsoft :: Windows :: Windows 11"  # 対応OS
+]
+
+# pytestの設定オプション
+[tool.pytest.ini_options]
+addopts = "-ra -q -v"         # テスト実行時のオプション（結果表示の詳細度など）
+testpaths = ["test"]          # テストファイルの場所
+pythonpath = ["genai_tag_db_tools"]          # テスト実行時のPythonパス
+
+# 開発時のみ必要な追加パッケージ
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.3",          # テストフレームワーク
+    "pytest-cov>=5.0.0",      # テストカバレッジツール
+]
+
+# ビルド設定
+[tool.hatch.build.targets.wheel]
+packages = ["genai_tag_db_tools"] # Pythonパッケージ名（アンダースコア）
+
+# プロジェクトスクリプト
+[project.scripts]
+genai-tag-db-tools = "genai_tag_db_tools.main:main"
+#インストールしてgenai_tag_db_toolswpターミナルで入力するとmainが実行されるよという話
+
+# Pyright（静的型チェッカー）の設定
+[tool.pyright]
+include = ["genai_tag_db_tools"]             # 型チェック対象
+exclude = [                   # 型チェック除外対象
+    "**/__pycache__",
+    "test"
+]
+venvPath = "."               # 仮想環境のパス
+venv = "venv"               # 仮想環境の名前
+typeCheckingMode = "basic"  # 型チェックの厳格さ
+
+# PySide6関連の特別な設定
+reportGeneralTypeIssues = "warning"     # 一般的な型の問題を警告として報告
+reportMissingTypeStubs = false          # 型定義ファイルの不足を無視
+reportUnknownMemberType = false         # 不明なメンバー型を無視

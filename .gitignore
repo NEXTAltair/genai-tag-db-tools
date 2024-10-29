@@ -1,17 +1,20 @@
 __pycache__/
 venv/
-*.ui
 genai-tag-db-tools.pyproject
 genai-tag-db-tools.pyproject.user
+initial-analysis.json
 
 #database backup files
 tags_v3.db.*
 
 #workspace file
+.pytest_cache/
+.vscode/
+.git/
 genai-tag-db-tools.code-workspace
 .vscode/settings.json
-
-# Maintenance
-tools
-tags_csv
 .pylintrc
+
+#データソース
+tags_csv/
+

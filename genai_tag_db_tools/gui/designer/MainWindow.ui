@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1000</width>
+    <height>600</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>タグデータベースツール</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="verticalLayout">
+    <item>
+     <widget class="QTabWidget" name="tabWidget">
+      <property name="currentIndex">
+       <number>2</number>
+      </property>
+      <widget class="TagSearchWidget" name="tagSearch">
+       <attribute name="title">
+        <string>タグ検索</string>
+       </attribute>
+      </widget>
+      <widget class="TagCleanerWidget" name="tagCleaner">
+       <attribute name="title">
+        <string>タグクリーナー</string>
+       </attribute>
+      </widget>
+      <widget class="TagRegisterWidget" name="tagRegister">
+       <attribute name="title">
+        <string>登録</string>
+       </attribute>
+      </widget>
+      <widget class="TagStatisticsWidget" name="tagStatistics">
+       <attribute name="title">
+        <string>タグ統計</string>
+       </attribute>
+      </widget>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>TagSearchWidget</class>
+   <extends>QWidget</extends>
+   <header>..widgets.tag_search</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>TagCleanerWidget</class>
+   <extends>QWidget</extends>
+   <header>..widgets.tag_cleaner</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>TagStatisticsWidget</class>
+   <extends>QWidget</extends>
+   <header>..widgets.tag_statistics</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>TagRegisterWidget</class>
+   <extends>QWidget</extends>
+   <header>..widgets.tag_register</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

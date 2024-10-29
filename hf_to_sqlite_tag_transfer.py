@@ -1,7 +1,7 @@
 import polars as pl
 import sqlite3
 import logging
-from CSVToDatabaseProcessor import CSVToDatabaseProcessor
+from genai_tag_db_tools.core.processor import CSVToDatabaseProcessor
 
 class DanbooruJaTagBatch:
     def __init__(self, df: pl.DataFrame):
