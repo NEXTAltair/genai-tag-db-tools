@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>TagStatisticsWidget</class>
+ <widget class="QWidget" name="TagStatisticsWidget">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>400</width>
+    <height>300</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>タグ統計</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QLabel" name="labelSummary">
+     <property name="text">
+      <string>タグ概要</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QTabWidget" name="tabWidgetCharts">
+     <widget class="QWidget" name="tabDistribution">
+      <attribute name="title">
+       <string>分布</string>
+      </attribute>
+     </widget>
+     <widget class="QWidget" name="tabUsage">
+      <attribute name="title">
+       <string>使用頻度</string>
+      </attribute>
+     </widget>
+     <widget class="QWidget" name="tabLanguage">
+      <attribute name="title">
+       <string>言語</string>
+      </attribute>
+     </widget>
+     <widget class="QWidget" name="tabTrends">
+      <attribute name="title">
+       <string>トレンド</string>
+      </attribute>
+     </widget>
+    </widget>
+   </item>
+   <item>
+    <widget class="QListWidget" name="listWidgetTopTags"/>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

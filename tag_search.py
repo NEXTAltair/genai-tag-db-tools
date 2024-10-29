@@ -2,10 +2,10 @@ from typing import Optional
 import sqlite3
 from pathlib import Path
 import pandas as pd
-from CSVToDatabaseProcessor import CSVToDatabaseProcessor
+from genai_tag_db_tools.core.processor import CSVToDatabaseProcessor
 from cleanup_str import TagCleaner
 
-db_path = Path(__file__).parent / "tags_v3.db"
+db_path = Path(__file__).parent / "data" / "tags_v3.db"
 conn = sqlite3.connect(db_path, check_same_thread=False)
 
 class TagSearcher:

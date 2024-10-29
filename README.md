@@ -18,61 +18,113 @@ genai-tag-db-toolsは、異なるプラットフォーム間でタグ、その�
 
 ```bash
 genai-tag-db-tools/
-├── CSVToDatabaseProcessor.py
-├── gui/
-│   ├── MainWindow.py
-│   ├── TagCleanerWidget.py
-│   ├── TagRegisterWidget.py
-│   ├── TagSearchWidget.py
-│   └── TagStatisticsWidget.py
-├── main.py
-├── README.md
-├── requirements.txt
-├── tag_search.py
-└── tags_v3.db
+├── genai_tag_db_tools/          # メインパッケージ
+│   ├── core/                    # コア機能
+│   │   └── processor.py         # データ処理ロジック
+│   ├── gui/                     # GUIコンポーネント
+│   │   ├── designer/           # UI定義ファイル
+│   │   ├── widgets/            # カスタムウィジェット
+│   │   └── windows/            # メインウィンドウ実装
+│   └── main.py                 # エントリーポイント
+├── tools/                       # ユーティリティスクリプト
+├── data/                        # データファイル
+├── test/                        # テストコード
+├── pyproject.toml              # プロジェクト設定
+└── README.md
 ```
 
 ## データベース構造
 
-データベースはSQLiteで実装されており、以下の主要なテーブルで構成されています：
+データベースはSQLiteで実装され、以下の主要なテーブルで構成されています：
 
-1. `TAGS`: ソースと正規化された形式を含む、ユニークなタグを保存します。
-2. `TAG_TRANSLATIONS`: 異なる言語でのタグの翻訳を含みます。
-3. `TAG_FORMATS`: タグの異なるフォーマットまたはソース（例：danbooru、e621、derpibooru）を定義します。
-4. `TAG_TYPE_NAME`: タグの種類（例：一般、アーティスト、著作権、キャラクター）を定義します。
-5. `TAG_TYPE_FORMAT_MAPPING`: タグの種類を特定のフォーマットにマッピングします。
-6. `TAG_USAGE_COUNTS`: 異なるフォーマットでのタグの使用回数を追跡します。
-7. `TAG_STATUS`: タグのステータス（エイリアスや推奨形式を含む）を管理します。
+### コアテーブル
+1. `TAGS`: タグの基本情報
+   - `tag_id`: プライマリーキー
+   - `source_tag`: 元のタグ文字列
+   - `tag`: 正規化されたタグ
 
-## セットアップと実行
+2. `TAG_TRANSLATIONS`: 多言語対応
+   - `translation_id`: プライマリーキー
+   - `tag_id`: TAGSテーブルへの参照
+   - `language`: 言語コード
+   - `translation`: 翻訳テキスト
 
-1. リポジトリをクローンします：
+3. `TAG_FORMATS`: タグのフォーマット定義
+   - `format_id`: プライマリーキー
+   - `format_name`: フォーマット名
+   - `description`: 説明
 
-   ```bash
-   git clone https://github.com/yourusername/genai-tag-db-tools.git
-   cd genai-tag-db-tools
-   ```
+4. `TAG_TYPE_NAME`: タグタイプの定義
+   - `type_name_id`: プライマリーキー
+   - `type_name`: タイプ名
+   - `description`: 説明
 
-2. 必要な依存関係をインストールします：
+### 関連テーブル
+5. `TAG_TYPE_FORMAT_MAPPING`: タイプとフォーマットの関連付け
+6. `TAG_USAGE_COUNTS`: 使用頻度の追跡
+7. `TAG_STATUS`: タグのステータス管理
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+## インストール
 
-3. メインアプリケーションを実行します：
+1. リポジトリのクローン:
+```bash
+git clone https://github.com/yourusername/genai-tag-db-tools.git
+cd genai-tag-db-tools
+```
 
-   ```bash
-   python main.py
-   ```
+2. 開発環境のセットアップ:
+```bash
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install -e ".[dev]"
+```
 
 ## 使用方法
 
-アプリケーションは以下の主要な機能を提供します：
+### GUIアプリケーションの起動
 
-- タグ検索: キーワード、フォーマット、タイプ、言語などで高度な検索が可能です。
-- タグクリーナー: 入力されたタグを正規化し、推奨タグに変換します。
-- タグ登録: 新しいタグの追加や既存タグの情報更新ができます。
-- タグ統計: データベース内のタグに関する統計情報を表示します。
+```bash
+python -m genai_tag_db_tools
+```
+
+### 主要な機能
+
+1. **タグ検索**
+   - キーワード検索
+   - フォーマット別フィルタリング
+   - タイプ別フィルタリング
+   - 翻訳検索
+
+2. **タグクリーナー**
+   - タグの正規化
+   - 非推奨タグの検出
+   - 推奨タグへの変換
+
+3. **タグ登録**
+   - 新規タグの追加
+   - 既存タグの更新
+   - タグ関係の管理
+
+4. **タグ統計**
+   - 使用頻度分析
+   - フォーマット別統計
+   - タイプ別分布
+
+## 開発者向け情報
+
+### テストの実行
+
+```bash
+pytest
+```
+
+### コードスタイル
+
+このプロジェクトはPEP 8に従います。コードフォーマットには`black`を使用しています。
+
+```bash
+black genai_tag_db_tools
+```
 
 ## データソース
 
