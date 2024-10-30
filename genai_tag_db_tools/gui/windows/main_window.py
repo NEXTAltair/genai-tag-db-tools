@@ -2,6 +2,7 @@ import sys
 from PySide6.QtWidgets import QApplication, QMainWindow
 from ..designer.MainWindow_ui import Ui_MainWindow
 
+
 class MainWindow(QMainWindow, Ui_MainWindow):
     def __init__(self):
         super().__init__()
@@ -21,6 +22,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 if __name__ == "__main__":
     import sys
     from pathlib import Path
+
     current_dir = Path(__file__).parent
     project_root = current_dir.parent
     sys.path.insert(0, str(project_root))

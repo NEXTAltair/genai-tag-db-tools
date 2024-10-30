@@ -3,12 +3,12 @@ from PySide6.QtCore import Slot
 from ..designer.TagRegisterWidget_ui import Ui_TagRegisterWidget
 from ...core.processor import CSVToDatabaseProcessor
 
+
 class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
         self.tag_searcher = None
-
 
     def initialize(self, tag_searcher):
         self.tag_searcher = tag_searcher
@@ -17,7 +17,7 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
     def initialize_ui(self):
         self.comboBoxFormat.addItems(self.tag_searcher.get_tag_formats())
         self.comboBoxLanguage.addItems(self.tag_searcher.get_tag_languages())
-        self.comboBoxLanguage.setCurrentText('japanese')
+        self.comboBoxLanguage.setCurrentText("japanese")
         self.on_comboBoxFormat_currentIndexChanged()
 
     @Slot(int)
@@ -25,7 +25,7 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
         format_name = self.comboBoxFormat.currentText()
         tag_types = self.tag_searcher.get_tag_types(format_name)
         self.comboBoxType.clear()
-        self.comboBoxType.addItems([''] + tag_types)
+        self.comboBoxType.addItems([""] + tag_types)
 
     @Slot()
     def on_pushButtonRegister_clicked(self):
@@ -45,7 +45,7 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
 
         if not tag and not source_tag:
             raise ValueError("タグまたは元タグは必須です。")
-        if ',' in tag or ',' in source_tag:
+        if "," in tag or "," in source_tag:
             raise ValueError("登録するタグは単一のタグである必要があります。")
 
         if source_tag == tag:
@@ -54,13 +54,13 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
             normalized_tag = CSVToDatabaseProcessor.normalize_tag(source_tag)
 
         return {
-            'normalized_tag': normalized_tag,
-            'source_tag': source_tag,
-            'format_name': self.comboBoxFormat.currentText(),
-            'type_name': self.comboBoxType.currentText(),
-            'use_count': self.spinBoxUseCount.value(),
-            'language': self.comboBoxLanguage.currentText(),
-            'translation': self.lineEditTranslation.text()
+            "normalized_tag": normalized_tag,
+            "source_tag": source_tag,
+            "format_name": self.comboBoxFormat.currentText(),
+            "type_name": self.comboBoxType.currentText(),
+            "use_count": self.spinBoxUseCount.value(),
+            "language": self.comboBoxLanguage.currentText(),
+            "translation": self.lineEditTranslation.text(),
         }
 
     def display_tag_details(self, tag_id):
@@ -86,13 +86,15 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
         self.comboBoxFormat.setCurrentIndex(0)
         self.comboBoxType.setCurrentIndex(0)
         self.spinBoxUseCount.setValue(0)
-        self.comboBoxLanguage.setCurrentText('japanese')
+        self.comboBoxLanguage.setCurrentText("japanese")
         self.lineEditTranslation.clear()
+
 
 if __name__ == "__main__":
     from tag_search import initialize_tag_searcher
     from PySide6.QtWidgets import QApplication
-    from TagRegisterWidget import TagRegisterWidget
+    from ..designer.TagRegisterWidget import TagRegisterWidget
+
     app = QApplication([])
     tag_searcher = initialize_tag_searcher()
     widget = TagRegisterWidget()

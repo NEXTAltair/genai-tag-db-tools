@@ -1,5 +1,0 @@
-PySide6
-pandas
-superqt
-polars
-pytest

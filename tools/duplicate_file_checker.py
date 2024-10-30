@@ -28,6 +28,7 @@ from pathlib import Path
 import hashlib
 from collections import defaultdict
 
+
 def get_file_hash(file_path):
     """ファイルのMD5ハッシュを計算する。"""
     hash_md5 = hashlib.md5()
@@ -36,14 +37,16 @@ def get_file_hash(file_path):
             hash_md5.update(chunk)
     return hash_md5.hexdigest()
 
+
 def find_duplicate_files(directory):
     """指定されたディレクトリ内の重複ファイルを見つける。"""
     file_hash_dict = defaultdict(list)
-    for file_path in Path(directory).rglob('*'):
+    for file_path in Path(directory).rglob("*"):
         if file_path.is_file():
             file_hash = get_file_hash(file_path)
             file_hash_dict[file_hash].append(file_path)
     return {k: v for k, v in file_hash_dict.items() if len(v) > 1}
+
 
 def remove_duplicates(duplicates):
     """重複ファイルを削除する。各グループの最初のファイルは保持される。"""
@@ -52,8 +55,11 @@ def remove_duplicates(duplicates):
             file_path.unlink()
             print(f"削除されました: {file_path}")
 
+
 def main():
-    directory = Path(input("重複ファイルを検索するディレクトリのパスを入力してください: "))
+    directory = Path(
+        input("重複ファイルを検索するディレクトリのパスを入力してください: ")
+    )
     if not directory.is_dir():
         print("無効なディレクトリパスです。")
         return
@@ -71,11 +77,12 @@ def main():
             print(f"  {file_path}")
 
     choice = input("重複ファイルを削除しますか？ (y/n): ")
-    if choice.lower() == 'y':
+    if choice.lower() == "y":
         remove_duplicates(duplicates)
         print("重複ファイルの削除が完了しました。")
     else:
         print("重複ファイルは削除されませんでした。")
+
 
 if __name__ == "__main__":
     main()

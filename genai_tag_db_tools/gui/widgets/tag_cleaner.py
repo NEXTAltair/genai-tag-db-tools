@@ -2,6 +2,7 @@ from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Qt, Slot
 from ..designer.TagCleanerWidget_ui import Ui_TagCleanerWidget
 
+
 class TagCleanerWidget(QWidget, Ui_TagCleanerWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -14,8 +15,11 @@ class TagCleanerWidget(QWidget, Ui_TagCleanerWidget):
     @Slot()
     def on_pushButtonConvert_clicked(self):
         plain_text = self.plainTextEditPrompt.toPlainText()
-        converted_tags = self.tag_searcher.convert_prompt(plain_text, self.comboBoxFormat.currentText())
+        converted_tags = self.tag_searcher.convert_prompt(
+            plain_text, self.comboBoxFormat.currentText()
+        )
         self.plainTextEditResult.setPlainText(converted_tags)
+
 
 if __name__ == "__main__":
     import sys
@@ -28,5 +32,3 @@ if __name__ == "__main__":
     window.initialize(tag_searcher)
     window.show()
     sys.exit(app.exec())
-
-

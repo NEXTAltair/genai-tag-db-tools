@@ -44,7 +44,7 @@ packages = ["genai_tag_db_tools"] # Pythonパッケージ名（アンダース�
 # プロジェクトスクリプト
 [project.scripts]
 genai-tag-db-tools = "genai_tag_db_tools.main:main"
-#インストールしてgenai_tag_db_toolswpターミナルで入力するとmainが実行されるよという話
+#インストールして genai_tag_db_tools をターミナルで入力するとmainが実行されるよという話
 
 # Pyright（静的型チェッカー）の設定
 [tool.pyright]

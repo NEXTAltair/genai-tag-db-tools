@@ -1,5 +1,11 @@
-from PySide6.QtWidgets import (QWidget, QTableWidgetItem, QApplication, 
-                               QHBoxLayout, QLabel, QVBoxLayout)
+from PySide6.QtWidgets import (
+    QWidget,
+    QTableWidgetItem,
+    QApplication,
+    QHBoxLayout,
+    QLabel,
+    QVBoxLayout,
+)
 from PySide6.QtCore import Qt, Slot
 from superqt import QRangeSlider
 
@@ -9,8 +15,9 @@ import numpy as np
 import os
 import sys
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, project_root)
+
 
 class CustomLogScaleSlider(QWidget):
     def __init__(self, parent=None):
@@ -62,6 +69,7 @@ class CustomLogScaleSlider(QWidget):
         min_val, max_val = self.slider.value()
         return (self.scale_to_count(min_val), self.scale_to_count(max_val))
 
+
 class TagSearchWidget(QWidget, Ui_TagSearchWidget):
     def __init__(self):
         super().__init__()
@@ -85,7 +93,10 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
     def setup_range_slider(self):
         # 新しいカスタムレンジスライダーを作成
         self.usage_count_slider = CustomLogScaleSlider()
-        self.verticalLayout_2.insertWidget(self.verticalLayout_2.indexOf(self.labelUsageCount) + 1, self.usage_count_slider)
+        self.verticalLayout_2.insertWidget(
+            self.verticalLayout_2.indexOf(self.labelUsageCount) + 1,
+            self.usage_count_slider,
+        )
 
     @Slot()
     def on_pushButtonSearch_clicked(self):
@@ -104,22 +115,29 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
     def client_side_filtering(self, df: pd.DataFrame) -> pd.DataFrame:
         # タグタイプでフィルタリング
         tag_type = self.comboBoxType.currentText()
-        if tag_type and tag_type != 'All' and 'type_name' in df.columns:
-            df = df[(df['type_name'] == tag_type) | (df['type_name'].isna()) | (df['type_name'] == '')]
+        if tag_type and tag_type != "All" and "type_name" in df.columns:
+            df = df[
+                (df["type_name"] == tag_type)
+                | (df["type_name"].isna())
+                | (df["type_name"] == "")
+            ]
             print(f"After type filtering (type: {tag_type}): {len(df)} rows")
 
         # 言語でフィルタリング
         language = self.comboBoxLanguage.currentText()
-        if language != 'All' and 'language' in df.columns:
-            df = df[df['language'] == language]
+        if language != "All" and "language" in df.columns:
+            df = df[df["language"] == language]
 
         # 使用回数でフィルタリング
         min_usage_count, max_usage_count = self.usage_count_slider.get_range()
-        if 'usage_count' in df.columns:
+        if "usage_count" in df.columns:
             if max_usage_count < 100000:
-                df = df[(df['usage_count'] >= min_usage_count) & (df['usage_count'] <= max_usage_count)]
+                df = df[
+                    (df["usage_count"] >= min_usage_count)
+                    & (df["usage_count"] <= max_usage_count)
+                ]
             else:
-                df = df[df['usage_count'] >= min_usage_count]
+                df = df[df["usage_count"] >= min_usage_count]
 
         return df
 
@@ -127,18 +145,24 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         print(f"検索結果の行数: {len(results)}")
         print(f"列名: {results.columns.tolist()}")
 
-        if 'tag' in results.columns and 'usage_count' in results.columns:
-            print(results[['tag', 'usage_count']])
+        if "tag" in results.columns and "usage_count" in results.columns:
+            print(results[["tag", "usage_count"]])
 
-        if 'type_name' in results.columns and 'usage_count' in results.columns:
-            type_summary = results.groupby('type_name')['usage_count'].sum().sort_values(ascending=False)
+        if "type_name" in results.columns and "usage_count" in results.columns:
+            type_summary = (
+                results.groupby("type_name")["usage_count"]
+                .sum()
+                .sort_values(ascending=False)
+            )
             print("タイプ別の使用回数合計:")
             print(type_summary)
 
         self.display_results(results)
 
     def display_results(self, results: pd.DataFrame):
-        columns = [col for col in results.columns if col not in ['alias', 'preferred_tag']]
+        columns = [
+            col for col in results.columns if col not in ["alias", "preferred_tag"]
+        ]
         self.tableWidgetResults.setRowCount(len(results))
         self.tableWidgetResults.setColumnCount(len(columns))
         self.tableWidgetResults.setHorizontalHeaderLabels(columns)
@@ -168,11 +192,15 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
     @Slot(int)
     def on_comboBoxSavedSearches_currentIndexChanged(self, index):
         # 保存された検索条件を読み込み
-        print(f"保存された検索条件 {index} が選択されました。ここに読み込みロジックを実装します。")
+        print(
+            f"保存された検索条件 {index} が選択されました。ここに読み込みロジックを実装します。"
+        )
+
 
 if __name__ == "__main__":
     import sys
     from pathlib import Path
+
     current_dir = Path(__file__).parent
     project_root = current_dir.parent
     sys.path.insert(0, str(project_root))

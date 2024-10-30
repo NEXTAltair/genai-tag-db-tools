@@ -1,8 +1,10 @@
 """何かと狂いがちなDBのデータの整合性をチェックするテストコード
 """
+
 import pytest
 import sqlite3
 from pathlib import Path
+
 
 @pytest.fixture
 def db_connection():
@@ -11,8 +13,10 @@ def db_connection():
     yield conn
     conn.close()
 
+
 def test_database_connection(db_connection):
     assert db_connection is not None
+
 
 def test_tables_exist(db_connection):
     cursor = db_connection.cursor()
@@ -23,19 +27,23 @@ def test_tables_exist(db_connection):
         "TAG_FORMATS",
         "TAG_USAGE_COUNTS",
         "TAG_TYPE_FORMAT_MAPPING",
-        "TAG_TYPE_NAME"
+        "TAG_TYPE_NAME",
     ]
     for table in tables:
-        cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
+        cursor.execute(
+            f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'"
+        )
         assert cursor.fetchone() is not None, f"テーブル {table} が存在しません"
+
 
 def test_tags_table_columns(db_connection):
     cursor = db_connection.cursor()
     cursor.execute("PRAGMA table_info('TAGS')")
     columns = [info[1] for info in cursor.fetchall()]
-    expected_columns = ['tag_id', 'tag', 'source_tag']
+    expected_columns = ["tag_id", "tag", "source_tag"]
     for col in expected_columns:
         assert col in columns, f"列 {col} がTAGSテーブルに存在しません"
+
 
 def test_foreign_key_constraints(db_connection):
     """
@@ -55,29 +63,38 @@ def test_foreign_key_constraints(db_connection):
 
     # TAG_STATUS の各外部キーの整合性を確認する
     # TAG_STATUS の tag_id が TAGS に存在するかチェック
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT TS.tag_id, T.source_tag, TF.format_name, TT.translation, TT.language, TS.type_id, TS.alias
         FROM TAG_STATUS AS TS
         LEFT JOIN TAGS AS T ON TS.tag_id = T.tag_id
         LEFT JOIN TAG_FORMATS AS TF ON TS.format_id = TF.format_id
         LEFT JOIN TAG_TRANSLATIONS AS TT ON TS.tag_id = TT.tag_id
         WHERE TS.tag_id NOT IN (SELECT tag_id FROM TAGS)
-    """)
+    """
+    )
     missing_tags = cursor.fetchall()
-    assert len(missing_tags) == 0, f"TAG_STATUS の tag_id が TAGS に存在しません: {missing_tags}"
+    assert (
+        len(missing_tags) == 0
+    ), f"TAG_STATUS の tag_id が TAGS に存在しません: {missing_tags}"
 
     # TAG_STATUS の format_id が TAG_FORMATS に存在するかチェック
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT TS.format_id, TF.format_name, TS.type_id, TS.alias
         FROM TAG_STATUS AS TS
         LEFT JOIN TAG_FORMATS AS TF ON TS.format_id = TF.format_id
         WHERE TS.format_id NOT IN (SELECT format_id FROM TAG_FORMATS)
-    """)
+    """
+    )
     missing_formats = cursor.fetchall()
-    assert len(missing_formats) == 0, f"TAG_STATUS の format_id が TAG_FORMATS に存在しません: {missing_formats}"
+    assert (
+        len(missing_formats) == 0
+    ), f"TAG_STATUS の format_id が TAG_FORMATS に存在しません: {missing_formats}"
 
     # TAG_STATUS の (format_id, type_id) が TAG_TYPE_FORMAT_MAPPING に存在するかチェック
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT TS.format_id, TS.type_id, TF.format_name, TTN.type_name, TS.alias
         FROM TAG_STATUS AS TS
         LEFT JOIN TAG_FORMATS AS TF ON TS.format_id = TF.format_id
@@ -86,17 +103,24 @@ def test_foreign_key_constraints(db_connection):
         WHERE (TS.format_id, TS.type_id) NOT IN (
             SELECT format_id, type_id FROM TAG_TYPE_FORMAT_MAPPING
         )
-    """)
+    """
+    )
     missing_mappings = cursor.fetchall()
-    assert len(missing_mappings) == 0, f"TAG_STATUS の (format_id, type_id) が TAG_TYPE_FORMAT_MAPPING に存在しません: {missing_mappings}"
+    assert (
+        len(missing_mappings) == 0
+    ), f"TAG_STATUS の (format_id, type_id) が TAG_TYPE_FORMAT_MAPPING に存在しません: {missing_mappings}"
 
     # TAG_STATUS の preferred_tag_id が TAGS に存在するかチェック
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT TS.preferred_tag_id, T.source_tag, TF.format_name, TS.type_id, TS.alias
         FROM TAG_STATUS AS TS
         LEFT JOIN TAGS AS T ON TS.preferred_tag_id = T.tag_id
         LEFT JOIN TAG_FORMATS AS TF ON TS.format_id = TF.format_id
         WHERE TS.preferred_tag_id IS NOT NULL AND TS.preferred_tag_id NOT IN (SELECT tag_id FROM TAGS)
-    """)
+    """
+    )
     missing_preferred_tags = cursor.fetchall()
-    assert len(missing_preferred_tags) == 0, f"TAG_STATUS の preferred_tag_id が TAGS に存在しません: {missing_preferred_tags}"
+    assert (
+        len(missing_preferred_tags) == 0
+    ), f"TAG_STATUS の preferred_tag_id が TAGS に存在しません: {missing_preferred_tags}"

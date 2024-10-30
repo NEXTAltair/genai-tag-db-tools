@@ -1,6 +1,7 @@
 import sqlite3
 import polars as pl
 
+
 class DatabaseMaintenanceTool:
     def __init__(self, db_path):
         self.conn = sqlite3.connect(db_path)
@@ -39,7 +40,12 @@ class DatabaseMaintenanceTool:
         """
         duplicates_translation = self.cursor.execute(query).fetchall()
         return [
-            {"translation_id": row[0], "tag": row[1], "language": row[2], "translation": row[3]}
+            {
+                "translation_id": row[0],
+                "tag": row[1],
+                "language": row[2],
+                "translation": row[3],
+            }
             for row in duplicates_translation
         ]
 
@@ -67,7 +73,7 @@ class DatabaseMaintenanceTool:
                 "format": row[3],
                 "type": row[5],
                 "alias": bool(row[6]),
-                "preferred_tag": row[8]
+                "preferred_tag": row[8],
             }
             for row in duplicates_status
         ]
@@ -120,7 +126,7 @@ class DatabaseMaintenanceTool:
     #     # 孤立したレコードを修正または削除
     #     for tag_id in orphan_records:
     #         print(f"孤立したレコードを修正または削除します: tag_id {tag_id}")
-            # TODO: 孤立レコードの修正を実装
+    # TODO: 孤立レコードの修正を実装
 
     def optimize_indexes(self):
         # インデックスの再構築や最適化を行う
@@ -130,6 +136,8 @@ class DatabaseMaintenanceTool:
 
     def close(self):
         self.conn.close()
+
+
 # 使用例
 if __name__ == "__main__":
     db_tool = DatabaseMaintenanceTool("tags_v3.db")
