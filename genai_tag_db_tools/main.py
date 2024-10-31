@@ -5,6 +5,7 @@ from genai_tag_db_tools.gui.windows.main_window import MainWindow
 from .core.tag_search import initialize_tag_searcher
 
 
+
 def main():
     app = QApplication(sys.argv)
     tag_searcher = initialize_tag_searcher()
