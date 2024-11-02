@@ -18,3 +18,5 @@ genai-tag-db-tools.code-workspace
 #データソース
 tags_csv/
 
+# GOlemi-llm-apprentice/generate-project-summary 用除外設定
+.summaryignore
