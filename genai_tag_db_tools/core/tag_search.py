@@ -5,7 +5,7 @@ import pandas as pd
 from genai_tag_db_tools.core.processor import CSVToDatabaseProcessor
 from .cleanup_str import TagCleaner
 
-db_path = Path(__file__).parent.parent.parent / "data" / "tags_v3.db"
+db_path = Path(__file__).parent.parent / "data" / "tags_v3.db"
 conn = sqlite3.connect(db_path, check_same_thread=False)
 
 
