@@ -41,6 +41,9 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["genai_tag_db_tools"] # Pythonパッケージ名（アンダースコア）
 
+[tool.hatch.build.targets.wheel.package-data]
+genai_tag_db_tools = ["data/*.db"]
+
 # プロジェクトスクリプト
 [project.scripts]
 genai-tag-db-tools = "genai_tag_db_tools.main:main"

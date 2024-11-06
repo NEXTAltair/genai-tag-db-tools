@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from TagSearcher import TagSearcher
+from genai_tag_db_tools.core.tag_search import TagSearcher
 import pandas as pd
 
 
@@ -12,8 +12,8 @@ def tag_searcher():
 
 def test_find_tag_id(tag_searcher):
     # 存在するタグのテスト
-    tag_id = tag_searcher.find_tag_id("existing_tag")
-    assert tag_id == expected_tag_id  # expected_tag_idを実際のIDに置き換えてください
+    tag_id = tag_searcher.find_tag_id("phone")
+    assert tag_id == 32
 
     # 存在しないタグのテスト
     tag_id = tag_searcher.find_tag_id("non_existing_tag")
