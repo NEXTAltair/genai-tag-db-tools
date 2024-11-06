@@ -26,9 +26,9 @@ classifiers = [
 
 # pytestの設定オプション
 [tool.pytest.ini_options]
-addopts = "-ra -q -v"         # テスト実行時のオプション（結果表示の詳細度など）
-testpaths = ["test"]          # テストファイルの場所
 pythonpath = ["genai_tag_db_tools"]          # テスト実行時のPythonパス
+addopts = "-ra -q -v"         # テスト実行時のオプション（結果表示の詳細度など）
+testpaths = ["tests"]          # テストファイルの場所
 
 # 開発時のみ必要な追加パッケージ
 [project.optional-dependencies]

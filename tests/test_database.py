@@ -1,5 +1,4 @@
-"""何かと狂いがちなDBのデータの整合性をチェックするテストコード
-"""
+"""何かと狂いがちなDBのデータの整合性をチェックするテストコード"""
 
 import pytest
 import sqlite3
@@ -124,3 +123,26 @@ def test_foreign_key_constraints(db_connection):
     assert (
         len(missing_preferred_tags) == 0
     ), f"TAG_STATUS の preferred_tag_id が TAGS に存在しません: {missing_preferred_tags}"
+
+    def test_models_present(db_connection):
+        """モデルがデータベースに正しく挿入されていることを確認するテスト"""
+        cursor = db_connection.cursor()
+        cursor.execute("SELECT name FROM models")
+        models = {row[0] for row in cursor.fetchall()}
+        expected_models = {
+            "gpt-4o",
+            "gpt-4-turbo",
+            "gpt-4o-mini",
+            "laion",
+            "cafe",
+            "gemini-1.5-pro-exp-0801",
+            "gemini-1.5-pro-preview-0409",
+            "gemini-1.0-pro-vision",
+            "claude-3-5-sonnet-20240620",
+            "claude-3-5-sonnet-20241022",
+            "claude-3-opus-20240229",
+            "claude-3-sonnet-20240229",
+            "claude-3-haiku-20240307",
+            "RealESRGAN_x4plus",
+        }
+        assert expected_models.issubset(models), "期待されるモデルがすべて存在しません"
