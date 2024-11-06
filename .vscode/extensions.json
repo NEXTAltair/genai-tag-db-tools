@@ -28,7 +28,6 @@
         "ms-python.debugpy",
         "ms-python.vscode-pylance",
         "qwtel.sqlite-viewer",
-        "donjayamanne.python-extension-pack",
         "tamasfe.even-better-toml",
         "seanwu.vscode-qt-for-python",
         "theqtcompany.qt",
