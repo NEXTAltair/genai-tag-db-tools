@@ -56,11 +56,26 @@ exclude = [                   # 型チェック除外対象
     "**/__pycache__",
     "test"
 ]
-venvPath = "."               # 仮想環境のパス
-venv = "venv"               # 仮想環境の名前
 typeCheckingMode = "basic"  # 型チェックの厳格さ
 
 # PySide6関連の特別な設定
 reportGeneralTypeIssues = "warning"     # 一般的な型の問題を警告として報告
 reportMissingTypeStubs = false          # 型定義ファイルの不足を無視
 reportUnknownMemberType = false         # 不明なメンバー型を無視
+
+[tool.coverage.run]
+omit = [
+    "*/shibokensupport/*",
+    "*/site-packages/*",
+    "*/tests/*",
+    "*/pyscript",
+    "*/signature_bootstrap.py"
+]
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if __name__ == '__main__':",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]

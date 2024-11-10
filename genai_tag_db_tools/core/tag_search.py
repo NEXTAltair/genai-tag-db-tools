@@ -3,15 +3,14 @@ import sqlite3
 from pathlib import Path
 import pandas as pd
 from genai_tag_db_tools.core.processor import CSVToDatabaseProcessor
-from .cleanup_str import TagCleaner
-
-db_path = Path(__file__).parent.parent / "data" / "tags_v3.db"
-conn = sqlite3.connect(db_path, check_same_thread=False)
 
 
 class TagSearcher:
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Optional[Path] = None):
+        if db_path is None:
+            db_path = Path(__file__).parent.parent / "data" / "tags_v3.db"
         self.db_path = db_path
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
 
     def execute_query(self, query: str, params: tuple = None) -> pd.DataFrame:
         """SQLクエリを実行し、結果をDataFrameとして返します。
@@ -90,9 +89,7 @@ class TagSearcher:
         LEFT JOIN TAG_TYPE_FORMAT_MAPPING AS TTFM ON TS.format_id = TTFM.format_id AND TS.type_id = TTFM.type_id
         LEFT JOIN TAG_TYPE_NAME AS TTN ON TTFM.type_name_id = TTN.type_name_id
         WHERE (T.tag {match_operator} ? OR TT.translation {match_operator} ?)
-        """.replace(
-            "{match_operator}", "=" if match_mode == "exact" else "LIKE"
-        )
+        """.replace("{match_operator}", "=" if match_mode == "exact" else "LIKE")
 
         params = (
             (keyword, keyword)
@@ -298,48 +295,29 @@ class TagSearcher:
         )
         df.to_sql("TAG_TRANSLATIONS", conn, if_exists="append", index=False)
 
-    def convert_prompt(self, prompt: str, format_name: str):
+    def convert_tag(self, search_tag: str, target_format_name: str):
         """タグをフォーマット推奨の形式に変換して表示する
 
         Args:
-            prompt (str): 検索するタグ (カンマ区切りも可)
-            format_name (str): 変換先のフォーマット名
+            search_tag (str): 検索するタグ
+            target_format_name (str): 変換先のフォーマット名
         """
-        try:
-            converted_tags = []
-            format_id = self.get_format_id(format_name)
-            clean_prompt = TagCleaner.clean_tags(prompt)
-            for tag in clean_prompt.split(","):
-                tag = (
-                    tag.strip().lower()
-                )  # FIXME: 小文字にすると顔文字に対応できないがテキストエンコーダーは大文字小文字区別するの？
+        format_id = self.get_format_id(target_format_name)
 
-                try:
-                    tag_id = self.find_tag_id(tag)
-                except ValueError:
-                    converted_tags.append(tag)  # 元のタグを追加
-                    continue
+        tag_id = self.find_tag_id(search_tag)
 
-                if tag_id is not None:
-                    preferred_tag = self.find_preferred_tag(tag_id, format_id)
-                    if (
-                        preferred_tag and preferred_tag != "invalid tag"
-                    ):  # FIXME: preferred_tagにinvalid tag があるのは問題なのであとでなおす
-                        # FIXME: \(disambiguation\) を含むタグと original, skeb commission, pixiv commission, hashtag-only commentaryはDBから除去が必要
-                        if tag != preferred_tag:
-                            print(f"タグ '{tag}' は '{preferred_tag}' に変換されました")
-                        converted_tags.append(preferred_tag)
-                    else:
-                        converted_tags.append(tag)  # 元のタグを追加
-                else:
-                    converted_tags.append(tag)  # tag_id が None の場合も元のタグを追加
-
-            unique_tags = list(set(converted_tags))
-
-            return ", ".join(unique_tags)
-        except Exception as e:
-            print(f"エラーが発生しました: {str(e)}")
-            return None
+        if tag_id is not None:
+            preferred_tag = self.find_preferred_tag(tag_id, format_id)
+            if preferred_tag and preferred_tag != "invalid tag":
+                # FIXME: preferred_tagにinvalid tag があるのは問題なのであとでなおす
+                # FIXME: \(disambiguation\) を含むタグと original, skeb commission, pixiv commission, hashtag-only commentaryはDBから除去が必要
+                if tag != preferred_tag:
+                    print(f"タグ '{tag}' は '{preferred_tag}' に変換されました")
+            else:
+                return search_tag
+        else:
+            return search_tag
+        return preferred_tag
 
     def get_all_tag_ids(self):
         """すべてのタグIDを取得する関数です。
@@ -612,21 +590,24 @@ class TagSearcher:
 
 
 def initialize_tag_searcher() -> TagSearcher:
-    db_path = Path("tags_v3.db")
+    db_path = Path(__file__).parent / "data" / "tags_v3.db"
     return TagSearcher(db_path)
 
 
-# if __name__ == '__main__':
-# word = "1boy"
-# match_mode = "partial"
-# search_and_display(word, match_mode, "All")
-# prompt = "1boy, 1girl, 2boys, 2girls, 3boys, 3girls, 4boys, 4girls, 5boys"
-# format_name = "e621"
-# tagsearcher = initialize_tag_searcher()
-# cleanprompt = tagsearcher.prompt_convert(prompt, format_name)
-# print(prompt)
-# print(cleanprompt)
-# types = tagsearcher.get_tag_types('e621')
-# print(types)
-# langs = tagsearcher.get_tag_languages()
-# print(langs)
+if __name__ == "__main__":
+    word = "1boy"
+    match_mode = "partial"
+    prompt = "1boy, 1girl, 2boys, 2girls, 3boys, 3girls, 4boys, 4girls, 5boys"
+    format_name = "e621"
+    tagsearcher = initialize_tag_searcher()
+    tags = []
+    for tag in prompt.split(", "):
+        tag = tagsearcher.convert_tag(prompt, format_name)
+        tags.append(tag)
+    cleanprompt = ", ".join(tags)
+    print(prompt)
+    print(cleanprompt)
+    types = tagsearcher.get_tag_types("e621")
+    print(types)
+    langs = tagsearcher.get_tag_languages()
+    print(langs)

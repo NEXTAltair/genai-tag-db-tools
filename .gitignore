@@ -10,14 +10,18 @@ tags_v3.db.*
 
 #workspace file
 .pytest_cache/
+.coverage
+
 .vscode/
 .git/
 genai-tag-db-tools.code-workspace
 .vscode/settings.json
 .pylintrc
+htmlcov/
 
 #データソース
 tags_csv/
 
 # GOlemi-llm-apprentice/generate-project-summary 用除外設定
 .summaryignore
+*_project_summary.txt

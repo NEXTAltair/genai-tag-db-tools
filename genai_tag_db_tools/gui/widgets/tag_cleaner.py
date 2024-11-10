@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QWidget
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Slot
 from ..designer.TagCleanerWidget_ui import Ui_TagCleanerWidget
 
 
@@ -24,7 +24,7 @@ class TagCleanerWidget(QWidget, Ui_TagCleanerWidget):
 if __name__ == "__main__":
     import sys
     from PySide6.QtWidgets import QApplication
-    from tag_search import initialize_tag_searcher
+    from .tag_cleaner import initialize_tag_searcher
 
     app = QApplication(sys.argv)
     tag_searcher = initialize_tag_searcher()

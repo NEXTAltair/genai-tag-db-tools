@@ -2,7 +2,6 @@ from PySide6.QtWidgets import QWidget
 from ..designer.TagStatisticsWidget_ui import Ui_TagStatisticsWidget
 
 import pandas as pd
-import numpy as np
 import os
 import sys
 

@@ -1,53 +1,12 @@
+from pathlib import Path
 import sqlite3
-import polars as pl
 
 
 class DatabaseMaintenanceTool:
     def __init__(self, db_path):
+        db_path = Path(__file__).resolve().parent.parent / "data" / db_path
         self.conn = sqlite3.connect(db_path)
         self.cursor = self.conn.cursor()
-
-    def detect_duplicates_in_tags(self):
-        """TAGSテーブルの重複レコードを検出
-        Returns:
-            list[dict[str, Any]]: 重複レコードのリスト
-        Note:
-            重複が検出された場合、修正するための別のメソッド（例えば、delete_duplicates_in_tags）を利用してください。
-        """
-        query = """
-        SELECT tag_id, tag, source_tag, COUNT(*) as count
-        FROM TAGS
-        GROUP BY tag, source_tag
-        HAVING count > 1
-        """
-        duplicates_tags = self.cursor.execute(query).fetchall()
-        return [
-            {"tag_id": row[0], "tag": row[1], "source_tag": row[2]}
-            for row in duplicates_tags
-        ]
-
-    def detect_duplicates_in_tag_translations(self):
-        """TAG_TRANSLATIONSテーブルの重複レコードを検出し、TAGSテーブルのタグ情報も追加して返す
-        Returns:
-            list[dict[str, Any]]: 重複レコードのリスト（関連するタグの情報を含む）
-        """
-        query = """
-        SELECT tt.translation_id, t.tag, tt.language, tt.translation, COUNT(*) as count
-        FROM TAG_TRANSLATIONS tt
-        LEFT JOIN TAGS t ON tt.tag_id = t.tag_id
-        GROUP BY tt.tag_id, tt.language, tt.translation
-        HAVING count > 1
-        """
-        duplicates_translation = self.cursor.execute(query).fetchall()
-        return [
-            {
-                "translation_id": row[0],
-                "tag": row[1],
-                "language": row[2],
-                "translation": row[3],
-            }
-            for row in duplicates_translation
-        ]
 
     def detect_duplicates_in_tag_status(self):
         """TAG_STATUSテーブルの重複レコードを検出し、詳細情報を返す
@@ -66,7 +25,7 @@ class DatabaseMaintenanceTool:
         GROUP BY ts.tag_id, ts.format_id, ts.type_id
         HAVING count > 1
         """
-        duplicates_status = self.cursor.execute(query).fetchall()
+        duplicate_records = self.cursor.execute(query).fetchall()
         return [
             {
                 "tag": row[1],
@@ -75,7 +34,7 @@ class DatabaseMaintenanceTool:
                 "alias": bool(row[6]),
                 "preferred_tag": row[8],
             }
-            for row in duplicates_status
+            for row in duplicate_records
         ]
 
     def detect_usage_counts_for_tags(self):
@@ -107,12 +66,6 @@ class DatabaseMaintenanceTool:
         missing_tags = self.cursor.execute(query).fetchall()
         return missing_tags
 
-    # def fix_foreign_key_issues(self, missing_tags):
-    #     # 不整合な外部キーの修正
-    #     for tag_id, source_tag in missing_tags:
-    #         print(f"不整合な外部キーを修正します: tag_id {tag_id}, source_tag {source_tag}")
-    #         # TODO: 不整合の修正を実装
-
     def detect_orphan_records(self):
         # 孤立したレコードを検出
         query = """
@@ -122,17 +75,40 @@ class DatabaseMaintenanceTool:
         orphan_records = self.cursor.execute(query).fetchall()
         return orphan_records
 
-    # def fix_orphan_records(self, orphan_records):
-    #     # 孤立したレコードを修正または削除
-    #     for tag_id in orphan_records:
-    #         print(f"孤立したレコードを修正または削除します: tag_id {tag_id}")
-    # TODO: 孤立レコードの修正を実装
-
     def optimize_indexes(self):
         # インデックスの再構築や最適化を行う
         self.cursor.execute("REINDEX")
         self.conn.commit()
         print("インデックスの再構築を行いました")
+
+    def detect_invalid_tag_id(self):
+        """invalid_tagのタグIDを取得
+        Returns:
+            int: invalid_tagのタグIDのリスト
+        """
+        query = """
+        SELECT tag_id FROM TAGS WHERE tag = 'invalid tag' OR source_tag = 'invalid_tag'
+        """
+        invalid_tags = self.cursor.execute(query).fetchone()
+        return invalid_tags[0]
+
+    def detect_invalid_preferred_tags(self, invalid_tag_id):
+        """invalid tagのタグIDをpreferred_tagに記録したレコードを検出
+        Args:
+            invalid_tag_id (int): invalid tagのタグID
+        Returns:
+            list[tuple[int, str]]: invalid tagをpreferred_tagに設定しているレコードのリスト
+        """
+        query = """
+        SELECT ts.tag_id, t.tag
+        FROM TAG_STATUS ts
+        LEFT JOIN TAGS t ON ts.tag_id = t.tag_id
+        WHERE ts.preferred_tag_id = ?
+        """
+        invalid_preferred_tags = self.cursor.execute(
+            query, (invalid_tag_id,)
+        ).fetchall()
+        return invalid_preferred_tags
 
     def close(self):
         self.conn.close()
@@ -141,19 +117,6 @@ class DatabaseMaintenanceTool:
 # 使用例
 if __name__ == "__main__":
     db_tool = DatabaseMaintenanceTool("tags_v3.db")
-
-    # 重複レコードの検出
-    duplicates_tags = db_tool.detect_duplicates_in_tags()
-    if duplicates_tags:
-        print(f"重複レコードが検出されました: {duplicates_tags}")
-        for duplicate in duplicates_tags:
-            print(f"重複レコード: {duplicate}")
-
-    duplicates_translation = db_tool.detect_duplicates_in_tag_translations()
-    if duplicates_translation:
-        print(f"重複レコードが検出されました: {duplicates_translation}")
-        for duplicate in duplicates_translation:
-            print(f"重複レコード: {duplicate}")
 
     duplicates_status = db_tool.detect_duplicates_in_tag_status()
     if duplicates_status:
@@ -180,6 +143,13 @@ if __name__ == "__main__":
         print(f"孤立レコードが検出されました: {orphan_records}")
         # 必要に応じて修正
         # db_tool.fix_orphan_records(orphan_records)
+
+    # invalid tag の検出
+    invalid_tag = db_tool.detect_invalid_tag_id()
+
+    # invalid tag をpreferred_tagに設定しているレコードの検出
+    invalid_preferred_tags = db_tool.detect_invalid_preferred_tags(invalid_tag)
+    print(f"invalid tagをpreferred_tagに設定しているレコード: {invalid_preferred_tags}")
 
     db_tool.optimize_indexes()
     db_tool.close()

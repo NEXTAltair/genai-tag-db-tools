@@ -9,21 +9,21 @@ class CSVToDatabaseProcessor:
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self.current_id: int = 0
-        self.tags: dict[int, tuple[str, str]] = (
-            {}
-        )  # {tag_id: (source_tag, normalized_tag)}
-        self.tag_id_map: dict[tuple[str, str], int] = (
-            {}
-        )  # {(source_tag, normalized_tag): tag_id}
+        self.tags: dict[
+            int, tuple[str, str]
+        ] = {}  # {tag_id: (source_tag, normalized_tag)}
+        self.tag_id_map: dict[
+            tuple[str, str], int
+        ] = {}  # {(source_tag, normalized_tag): tag_id}
         self.translations: dict[int, set[tuple[str, str]]] = defaultdict(
             set
         )  # {tag_id: {(language, translation)}}
         self.usage_counts: dict[tuple[int, int], int] = defaultdict(
             int
         )  # {(tag_id, format_id): count}
-        self.tag_status: dict[tuple[int, int], tuple[int, bool, int]] = (
-            {}
-        )  # {(tag_id, format_id): (type_id, alias, preferred_tag_id)}
+        self.tag_status: dict[
+            tuple[int, int], tuple[int, bool, int]
+        ] = {}  # {(tag_id, format_id): (type_id, alias, preferred_tag_id)}
 
     def process_csv_files(self, csv_dir: Path):
         for file_path in csv_dir.rglob("*.csv"):
@@ -115,7 +115,8 @@ class CSVToDatabaseProcessor:
                     tag_id,
                 )
 
-    def split_compound_field(self, field: str) -> set[str]:
+    @staticmethod
+    def split_compound_field(field: str) -> set[str]:
         if not field:
             return set()
         return {item.strip() for item in field.split(",")}
@@ -137,7 +138,8 @@ class CSVToDatabaseProcessor:
         tag = tag.strip()
         return tag
 
-    def get_format_id(self, filename: str) -> int:
+    @staticmethod
+    def get_format_id(filename: str) -> int:
         # DominikDoom/a1111-sd-webui-tagcomplete: CSVファイル名からフォーマットIDを取得
         id0 = ["EnglishDictionary", "Tags_zh_full"]
         id1 = ["danbooru_klein10k_jp", "danbooru_machine_jp", "danbooru"]
@@ -163,7 +165,8 @@ class CSVToDatabaseProcessor:
             print(f"Warning: {filename} フォーマットID不明とりあえず0")
             return 0
 
-    def get_default_type_id(self, filename: str) -> int:
+    @staticmethod
+    def get_default_type_id(filename: str) -> int:
         # CSVファイル名からデフォルトのtype_idを取得
         danbooru_types = {
             "danbooru_general": 0,
