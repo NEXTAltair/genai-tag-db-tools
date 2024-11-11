@@ -26,7 +26,7 @@ class PolarsModel(QAbstractTableModel):
         self.importer = TagDataImporter()
         self._headers = list(
             self._data.columns
-        )  # デフォルトのヘッダーを維持､あれば既存のヘッダーを使用､なければ `colmn1` など""
+        )  # デフォルトのヘッダーを維持､あれば既存のヘッダーを使用､なければ `column1` など
         self._mapping = {
             i: "未選択" for i in range(len(self._headers))
         }  # カラムマッピング
@@ -221,7 +221,7 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
         df = self.model._data.select(selected_columns)
 
         config = ImportConfig(
-            format_id=self.fomat_id,
+            format_id=self.format_id,
             language=self.languageComboBox.currentText(),
             column_names=selected_columns,
         )
@@ -232,9 +232,6 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
 
         # インポート開始
         self.importer.import_data(df, config)
-
-        # インポートが成功した場合にダイアログをAcceptedにする
-        self.accept()
 
     @Slot()
     def on_sourceTagCheckBox_stateChanged(self):
@@ -298,7 +295,7 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
     def on_formatComboBox_currentTextChanged(self):
         """フォーマットが変更されたときの処理"""
         format_name = self.formatComboBox.currentText()
-        self.fomat_id = self.tag_searcher.get_format_id(format_name)
+        self.format_id = self.tag_searcher.get_format_id(format_name)
         self.on_sourceTagCheckBox_stateChanged()
 
     @Slot()
