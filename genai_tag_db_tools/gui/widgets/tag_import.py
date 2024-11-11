@@ -4,7 +4,7 @@ from functools import partial
 
 import polars as pl
 
-from PySide6.QtCore import Slot, Qt, QAbstractTableModel, QPoint, Signal
+from PySide6.QtCore import Slot, Qt, QAbstractTableModel, Signal
 from PySide6.QtWidgets import QDialog, QMenu, QMessageBox
 
 from genai_tag_db_tools.gui.designer.TagDataImportDialog_ui import (
@@ -86,41 +86,9 @@ class PolarsModel(QAbstractTableModel):
             if mapped != "未選択"
         }
 
-    def get_header_index(self, header_name: str) -> int:
-        """ヘッダー名からインデックスを取得します。
-
-        Args:
-            header_name: 検索するヘッダー名
-
-        Returns:
-            int: ヘッダーのインデックス
-
-        Raises:
-            ValueError: ヘッダーが見つからない場合
-        """
-        return self._headers.index(header_name)
-
-    def get_mapping(self, index: int, default: str = "") -> str:
-        """マッピング値を取得します。
-
-        Args:
-            index: マッピングのインデックス
-            default: デフォルト値
-
-        Returns:
-            str: マッピング値またはデフォルト値
-        """
-        return self._mapping.get(index, default)
-
     def hasRequiredMapping(self, required_field: str) -> bool:
         """指定された必須フィールドがマッピングされているかを確認"""
         return required_field in self.getMapping().values()
-
-    def getMappingByHeader(self, header_name: str) -> str:
-        """ヘッダー名からマッピングを取得"""
-        if header_name in self._headers:
-            return self._mapping[self._headers.index(header_name)]
-        return "未選択"
 
 
 class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
@@ -129,8 +97,11 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
         self.logger = logging.getLogger(__name__)
         self.setupUi(self)
         self.tag_searcher = TagSearcher()
+        self.format_id = 1
+        self.language = "None"
 
         # モデルの設定
+        self.source_df = source_df
         self.model = PolarsModel(source_df)
         self.dataPreviewTable.setModel(self.model)
 
@@ -158,9 +129,6 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
 
     def setupConnections(self):
         """UIコンポーネントのイベントとアクションを接続"""
-        self.sourceTagCheckBox.stateChanged.connect(
-            self.on_sourceTagCheckBox_stateChanged
-        )
 
         # テーブルヘッダーメニュー
         header = self.dataPreviewTable.horizontalHeader()
@@ -170,29 +138,19 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
         # インポーター(QObject)のシグナル接続
         self.importer.progress_updated.connect(self.update_progress)
         self.importer.process_finished.connect(self.import_finished)
-        self.importer.error_occurred.connect(self.onImportError)
 
     @Slot(int, str)
     def update_progress(self, progress: int, message: str):
         """進捗状況の更新"""
-        self.setWindowTitle(f"インポート中... {progress}%")
+        self.setWindowTitle(f"インポート中... {progress}%, {message}")
 
     @Slot(str)
     def import_finished(self, process_name: str):
         """インポート完了時の処理"""
         self.importButton.setEnabled(True)
-        self.setWindowTitle("インポート完了")
+        self.setWindowTitle(f"インポート完了, {process_name}")
         QMessageBox.information(self, "完了", "インポートが完了しました。")
         self.accept()
-
-    @Slot(str)
-    def onImportError(self, error_message: str):
-        """エラー発生時の処理"""
-        self.importButton.setEnabled(True)
-        self.setWindowTitle("エラー")
-        QMessageBox.critical(
-            self, "エラー", f"インポート中にエラーが発生しました: {error_message}"
-        )
 
     def setControlsEnabled(self, enabled: bool):
         """
@@ -217,13 +175,14 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
         検証は既にマッピング時に行われているため、ここではインポート処理のみを実行。
         """
         mapping = self.model.getMapping()
-        selected_columns = list(mapping.keys())
-        df = self.model._data.select(selected_columns)
+
+        # データフレームのカラム名を直接リネーム
+        new_df = self.source_df.rename(mapping)
 
         config = ImportConfig(
             format_id=self.format_id,
             language=self.languageComboBox.currentText(),
-            column_names=selected_columns,
+            column_names=list(mapping.values()),
         )
 
         # UI要素の状態を更新
@@ -231,7 +190,7 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
         self.cancelButton.setText("キャンセル")
 
         # インポート開始
-        self.importer.import_data(df, config)
+        self.importer.import_data(new_df, config)
 
     @Slot()
     def on_sourceTagCheckBox_stateChanged(self):
@@ -255,17 +214,17 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
         self.deprecatedTagsCheckBox.setChecked("translation" in mapping.values())
         self.translationTagsCheckBox.setChecked(has_translation)
 
+        if not has_source_tag and not has_tag:
+            self.importButton.setEnabled(False)
+            return
         if not has_format and not has_language:
             self.importButton.setEnabled(False)
             return
-        elif not has_source_tag and not has_tag:
+        if has_language and not has_translation:
             self.importButton.setEnabled(False)
             return
-        elif has_language and not has_translation:
-            self.importButton.setEnabled(False)
-            return
-        else:
-            self.importButton.setEnabled(True)
+
+        self.importButton.setEnabled(True)
 
     @Slot()
     def on_cancelButton_clicked(self):
@@ -276,20 +235,6 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
             self.setWindowTitle("キャンセル")
         else:
             self.reject()
-
-    def importData(self):
-        """データのインポート処理"""
-        mapping = self.model.getMapping()
-        selected_columns = list(mapping.keys())
-        import_df = self.model._data.select(selected_columns)  # 必要なカラムを選択
-
-        importer = TagDataImporter()
-        config = importer.configure_import(import_df)
-        importer.import_data(import_df, config)
-
-        QMessageBox.information(
-            self, "インポート完了", "データのインポートが完了しました。"
-        )
 
     @Slot()
     def on_formatComboBox_currentTextChanged(self):

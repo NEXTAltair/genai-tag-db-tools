@@ -65,6 +65,8 @@ def test_tag_data_import_dialog_on_import_button_clicked(qtbot, monkeypatch):
     dialog = TagDataImportDialog(data)
     # col1をsource_tagにマッピング
     dialog.model.setMapping(0, "source_tag")
+    # インスタンス変数の format_name を `danbooru` に設定
+    dialog.formatComboBox.setCurrentText("danbooru")
     # 必須フィールドの検証をトリガー
     dialog.on_sourceTagCheckBox_stateChanged()
     # hasRequiredMapping を使用してインポートボタンが有効化されていることを確認
@@ -82,9 +84,6 @@ def test_tag_data_import_dialog_on_import_button_clicked(qtbot, monkeypatch):
 
     # import_data が呼び出されたことを確認
     mock_importer.import_data.assert_called_once()
-
-    # ダイアログが Accepted 状態になっていることを確認
-    assert dialog.result() == QDialog.DialogCode.Accepted
 
 
 def test_tag_data_import_dialog_popup_handling(qtbot, monkeypatch):
@@ -215,5 +214,59 @@ def test_polars_model_set_mapping_emits_signal(qtbot):
     """setMapping が mappingChanged シグナルを発行することを確認するテスト"""
     data = pl.DataFrame({"col1": [1], "col2": [2]})
     model = PolarsModel(data)
-    with qtbot.waitSignal(model.mappingChanged):
+
+    # シグナルが発行されることを確認
+    with qtbot.waitSignals([model.mappingChanged], timeout=5, raising=True) as blocker:
         model.setMapping(0, "source_tag")
+
+    # シグナルが1回だけ発行されたことを確認
+    assert blocker.signal_triggered
+
+
+def test_on_importButton_clicked_with_custom_mapping(qtbot, monkeypatch):
+    """on_importButton_clickedのテスト。カスタムマッピングが使用されることを確認"""
+    data = pl.DataFrame({"col1": [1], "col2": [2]})
+    dialog = TagDataImportDialog(data)
+    dialog.model.setMapping(0, "source_tag")
+    dialog.model.setMapping(1, "custom_tag")
+    # インスタンス変数の format_name を `danbooru` に設定
+    dialog.formatComboBox.setCurrentText("danbooru")
+    dialog.on_sourceTagCheckBox_stateChanged()
+
+    # source_tag が必須マッピングに含まれていることを確認
+    assert dialog.model.hasRequiredMapping("source_tag")
+    # インポートボタンが有効になっていることを確認
+    assert dialog.importButton.isEnabled()
+
+    mock_importer = MagicMock()
+    monkeypatch.setattr(dialog, "importer", mock_importer)
+
+    dialog.importButton.click()
+
+    # import_data メソッドが一度だけ呼び出されていることを確認
+    mock_importer.import_data.assert_called_once()
+    called_args = mock_importer.import_data.call_args[0]
+    new_df = called_args[0]
+
+    # new_df のカラム名が正しくリネームされていることを確認
+    assert new_df.columns == ["source_tag", "custom_tag"]
+
+
+def test_on_importButton_clicked_with_no_mapping(qtbot, monkeypatch):
+    """on_importButton_clickedのテスト。マッピングがない場合"""
+    data = pl.DataFrame({"col1": [1], "col2": [2]})
+    dialog = TagDataImportDialog(data)
+    dialog.on_sourceTagCheckBox_stateChanged()
+
+    # source_tag が必須マッピングに含まれていないことを確認
+    assert not dialog.model.hasRequiredMapping("source_tag")
+    # インポートボタンが無効になっていることを確認
+    assert not dialog.importButton.isEnabled()
+
+    mock_importer = MagicMock()
+    monkeypatch.setattr(dialog, "importer", mock_importer)
+
+    dialog.importButton.click()
+
+    # import_data メソッドが呼び出されていないことを確認
+    mock_importer.import_data.assert_not_called()

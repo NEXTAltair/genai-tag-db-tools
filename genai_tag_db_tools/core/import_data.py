@@ -21,9 +21,8 @@ from genai_tag_db_tools.config import db_path, AVAILABLE_COLUMNS
 class ImportConfig:
     """インポート設定を保持するデータクラス"""
 
-    format_id: int
+    format_id: Optional[int] = None  # 訳語データの場合は不要
     language: Optional[str] = None
-    # 最低限 source_tag と format_id のカラムは必要
     column_names: list[str] = field(default_factory=list)
 
 
