@@ -1,5 +1,5 @@
 import re
-from typing import Dict, Set
+from typing import Set
 
 from genai_tag_db_tools.core.tag_search import initialize_tag_searcher
 
@@ -123,7 +123,7 @@ class TagCleaner:
         return ", ".join(tag for tag in tags_dict.values() if tag)
 
     @staticmethod
-    def _tags_to_dict(tags: str) -> Dict[int, str]:
+    def _tags_to_dict(tags: str) -> dict[int, str]:
         """タグを辞書に変換して重複を避ける
         Args:
             tags (str): タグ
@@ -140,7 +140,7 @@ class TagCleaner:
         return tags_dict
 
     @staticmethod
-    def _clean_individual_tags(tags_dict: Dict[int, str]) -> Dict[int, str]:
+    def _clean_individual_tags(tags_dict: dict[int, str]) -> dict[int, str]:
         """髪の長さを残して色の特徴等を含むタグを削除する"""
         placeholder = "@@@"
         original_lengths = {}
@@ -167,9 +167,9 @@ class TagCleaner:
         return tags_dict
 
     @staticmethod
-    def _clean_color_object(tags_dict: Dict[int, str]) -> Dict[int, str]:
+    def _clean_color_object(tags_dict: dict[int, str]) -> dict[int, str]:
         """white shirtとshirtのような重複タグから具体的ではないタグを削除する"""
-        word_tags: Dict[str, Set[str]] = {}
+        word_tags: dict[str, Set[str]] = {}
 
         for tag in tags_dict.values():
             words = WORD_PATTERN.findall(tag)
@@ -186,7 +186,7 @@ class TagCleaner:
         }
 
     @staticmethod
-    def _clean_style(tags_dict: Dict[int, str]) -> Dict[int, str]:
+    def _clean_style(tags_dict: dict[int, str]) -> dict[int, str]:
         """anime styleとanime artのような重複タグをanimeに統一"""
         word_tags = {}
         for key, tag in tags_dict.items():

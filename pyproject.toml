@@ -24,17 +24,44 @@ classifiers = [
     "Operating System :: Microsoft :: Windows :: Windows 11"  # 対応OS
 ]
 
-# pytestの設定オプション
-[tool.pytest.ini_options]
-pythonpath = ["genai_tag_db_tools"]          # テスト実行時のPythonパス
-addopts = "-ra -q -v"         # テスト実行時のオプション（結果表示の詳細度など）
-testpaths = ["tests"]          # テストファイルの場所
-
 # 開発時のみ必要な追加パッケージ
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3.3",          # テストフレームワーク
     "pytest-cov>=5.0.0",      # テストカバレッジツール
+    "pytest-qt",        # Qtアプリケーションのテストツール
+]
+
+# pytestの設定オプション
+[tool.pytest.ini_options]
+pythonpath = ["genai_tag_db_tools"]          # テスト実行時のPythonパス
+addopts ="""
+    -ra -q -v
+    --cov=genai_tag_db_tools
+    --cov-report=term-missing tests/
+    """
+
+# テスト実行時のオプション（結果表示の詳細度など）
+testpaths = ["tests"]          # テストファイルの場所
+
+[tool.coverage.run]
+source = ["genai_tag_db_tools"]
+omit = [
+    "*/shibokensupport/*",
+    "*/site-packages/*",
+    "*/tests/*",
+    "*/pyscript",
+    "*/signature_bootstrap.py",
+    "*/__init__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if __name__ == \"__main__\":",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
 ]
 
 # ビルド設定
@@ -62,20 +89,3 @@ typeCheckingMode = "basic"  # 型チェックの厳格さ
 reportGeneralTypeIssues = "warning"     # 一般的な型の問題を警告として報告
 reportMissingTypeStubs = false          # 型定義ファイルの不足を無視
 reportUnknownMemberType = false         # 不明なメンバー型を無視
-
-[tool.coverage.run]
-omit = [
-    "*/shibokensupport/*",
-    "*/site-packages/*",
-    "*/tests/*",
-    "*/pyscript",
-    "*/signature_bootstrap.py"
-]
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "if __name__ == '__main__':",
-    "raise NotImplementedError",
-    "if TYPE_CHECKING:",
-]

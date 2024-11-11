@@ -91,7 +91,7 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
 
 
 if __name__ == "__main__":
-    from tag_search import initialize_tag_searcher
+    from genai_tag_db_tools.gui.widgets.tag_register import initialize_tag_searcher
     from PySide6.QtWidgets import QApplication
     from ..designer.TagRegisterWidget import TagRegisterWidget
 

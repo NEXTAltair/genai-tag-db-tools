@@ -6,7 +6,6 @@ import sqlite3
 from typing import Optional
 from dataclasses import dataclass, field
 
-from pkg_resources import AvailableDistributions
 import polars as pl
 from PySide6.QtCore import QObject, Signal
 
@@ -15,7 +14,7 @@ from genai_tag_db_tools.core.tag_search import TagSearcher
 from genai_tag_db_tools.cleanup_str import TagCleaner
 
 # パッケージのグローバル変数をインポート
-from genai_tag_db_tools import db_path, AVAILABLE_COLUMNS
+from genai_tag_db_tools.config import db_path, AVAILABLE_COLUMNS
 
 
 @dataclass
@@ -32,6 +31,7 @@ class TagDataImporter(QObject):
     """タグデータのインポートを行うクラス"""
 
     # シグナルの定義
+    importbutton_clicked = Signal()  # インポートボタンがクリックされた
     progress_updated = Signal(int, str)  # 進捗率, メッセージ
     process_started = Signal(str)  # プロセス名
     process_finished = Signal(str)  # プロセス名

@@ -1,18 +1,20 @@
+import logging
+import traceback
 from typing import Optional
 import sqlite3
 from pathlib import Path
-import pandas as pd
+import polars as pl
+
+from genai_tag_db_tools.config import db_path
 from genai_tag_db_tools.core.processor import CSVToDatabaseProcessor
 
 
 class TagSearcher:
-    def __init__(self, db_path: Optional[Path] = None):
-        if db_path is None:
-            db_path = Path(__file__).parent.parent / "data" / "tags_v3.db"
-        self.db_path = db_path
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
 
-    def execute_query(self, query: str, params: tuple = None) -> pd.DataFrame:
+    def execute_query(self, query: str) -> pl.DataFrame:
         """SQLクエリを実行し、結果をDataFrameとして返します。
 
         Args:
@@ -20,9 +22,9 @@ class TagSearcher:
             params (tuple, optional): クエリのパラメータ。デフォルトは None。
 
         Returns:
-            pandas.DataFrame: クエリの実行結果。
+            polars.DataFrame: クエリの実行結果。
         """
-        return pd.read_sql_query(query, conn, params=params)
+        return pl.read_database(query, self.conn)
 
     def execute_insert(self, query: str, params: tuple = None):
         """
@@ -32,8 +34,8 @@ class TagSearcher:
             query (str): SQL INSERT クエリ。
             params (tuple, optional): クエリのパラメータ。デフォルトは None。
         """
-        with conn:  # トランザクションを使用
-            cursor = conn.cursor()
+        with self.conn:  # トランザクションを使用
+            cursor = self.conn.cursor()
             cursor.execute(query, params)
 
     def find_tag_id(self, keyword: str) -> Optional[int]:
@@ -66,7 +68,7 @@ class TagSearcher:
             format_name (str, optional): タグのフォーマット。'All'（すべてのフォーマット）または特定のフォーマット名。デフォルトは 'All'。
 
         Returns:
-            pandas.DataFrame: 検索結果のタグデータを含むデータフレーム
+            polars.DataFrame: 検索結果のタグデータを含むデータフレーム
         """
         base_query = """
         SELECT
@@ -167,7 +169,7 @@ class TagSearcher:
         JOIN TAGS t ON ts.tag_id = t.tag_id
         WHERE ts.tag_id = ? AND ts.format_id = ?
         """
-        df = pd.read_sql_query(query, conn, params=(tag_id, format_id))
+        df = pl.read_sql_query(query, self.conn, params=(tag_id, format_id))
         return df.to_dict("records")[0] if not df.empty else None
 
     def update_tag_status(
@@ -198,7 +200,7 @@ class TagSearcher:
             preferred_tag_id = tag_id
 
         # タグステータスの更新または挿入用のDataFrameを作成
-        status_data = pd.DataFrame(
+        status_data = pl.DataFrame(
             {
                 "tag_id": [tag_id],
                 "format_id": [format_id],
@@ -212,7 +214,7 @@ class TagSearcher:
             # to_sqlメソッドを使用してUPSERT操作を実行
             status_data.to_sql(
                 "TAG_STATUS",
-                conn,
+                self.conn,
                 if_exists="append",
                 index=False,
                 method="multi",
@@ -228,8 +230,8 @@ class TagSearcher:
             return tag_id
         except sqlite3.IntegrityError:
             # 既存のレコードが存在する場合は更新
-            with conn:
-                cursor = conn.cursor()
+            with self.conn:
+                cursor = self.conn.cursor()
                 cursor.execute(
                     """
                     UPDATE TAG_STATUS
@@ -254,9 +256,9 @@ class TagSearcher:
         Returns:
             int: タグのID
         """
-        new_tag_df = pd.DataFrame({"tag": [tag], "source_tag": [source_tag]})
+        new_tag_df = pl.DataFrame({"tag": [tag], "source_tag": [source_tag]})
         try:
-            new_tag_df.to_sql("TAGS", conn, if_exists="append", index=False)
+            new_tag_df.to_sql("TAGS", self.conn, if_exists="append", index=False)
             tag_id = self.find_tag_id(tag)  # 新しく作成されたタグのIDを取得
             print(f"新規タグが作成されました: {tag}")
         except Exception as e:
@@ -270,14 +272,14 @@ class TagSearcher:
             new_count = current_count
         else:
             new_count = use_count
-        df = pd.DataFrame(
+        df = pl.DataFrame(
             {"tag_id": [tag_id], "format_id": [format_id], "count": [new_count]}
         )
         try:
-            df.to_sql("TAG_USAGE_COUNTS", conn, if_exists="append", index=False)
+            df.to_sql("TAG_USAGE_COUNTS", self.conn, if_exists="append", index=False)
         except sqlite3.IntegrityError:
-            with conn:
-                cursor = conn.cursor()
+            with self.conn:
+                cursor = self.conn.cursor()
                 cursor.execute(
                     """
                     UPDATE TAG_USAGE_COUNTS
@@ -290,10 +292,10 @@ class TagSearcher:
             print(f"タグカウントにエラーが発生しました: {e}")
 
     def update_tag_translation(self, tag_id: int, language: str, translation: str):
-        df = pd.DataFrame(
+        df = pl.DataFrame(
             {"tag_id": [tag_id], "language": [language], "translation": [translation]}
         )
-        df.to_sql("TAG_TRANSLATIONS", conn, if_exists="append", index=False)
+        df.to_sql("TAG_TRANSLATIONS", self.conn, if_exists="append", index=False)
 
     def convert_tag(self, search_tag: str, target_format_name: str):
         """タグをフォーマット推奨の形式に変換して表示する
@@ -337,7 +339,9 @@ class TagSearcher:
         """
         query = "SELECT DISTINCT format_name FROM TAG_FORMATS"
         formats = self.execute_query(query)
-        return ["All"] + formats["format_name"].tolist()
+        add_all = pl.DataFrame({"format_name": ["All"]})
+        formats = pl.concat([formats, add_all])
+        return formats
 
     def get_tag_languages(self):
         """
@@ -347,8 +351,10 @@ class TagSearcher:
             list: タグの言語のリスト。
         """
         query = "SELECT DISTINCT language FROM TAG_TRANSLATIONS"
-        langs = self.execute_query(query)
-        return ["All"] + langs["language"].tolist()
+        registered_languages = self.execute_query(query)
+        add_all = pl.DataFrame({"language": ["All"]})
+        langs = pl.concat([registered_languages, add_all])
+        return langs
 
     def get_tag_types(self, format_name: str = None):
         """フォーマットごとに設定されたタグのタイプを取得する関数
@@ -387,21 +393,25 @@ class TagSearcher:
         Returns:
             int: フォーマットID。見つからない場合は -1 を返します。
         """
-        query = "SELECT format_id FROM TAG_FORMATS WHERE format_name = ?"
-        df = self.execute_query(query, params=(format_name,))
-        if not df.empty:
-            return int(df["format_id"].iloc[0])
-        else:
-            return -1
+        query = f"SELECT format_id FROM TAG_FORMATS WHERE format_name = '{format_name}'"
+        try:
+            df = self.execute_query(query)
+            return int(df["format_id"][0])
+        except KeyError:
+            message = f"サイト '{format_name}' が見つかりませんでした。"
+            self.logger.error(message + "\n" + traceback.format_exc())
 
-    def get_type_id(self, type_name: str) -> int:
+    def get_type_id(self, type_name: str) -> Optional[int]:
         """タイプ名からタイプIDを取得します。"""
-        query = "SELECT type_name_id FROM TAG_TYPE_NAME WHERE type_name = ?"
-        df = self.execute_query(query, params=(type_name,))
-        if not df.empty:
-            return int(df["type_name_id"].iloc[0])
-        else:
-            return -1
+        query = (
+            f"SELECT type_name_id FROM TAG_TYPE_NAME WHERE type_name = '{type_name}'"
+        )
+        try:
+            df = self.execute_query(query)
+            return int(df["format_id"][0])
+        except KeyError:
+            message = f"タイプ名 '{type_name}' が見つかりませんでした。"
+            self.logger.error(message + "\n" + traceback.format_exc())
 
     def find_preferred_tag(
         self, tag_id: int, format_id: Optional[int] = None
@@ -427,12 +437,12 @@ class TagSearcher:
         # 複数の結果がある場合、Danbooru（ID: 1）のフォーマットを優先
         return self._select_preferred_tag(df)
 
-    def _select_preferred_tag(self, df: pd.DataFrame) -> str:
+    def _select_preferred_tag(self, df: pl.DataFrame) -> str:
         """
         与えられたデータフレームから、優先すべき推奨タグを選択します。
 
         Args:
-            df (pd.DataFrame): 推奨タグの検索結果。
+            df (pl.DataFrame): 推奨タグの検索結果。
 
         Returns:
             str: 優先する推奨タグ。
@@ -448,7 +458,7 @@ class TagSearcher:
 
     def _query_preferred_tags(
         self, tag_id: int, format_id: Optional[int] = None
-    ) -> pd.DataFrame:
+    ) -> pl.DataFrame:
         """
         指定されたタグIDとオプションのフォーマットIDに基づいて、推奨タグを検索します。
 
@@ -457,7 +467,7 @@ class TagSearcher:
             format_id (Optional[int]): フォーマットID。指定しない場合は全フォーマットで検索。
 
         Returns:
-            pd.DataFrame: 推奨タグの検索結果。
+            pl.DataFrame: 推奨タグの検索結果。
         """
         base_query = """
         SELECT T2.tag AS preferred_tag, TF.format_name, TF.format_id
@@ -475,7 +485,7 @@ class TagSearcher:
 
     def _get_current_usage_count(self, tag_id: int, format_id: int) -> int:
         query = "SELECT count FROM TAG_USAGE_COUNTS WHERE tag_id = ? AND format_id = ?"
-        df = pd.read_sql_query(query, conn, params=(tag_id, format_id))
+        df = pl.read_sql_query(query, self.conn, params=(tag_id, format_id))
         return int(df["count"].iloc[0] if not df.empty else 0)
 
     def register_or_update_tag(self, tag_info: dict) -> int:
@@ -541,11 +551,11 @@ class TagSearcher:
     ) -> int:
         """既存のタグ情報を更新します。"""
         # TAGSテーブルの更新
-        tags_df = pd.DataFrame({"tag_id": [tag_id], "source_tag": [source_tag]})
-        tags_df.to_sql("TAGS", conn, if_exists="replace", index=False)
+        tags_df = pl.DataFrame({"tag_id": [tag_id], "source_tag": [source_tag]})
+        tags_df.to_sql("TAGS", self.conn, if_exists="replace", index=False)
 
         # TAG_STATUSの更新または挿入
-        status_df = pd.DataFrame(
+        status_df = pl.DataFrame(
             {
                 "tag_id": [tag_id],
                 "format_id": [format_id],
@@ -554,28 +564,28 @@ class TagSearcher:
                 "preferred_tag_id": [tag_id],
             }
         )
-        status_df.to_sql("TAG_STATUS", conn, if_exists="replace", index=False)
+        status_df.to_sql("TAG_STATUS", self.conn, if_exists="replace", index=False)
 
         # TAG_USAGE_COUNTSの更新
-        current_count_df = pd.read_sql_query(
+        current_count_df = pl.read_sql_query(
             f"SELECT count FROM TAG_USAGE_COUNTS WHERE tag_id = {tag_id} AND format_id = {format_id}",
-            conn,
+            self.conn,
         )
         current_count = (
             current_count_df["count"].iloc[0] if not current_count_df.empty else 0
         )
-        usage_df = pd.DataFrame(
+        usage_df = pl.DataFrame(
             {
                 "tag_id": [tag_id],
                 "format_id": [format_id],
                 "count": [current_count + use_count],
             }
         )
-        usage_df.to_sql("TAG_USAGE_COUNTS", conn, if_exists="replace", index=False)
+        usage_df.to_sql("TAG_USAGE_COUNTS", self.conn, if_exists="replace", index=False)
 
         # TAG_TRANSLATIONSの更新または挿入
         if language and translation:
-            translations_df = pd.DataFrame(
+            translations_df = pl.DataFrame(
                 {
                     "tag_id": [tag_id],
                     "language": [language],
@@ -583,15 +593,14 @@ class TagSearcher:
                 }
             )
             translations_df.to_sql(
-                "TAG_TRANSLATIONS", conn, if_exists="replace", index=False
+                "TAG_TRANSLATIONS", self.conn, if_exists="replace", index=False
             )
 
         return tag_id
 
 
 def initialize_tag_searcher() -> TagSearcher:
-    db_path = Path(__file__).parent / "data" / "tags_v3.db"
-    return TagSearcher(db_path)
+    return TagSearcher()
 
 
 if __name__ == "__main__":
