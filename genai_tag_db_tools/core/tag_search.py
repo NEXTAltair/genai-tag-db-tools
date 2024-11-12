@@ -391,7 +391,10 @@ class TagSearcher:
             format_name (str): フォーマット名。
 
         Returns:
-            int: フォーマットID。見つからない場合は -1 を返します。
+            int: フォーマットID。
+
+        Raises:
+            KeyError: フォーマット名が見つからない場合。
         """
         query = f"SELECT format_id FROM TAG_FORMATS WHERE format_name = '{format_name}'"
         try:

@@ -1,9 +1,7 @@
 from pathlib import Path
 import logging
-import re
-import select
-import sqlite3
 from typing import Optional
+import sqlite3
 from dataclasses import dataclass, field
 
 import polars as pl
@@ -21,13 +19,15 @@ from genai_tag_db_tools.config import db_path, AVAILABLE_COLUMNS
 class ImportConfig:
     """インポート設定を保持するデータクラス"""
 
-    format_id: Optional[int] = None  # 訳語データの場合は不要
+    format_id: int = 0  # 0 = Unknown
     language: Optional[str] = None
     column_names: list[str] = field(default_factory=list)
 
 
 class TagDataImporter(QObject):
     """タグデータのインポートを行うクラス"""
+
+    logger = logging.getLogger(__name__)
 
     # シグナルの定義
     importbutton_clicked = Signal()  # インポートボタンがクリックされた
@@ -40,29 +40,34 @@ class TagDataImporter(QObject):
         super().__init__(parent)
         self.conn = sqlite3.connect(db_path)
         self.tag_search = TagSearcher()
-        self.logger = logging.getLogger(__name__)
         self._cancel_flag = False
 
-    def read_csv(self, file_path: Path) -> pl.DataFrame:
+    @staticmethod
+    def read_csv(csv_file_path: Path) -> pl.DataFrame:
         """CSVファイルを読み込む
 
         Args:
-            file_path (Path): 読み込むファイルのパス
+            csv_file_path (Path): 読み込むファイルのパス
 
         Returns:
             pl.DataFrame: 読み込んだデータフレーム
         """
         # 一行目だけを読み込んで `AVAILABLE_COLUMNS` に含まれるカラム名があるか確認
-        with open(file_path, "r") as f:
+        with open(csv_file_path, "r") as f:
             first_line = f.readline().strip()
-            if not any(col in first_line for col in AVAILABLE_COLUMNS):
-                self.logger.info(f"ヘッダありとしてCSVファイルを読み込み: {file_path}")
-                return pl.read_csv(file_path)
+            if any(col in first_line for col in AVAILABLE_COLUMNS):
+                TagDataImporter.logger.info(
+                    f"ヘッダありとしてCSVファイルを読み込み: {csv_file_path}"
+                )
+                return pl.read_csv(csv_file_path)
             else:
-                self.logger.info(f"ヘッダなしとしてCSVファイルを読み込み: {file_path}")
-                return pl.read_csv(file_path, has_header=False)
+                TagDataImporter.logger.info(
+                    f"ヘッダなしとしてCSVファイルを読み込み: {csv_file_path}"
+                )
+                return pl.read_csv(csv_file_path, has_header=False)
 
-    def load_hf_dataser(self, repository: str) -> pl.DataFrame:
+    @staticmethod
+    def load_hf_dataser(repository: str) -> pl.DataFrame:
         """Hugging Face Datasetのデータを読み込む
 
         Args:
@@ -71,77 +76,119 @@ class TagDataImporter(QObject):
         Returns:
             pl.DataFrame: 読み込んだデータフレーム
         """
-        self.logger.info(f"Hugging Face Datasetを読み込み: {repository}")
+        TagDataImporter.logger.info(f"Hugging Face Datasetを読み込み: {repository}")
         return pl.read_parquet(repository)
 
-    def configure_import(self, source_df: pl.DataFrame) -> ImportConfig:
-        """インポート設定を行う
-        一つのデータに複数のサイトから得たタグ情報があることは想定しない
-        どのフォーマットを選択するかはユーザーによる手動選択とする
-        prompt-all-in-one の csv の形式はカラムに名前がついていない
-        その類のデータに対応するため手動でカラム名を選択する
+    def configure_import(
+        self, source_df: pl.DataFrame
+    ) -> tuple[pl.DataFrame, ImportConfig]:
+        """
+        インポート設定を行う
+
+        この後の処理を行うためのヘッダーを正則化したデータフレームを作成する
 
         Args:
-            df (pl.DataFrame): カラム名を確認するデータフレーム
+            source_df (pl.DataFrame): カラム名を確認するデータフレームの元データ
 
         Returns:
-            ImportConfig: 設定されたインポート設定
+            add_db_df (pl.DataFrame): インポートするための加工を行ったデータフレーム
+            ImportConfig: インポート設定オブジェクト
         """
-        print("現在のカラム名:", list(source_df.columns))
-        print("選択可能なカラム名:", AVAILABLE_COLUMNS)
-
-        auto_selected = self.auto_select_columns(source_df)
-        manual_mappings = self.map_missing_columns(source_df, auto_selected)
-        updated_df = self.apply_mappings(source_df, manual_mappings)
-        selected_columns = auto_selected + list(manual_mappings.keys())
-
-        format_id = self.get_format_id()
-        language = self.get_language()
-
-        return ImportConfig(
-            format_id=format_id,
-            language=language,
-            column_names=selected_columns,
+        TagDataImporter.logger.info(f"現在のカラム名: {list(source_df.columns)}")
+        TagDataImporter.logger.info(
+            f"データベースに登録できるカラム名: {AVAILABLE_COLUMNS}"
         )
 
-    def auto_select_columns(self, source_df: pl.DataFrame) -> list[str]:
-        return [col for col in AVAILABLE_COLUMNS if col in source_df.columns]
+        language = self.get_language()
 
-    def map_missing_columns(
-        self, source_df: pl.DataFrame, auto_selected: list[str]
-    ) -> dict[str, str]:
-        missing = [col for col in AVAILABLE_COLUMNS if col not in auto_selected]
-        mappings = {}
-        for col in missing:
-            while True:
-                user_input = input(
-                    f"カラム '{col}' の対応するソースカラム名を入力してください（存在しない場合はスキップ）: "
-                ).strip()
-                if user_input == "":
-                    print(f"カラム '{col}' のマッピングをスキップします。")
-                    break
-                elif user_input in source_df.columns:
-                    mappings[col] = user_input
-                    print(
-                        f"カラム '{col}' はソースカラム '{user_input}' にマッピングされました。"
+        # 言語に基づいて翻訳データのカラムをレコード形式に変換
+        if language and language in source_df.columns:
+            source_df = source_df.melt(
+                id_vars=["source_tag"],
+                value_vars=[language],
+                variable_name="language",
+                value_name="translation",
+            )
+            TagDataImporter.logger.info(
+                f"カラム '{language}' をレコード形式に変換しました。"
+            )
+
+        existing_columns = [
+            col for col in AVAILABLE_COLUMNS if col in source_df.columns
+        ]
+        missing_columns = [
+            col for col in AVAILABLE_COLUMNS if col not in existing_columns
+        ]
+
+        TagDataImporter.logger.debug(f"既存のカラム: {existing_columns}")
+        TagDataImporter.logger.info(f"不足しているカラム: {missing_columns}")
+
+        # 既存のカラムのみを持つ新しいデータフレームを作成
+        add_db_df = source_df.select(existing_columns).clone()
+
+        # ここで add_db_columns を初期化
+        add_db_columns = existing_columns.copy()
+
+        # 不足しているカラムをリネームまたは追加
+        for col in missing_columns:
+            user_input = self.get_user_input_for_column(col, source_df)
+            if user_input:
+                if user_input in source_df.columns:
+                    add_db_df = add_db_df.with_columns(source_df[user_input].alias(col))
+                    TagDataImporter.logger.info(
+                        f"カラム '{col}' を '{user_input}' から追加しました。"
                     )
-                    break
                 else:
-                    print(
-                        f"ソースカラム '{user_input}' は存在しません。再度入力してください。"
+                    TagDataImporter.logger.warning(
+                        f"ソースデータフレームに '{user_input}' カラムが存在しません。"
                     )
-        return mappings
+                    continue
+                add_db_columns.append(col)  # 新しく追加されたカラムを一覧に追加
+            else:
+                TagDataImporter.logger.info(
+                    f"カラム '{col}' のマッピングをスキップしました。"
+                )
 
-    def apply_mappings(
-        self, source_df: pl.DataFrame, mappings: dict[str, str]
-    ) -> pl.DataFrame:
-        for target, source in mappings.items():
-            source_df = source_df.with_columns(pl.col(source).alias(target))
-        return source_df
+        format_id = self.get_format_id()
+
+        return add_db_df, ImportConfig(
+            format_id=format_id,
+            language=language,
+            column_names=add_db_columns,
+        )
+
+    def get_user_input_for_column(self, column: str, source_df: pl.DataFrame) -> str:
+        """
+        ユーザーからの入力を取得してカラムをリネームする
+
+        Args:
+            column (str): リネーム対象のカラム名
+            source_df (pl.DataFrame): 加工前のデータフレーム
+
+        Returns:
+            str: リネーム後のカラム名または空文字
+        """
+        while True:
+            user_input = input(
+                f"カラム '{column}' の対応するソースカラム名を入力してください（存在しない場合はスキップ）:"
+            ).strip()
+            if not user_input:
+                return ""
+            if user_input in source_df.columns:
+                return user_input
+            TagDataImporter.logger.warning(
+                f"ソースカラム '{user_input}' は存在しません。再度入力してください。"
+            )
 
     def get_format_id(self) -> int:
-        format_name = input("フォーマット名を選択: ")
-        return self.tag_search.get_format_id(format_name)
+        format_name = input("フォーマット名を選択（省略可能）: ").strip()
+        if not format_name:
+            return 0
+        try:
+            return self.tag_search.get_format_id(format_name)
+        except ValueError as e:
+            TagDataImporter.logger.error(str(e))
+            return 0
 
     def get_language(self) -> Optional[str]:
         lang = input("言語を入力してください（省略可能）: ").strip()
@@ -158,12 +205,12 @@ class TagDataImporter(QObject):
         """
         if "source_tag" not in df.columns:
             error_msg = "「source_tag」列がデータフレームにありません"
-            self.logger.error(error_msg)
+            TagDataImporter.logger.error(error_msg)
             raise KeyError(error_msg)
 
         if df["source_tag"].is_null().all():
             error_msg = "「source_tag」列にデータがありません"
-            self.logger.error(error_msg)
+            TagDataImporter.logger.error(error_msg)
             raise ValueError(error_msg)
 
         if "tag" not in df.columns:
@@ -302,7 +349,7 @@ class TagDataImporter(QObject):
     def cancel(self) -> None:
         """処理のキャンセル"""
         self._cancel_flag = True
-        self.logger.info("処理がキャンセルされました")
+        TagDataImporter.logger.info("処理がキャンセルされました")
 
     def __del__(self):
         """デストラクタ - リソースのクリーンアップ"""
@@ -311,7 +358,7 @@ class TagDataImporter(QObject):
                 self.conn.commit()
                 self.conn.close()
         except Exception as e:
-            self.logger.error(f"クリーンアップ中にエラーが発生: {str(e)}")
+            TagDataImporter.logger.error(f"クリーンアップ中にエラーが発生: {str(e)}")
 
 
 if __name__ == "__main__":
@@ -325,15 +372,6 @@ if __name__ == "__main__":
     # データの読み込み（例：danbooru_klein10k_jp.csv）
     df = pl.read_csv("danbooru_klein10k_jp.csv")
 
-    # 必要なカラムのリネームと型変換
-    df = df.rename(
-        {
-            "source_tag": "source_tag",
-            "japanese": "translation",
-            # 他の必要なカラムのリネーム
-        }
-    )
-
     # インポーターの初期化と実行
-    importer = TagDataImporter(Path("tags_v3.db"))
+    importer = TagDataImporter()
     importer.import_data(df, danbooru_config)
