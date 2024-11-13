@@ -49,7 +49,7 @@ class TagSearcher:
             ValueError: 複数または0件のタグが見つかった場合
         """
         query = "SELECT tag_id FROM TAGS WHERE tag = ?"
-        df = self.execute_query(query, params=(keyword,))
+        df = self.execute_query(query,keyword)
 
         if df.empty:
             return None

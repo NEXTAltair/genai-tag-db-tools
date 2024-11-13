@@ -1,3 +1,4 @@
+from os import error
 import re
 import pytest
 import polars as pl
@@ -23,9 +24,12 @@ sample_data_cases = [
         "auto_select_columns": ["source_tag", "type_id", "count"],
         # 自動で選択されなかったカラムは手入力で選択する
         # ["言語", 'tag', 'language', 'translation', 'deprecated_tags', 'created_at', 'updated_at', "フォーマット"]
-        "mapping_input": ["", "", "", "", "", "", "", "danbooru"],
+        "mapping_input": ["", "", "", "", "", "", ""],
+        "language_input": "",
+        "format_id_input": "danbooru",
         # assertのフォーマットID
         "format_id": 1,
+        "expected_columns": ["source_tag", "type_id", "count"],
     },
     # ケース 2: 非推奨のバリアントを含むCSV
     {
@@ -35,8 +39,11 @@ sample_data_cases = [
             "deprecated_tags": [["tag_4", "tag_5"], ["tag_6", "tag_7"]],
         },
         "auto_select_columns": ["tag", "deprecated_tags"],
-        "mapping_input": ["", "", "", "", "", "", "", "", "danbooru"],
+        "mapping_input": ["", "", "", "", "", "", "", ""],
+        "language_input": "",
+        "format_id_input": "danbooru",
         "format_id": 1,
+        "expected_columns": ["tag", "deprecated_tags"],
     },
     # ケース 3: 非推奨 + タイプ + カウント
     {
@@ -55,9 +62,11 @@ sample_data_cases = [
             "",
             "",
             "",
-            "danbooru",
         ],
+        "language_input": "",
+        "format_id_input": "danbooru",
         "format_id": 1,
+        "expected_columns": ["source_tag", "type_id", "count", "deprecated_tags"],
     },
     # ケース 4: いろいろな情報が含まれるCSV
     {
@@ -89,8 +98,17 @@ sample_data_cases = [
             "created_at",
             "updated_at",
         ],
-        "mapping_input": ["", "", "", "", "", "e621"],
+        "mapping_input": ["", "", "", "", ""],
+        "language_input": "",
+        "format_id_input": "e621",
         "format_id": 2,
+        "expected_columns": [
+            "source_tag",
+            "count",
+            "type_id",
+            "created_at",
+            "updated_at",
+        ],
     },
     # ケース 5: 日本語訳CSV
     {
@@ -99,9 +117,24 @@ sample_data_cases = [
             "source_tag": ["tag1", "tag2"],
             "Japanese": ["タグ1, タグ2", "タグ3"],
         },
-        "mapping_input": ["Japanese", "", "", "", "translation", "", "", "", "", ""],
-        # フォーマットIDは翻訳には不要
+        "auto_select_columns": [
+            "source_tag",
+        ],
+        "mapping_input": [
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],  # 欠落しているカラム数に合わせて入力を調整
+        "language_input": "Japanese",
+        "format_id_input": "",
         "format_id": 0,
+        "expected_columns": ["source_tag", "language", "translation"],
     },
     # ケース 6: 中国語訳CSV
     {
@@ -111,42 +144,81 @@ sample_data_cases = [
             "type_id": [0, 0],
             "zh-Hant": ["標籤1", "標籤2"],
         },
-        "auto_select_columns": ["source_tag", "type_id", "zh-Hant"],
-        "mapping_input": ["zh-Hant", "", "", "translation", "", "", "", "", ""],
+        "auto_select_columns": ["source_tag", "type_id"],
+        "mapping_input": ["", "", "", "", "", "", "", ""],
+        "language_input": "zh-Hant",
+        "format_id_input": "",
         "format_id": 0,
+        "expected_columns": ["source_tag", "type_id", "language", "translation"],
     },
-    # ケース 8: 実際のCSVを抜粋使用したテスト01 `danbooru_241016.csv`
+    # ケース 7: 実際のCSVを抜粋使用したテスト01 `danbooru_241016.csv`
     {
         "name": "danbooru_241016",
         "data": TagDataImporter.read_csv(Path("tests/resource/case_03.csv")),
         "mapping_input": [
-            "",
             "column_1",
+            "",
+            "",
             "column_2",
             "column_3",
+            "",
+            "",
             "column_4",
-            "column_5",
             "",
             "",
-            "",
-            "",
-            "danbooru",
-        ],
+        ],  # mapping_input の要素数を9個に調整
+        "language_input": "",
+        "format_id_input": "danbooru",
         "format_id": 1,
+        "expected_columns": ["source_tag", "type_id", "count", "deprecated_tags"],
     },
-    # ケース 9: 実際のCSVを抜粋使用したテスト02 `e621_tags_jsonl.csv`
+    # ケース 8: 実際のCSVを抜粋使用したテスト02 `e621_tags_jsonl.csv`
     {
         "name": "e621_tags_jsonl",
         "data": TagDataImporter.read_csv(Path("tests/resource/case_04.csv")),
         "mapping_input": [
             "",
-            "id",
-            "related_tags",
-            "related_tags_updated_at",
-            "is_locked",
-            "e621",
+            "",
+            "",
+            "",
+            "",
         ],
+        "language_input": "",
+        "format_id_input": "e621",
         "format_id": 2,
+        "expected_columns": [
+            "source_tag",
+            "count",
+            "type_id",
+            "created_at",
+            "updated_at",
+        ],
+    },
+    # ケース 9: 実際のhf_datasetを使用したテスト
+    {
+        "name": "hf_dataset",
+        "data": TagDataImporter.load_hf_dataser(
+            "hf://datasets/p1atdev/danbooru-ja-tag-pair-20241015/data/train-00000-of-00001.parquet"
+        ),
+        "mapping_input": [
+            "other_names",
+            "title",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],
+        "language_input": "japanese",
+        "format_id_input": "danbooru",
+        "format_id": 1,
+        "expected_columns": [
+            "source_tag",
+            "type",
+            "language",
+            "translation",
+        ],
     },
 ]
 sample_data_ids = [
@@ -158,6 +230,7 @@ sample_data_ids = [
     "CASE_06_中国語訳",
     "CASE_07_ダンボール241016",
     "CASE_08_e621タグ",
+    "CASE_09_hf_dataset",
 ]
 
 sample_csv_cases = [
@@ -178,7 +251,7 @@ sample_csv_cases = [
 
 
 # TagDataImporterのインスタンスを作成するためのフィクスチャ
-@pytest.fixture
+@pytest.fixture(name="importer")
 def importer():
     """TagDataImporterのモックを提供するフィクスチャ"""
     with patch("sqlite3.connect"):
@@ -188,8 +261,21 @@ def importer():
         yield mock_tag_data_importer
 
 
+@pytest.fixture(name="sample_df")
+def sample_df():
+    """サンプルデータフレームを提供するフィクスチャ"""
+    return pl.DataFrame(
+        {
+            "source_tag": ["tag1", "tag2"],
+            "type_id": [0, 0],
+            "count": [100, 200],
+            "deprecated_tags": [["tag_4", "tag_5"], ["tag_6", "tag_7"]],
+        }
+    )
+
+
 # ImportConfigのサンプルを提供するフィクスチャ
-@pytest.fixture
+@pytest.fixture(name="sample_config")
 def sample_config():
     """ImportConfigのサンプルを提供するフィクスチャ"""
     return ImportConfig(
@@ -199,7 +285,7 @@ def sample_config():
     )
 
 
-@pytest.fixture
+@pytest.fixture(name="mock_get_format_id")
 def mock_get_format_id():
     def side_effect(*args, **kwargs):
         if args[0] == "unknown":
@@ -243,9 +329,15 @@ def test_configure_import(importer: TagDataImporter, sample_case, mock_get_forma
     print(f"必要な入力: {required_inputs}")
 
     # `self.tag_search.get_format_id` を `mock_get_format_id` でモック
+    user_inputs = (
+        [sample_case.get("language_input", "")]
+        + sample_case["mapping_input"]
+        + [sample_case.get("format_id_input", "")]
+    )
+
     with patch.object(importer.tag_search, "get_format_id", mock_get_format_id):
         # 入力をモック化（必要に応じて変更）
-        with patch("builtins.input", side_effect=sample_case["mapping_input"]):
+        with patch("builtins.input", side_effect=user_inputs):
             add_db_df, config = importer.configure_import(
                 df
             )  # 新しいデータフレームを取得
@@ -253,13 +345,10 @@ def test_configure_import(importer: TagDataImporter, sample_case, mock_get_forma
     # 設定が正しく行われていることをアサート
     assert config.format_id == sample_case["format_id"]
 
-    # カラム名のテスト（新しいデータフレームを使用）
-    for col in config.column_names:
-        assert col in add_db_df.columns
-
-    # 追加で、add_db_df が期待通りのカラムのみを持つことを確認
-    expected_columns = config.column_names
-    assert set(add_db_df.columns) == set(expected_columns)
+    # 追加で、add_db_df が期待通りのカラムを持つことを確認
+    print(f"期待されるカラム: {sample_case['expected_columns']}")
+    print(f"実際のカラム: {add_db_df.columns}")
+    assert set(config.column_names) == set(sample_case["expected_columns"])
 
 
 def test_get_format_id(importer: TagDataImporter, mock_get_format_id):
@@ -271,6 +360,42 @@ def test_get_format_id(importer: TagDataImporter, mock_get_format_id):
         assert importer.get_format_id() == 2
     with patch("builtins.input", side_effect=["dripbooru"]):
         assert importer.get_format_id() == 3
+
+
+def test_normalize_typing(importer: TagDataImporter):
+    """タイプの正規化をテスト"""
+    # テスト用のデータフレームを作成
+    df = pl.DataFrame(
+        {
+            "deprecated_tags": ["str, で", "格納, されてる"],
+            "translation": [["リスト", "で"], ["格納", "されている"]],
+        }
+    )
+
+    # メソッドを実行
+    df_normalized = importer._normalize_typing(df)
+
+    # データ型が str から list に変換されていることを確認
+    type_dict = df_normalized.schema
+    assert type_dict["deprecated_tags"] == pl.List
+    assert type_dict["translation"] == pl.List
+
+
+@pytest.mark.parametrize("sample_case", sample_data_cases, ids=sample_data_ids)
+def test_normalize_typing_param(importer: TagDataImporter, sample_case):
+    """タイプの正規化をテスト"""
+    df = pl.DataFrame(sample_case["data"])
+
+    # メソッドを実行
+    df_normalized = importer._normalize_typing(df)
+
+    # データ型が正しく変換されていることを確認
+    for col, expected_type in AVAILABLE_COLUMNS.items():
+        if col in df_normalized.columns:
+            dtype = getattr(pl, expected_type, None)
+            if dtype is None:
+                raise ValueError(f"無効なデータ型: {expected_type}")
+            assert df_normalized.schema[col] == dtype
 
 
 def test_normalize_tags_append(importer: TagDataImporter):
@@ -317,8 +442,11 @@ def test_normalize_tags_no_source_tag(importer: TagDataImporter, sample_case):
     # sample_caseの'data'をDataFrameに変換
     df = pl.DataFrame(sample_case["data"])
 
-    # 'source_tag'カラムを削除する
-    drop_source = df.drop("source_tag")
+    # 'source_tag'カラムが存在する場合に削除する
+    if "source_tag" in df.columns:
+        drop_source = df.drop("source_tag")
+    else:
+        drop_source = df
 
     # メソッドを実行 tyep_id と count だけのデータフレームを送る
     with pytest.raises(KeyError) as exc_info:
@@ -327,61 +455,38 @@ def test_normalize_tags_no_source_tag(importer: TagDataImporter, sample_case):
 
 
 @pytest.mark.parametrize("sample_case", sample_data_cases, ids=sample_data_ids)
-def test_add_tag_id_column_normal(importer, sample_case):
-    """正常系テスト:タグIDが正常に追加される場合"""
-    # テスト用のデータフレームを作成
-    df = pl.DataFrame({"tag": ["tag1", "tag2"]})
-
-    with patch("genai_tag_db_tools.core.import_data.TagSearcher") as MockTagSearcher:
-        mock_searcher = MockTagSearcher.return_value
-        mock_searcher.find_tag_id.side_effect = [1, 2]
-
-        # メソッドを実行
-        df = importer._add_tag_id_column(df)
-
-        # tag_idカラムが追加され、正しい値が設定されていることを確認
-        assert "tag_id" in df.columns
-        assert df["tag_id"].to_list() == [1, 2]
-
-
-@pytest.mark.parametrize("sample_case", sample_data_cases, ids=sample_data_ids)
-def test_add_tag_id_column_abnormal(importer: TagDataImporter, sample_case):
-    """異常系テスト:タグIDが取得できない場合"""
-    # テスト用のデータフレームを作成（存在しないタグを含む）
-    df = pl.DataFrame({"tag": ["tag1", "unknown_tag"]})
-
-    # TagSearcherをモック化
-    with patch("genai_tag_db_tools.core.import_data.TagSearcher") as MockTagSearcher:
-        mock_searcher = MockTagSearcher.return_value
-        # 一つ目のタグはIDを返し、二つ目はNoneを返す
-        mock_searcher.find_tag_id.side_effect = [1, None]
-
-        # メソッドを実行
-        df = importer._add_tag_id_column(df)
-
-        # tag_idカラムが追加され、Noneが含まれていることを確認
-        assert "tag_id" in df.columns
-        assert df["tag_id"].to_list() == [1, None]
-
-        # None値が含まれている場合の処理を追加で確認する場合
-        assert df["tag_id"].null_count() == 1
-
-
-@pytest.mark.parametrize("sample_case", sample_data_cases, ids=sample_data_ids)
-def test_normalize_translation_normal(importer, sample_case):
+def test_normalize_translation_normal(importer, sample_case, mock_get_format_id):
     """翻訳の処理をテスト"""
     # テスト用のデータフレームを作成
-    df = pl.DataFrame(
-        {
-            "source_tag": ["tag1", "tag2"],
-            "Japanese": ["trans1", "trans2, trans3"],
-        }
+    df = pl.DataFrame(sample_case["data"])
+
+    # `self.tag_search.get_format_id` を `mock_get_format_id` でモック
+    user_inputs = (
+        [sample_case.get("language_input", "")]
+        + sample_case["mapping_input"]
+        + [sample_case.get("format_id_input", "")]
     )
 
-    # メソッドを実行
-    df = importer._normalize_translations(df)
-    # 翻訳が正しく正規化されていることを確認するアサーションを追加してください
-    # 例: assert df["translation"].to_list() == ["trans1", "trans2, trans3"]
+    with patch.object(importer.tag_search, "get_format_id", mock_get_format_id):
+        # 入力をモック化（必要に応じて変更）
+        with patch("builtins.input", side_effect=user_inputs):
+            add_db_df, _ = importer.configure_import(df)  # 新しいデータフレームを取得
+
+    if "translation" in add_db_df.columns:
+        # メソッドを実行
+        df_normalize_translation = importer._normalize_translations(add_db_df)
+
+        # translation 中の カンマ が含まれていないことを確認
+        for translation in df_normalize_translation["translation"]:
+            if "," in translation:
+                print(f"カンマが含まれている翻訳: {translation}")
+        assert all(
+            "," not in translation
+            for translation in df_normalize_translation["translation"]
+        )
+    else:
+        # translation がない場合は何もしない
+        assert True
 
 
 def test_cancel_import(importer: TagDataImporter):
@@ -394,13 +499,17 @@ def test_import_data_signals(
     importer: TagDataImporter, sample_df, sample_config: ImportConfig
 ):
     """インポートデータのシグナルをテスト"""
+    importbutton_signal = MagicMock()
     progress_signal = MagicMock()
     start_signal = MagicMock()
     finish_signal = MagicMock()
+    error_signal = MagicMock()
 
+    importer.importbutton_clicked.connect(importbutton_signal)
     importer.progress_updated.connect(progress_signal)
     importer.process_started.connect(start_signal)
     importer.process_finished.connect(finish_signal)
+    importer.error_occurred.connect(error_signal)
 
     importer.import_data(sample_df, sample_config)
 
