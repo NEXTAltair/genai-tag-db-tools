@@ -377,13 +377,19 @@ def test_normalize_typing(importer: TagDataImporter):
     type_dict = df_normalized.schema
     assert type_dict["deprecated_tags"] == pl.List(pl.Utf8)
     assert type_dict["translation"] == pl.List(pl.Utf8)
-    assert df_normalized.select(pl.col("deprecated_tags")).to_series().to_list() == [
+
+    # 列をフラット化して比較
+    assert df_normalized.select(
+        pl.col("deprecated_tags").explode()
+    ).to_series().to_list() == [
         "str",
         "で",
         "格納",
         "されてる",
     ]
-    assert df_normalized.select(pl.col("translation")).to_series().to_list() == [
+    assert df_normalized.select(
+        pl.col("translation").explode()
+    ).to_series().to_list() == [
         "リスト",
         "で",
         "格納",

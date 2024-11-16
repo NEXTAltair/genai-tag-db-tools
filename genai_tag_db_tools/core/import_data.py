@@ -181,50 +181,32 @@ class TagDataImporter(QObject):
             return self.tag_search.get_format_id(format_name)
 
     def _normalize_typing(self, df: pl.DataFrame) -> pl.DataFrame:
-        """データフレームの型を正規化
-
-        Args:
-            df (pl.DataFrame): 処理するデータフレーム
-
-        Returns:
-            pl.DataFrame: 正規化されたデータフレーム
-        """
-        typed_columns = []
+        """データフレームの型を正規化"""
         for col, expected_type in AVAILABLE_COLUMNS.items():
             if col not in df.columns:
                 continue
 
-            actual_type = df[col].dtype
-            if actual_type != expected_type:
-                self.logger.debug(
-                    f"列 '{col}' の型を {actual_type} から {expected_type} に変換します。"
+            current_type = df[col].dtype
+            if str(current_type) == str(expected_type):
+                continue
+
+            # 期待する型がリスト型の場合
+            if isinstance(expected_type, pl.List) and current_type == pl.Utf8:
+                df = df.with_columns(
+                    [
+                        pl.col(col)
+                        .str.split(",")
+                        .map_elements(lambda x: [s.strip() for s in x])
+                        .alias(col)
+                    ]
                 )
-                try:
-                    typed_columns.append(pl.col(col).cast(expected_type).alias(col))
-                except Exception as e:
-                    self.logger.error(
-                        f"列 '{col}' を {expected_type} にキャスト中にエラーが発生しました: {e}"
-                    )
-                    raise
+            # その他の型変換
+            elif not str(current_type).startswith("List") and not isinstance(
+                expected_type, pl.List
+            ):
+                df = df.with_columns([pl.col(col).cast(expected_type).alias(col)])
 
-        if typed_columns:
-            typed_df = df.with_columns(typed_columns)
-        else:
-            self.logger.debug(
-                "キャストが必要な列がありません。元のデータフレームを返します。"
-            )
-            typed_df = df
-
-        # deprecated_tags の分割
-        if "deprecated_tags" in typed_df.columns:
-            typed_df = typed_df.with_columns(
-                pl.col("deprecated_tags")
-                .str.split(",")
-                .str.strip_chars()
-                .alias("deprecated_tags")
-            )
-
-        return typed_df
+        return df
 
     def _normalize_tags(self, df: pl.DataFrame) -> pl.DataFrame:
         """データフレームのタグを正規化する
