@@ -1,13 +1,12 @@
-from os import error
-import re
+from random import sample
 import pytest
 import polars as pl
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from PySide6.QtCore import QObject
+from PySide6.QtCore import Signal
 
 from genai_tag_db_tools.core.import_data import TagDataImporter, ImportConfig
-from genai_tag_db_tools.config import db_path, AVAILABLE_COLUMNS
+from genai_tag_db_tools.config import AVAILABLE_COLUMNS
 
 
 # テスト用のサンプルデータを定義
@@ -197,7 +196,7 @@ sample_data_cases = [
     # ケース 9: 実際のhf_datasetを使用したテスト
     {
         "name": "hf_dataset",
-        "data": TagDataImporter.load_hf_dataser(
+        "data": TagDataImporter.load_hf_dataset(
             "hf://datasets/p1atdev/danbooru-ja-tag-pair-20241015/data/train-00000-of-00001.parquet"
         ),
         "mapping_input": [
@@ -375,10 +374,21 @@ def test_normalize_typing(importer: TagDataImporter):
     # メソッドを実行
     df_normalized = importer._normalize_typing(df)
 
-    # データ型が str から list に変換されていることを確認
     type_dict = df_normalized.schema
-    assert type_dict["deprecated_tags"] == pl.List
-    assert type_dict["translation"] == pl.List
+    assert type_dict["deprecated_tags"] == pl.List(pl.Utf8)
+    assert type_dict["translation"] == pl.List(pl.Utf8)
+    assert df_normalized.select(pl.col("deprecated_tags")).to_series().to_list() == [
+        "str",
+        "で",
+        "格納",
+        "されてる",
+    ]
+    assert df_normalized.select(pl.col("translation")).to_series().to_list() == [
+        "リスト",
+        "で",
+        "格納",
+        "されている",
+    ]
 
 
 @pytest.mark.parametrize("sample_case", sample_data_cases, ids=sample_data_ids)
@@ -392,10 +402,9 @@ def test_normalize_typing_param(importer: TagDataImporter, sample_case):
     # データ型が正しく変換されていることを確認
     for col, expected_type in AVAILABLE_COLUMNS.items():
         if col in df_normalized.columns:
-            dtype = getattr(pl, expected_type, None)
-            if dtype is None:
+            if expected_type is None:
                 raise ValueError(f"無効なデータ型: {expected_type}")
-            assert df_normalized.schema[col] == dtype
+            assert df_normalized.schema[col] == expected_type
 
 
 def test_normalize_tags_append(importer: TagDataImporter):
@@ -428,10 +437,13 @@ def test_normalize_tags_empty_source(importer: TagDataImporter, sample_case):
     # 'source_tag'カラムをNoneに設定して空にする
     source_null = df.with_columns(pl.lit(None).cast(pl.Utf8).alias("source_tag"))
 
-    # メソッドを実行
-    with pytest.raises(ValueError) as exc_info:
-        importer._normalize_tags(source_null)
-    print(exc_info.value)
+    if sample_case["name"] == "deprecated_tags":
+        # ケース2ではエラーが発生しないことを確認
+        result = importer._normalize_tags(source_null)
+    else:
+        # その他のケースでは ValueError が発生することを確認
+        with pytest.raises(ValueError):
+            importer._normalize_tags(source_null)
 
 
 @pytest.mark.parametrize("sample_case", sample_data_cases, ids=sample_data_ids)
@@ -448,17 +460,21 @@ def test_normalize_tags_no_source_tag(importer: TagDataImporter, sample_case):
     else:
         drop_source = df
 
-    # メソッドを実行 tyep_id と count だけのデータフレームを送る
-    with pytest.raises(KeyError) as exc_info:
-        importer._normalize_tags(drop_source)
-    print(exc_info.value)
+    if sample_case["name"] == "deprecated_tags":
+        # ケース2ではエラーが発生しないことを確認
+        result = importer._normalize_tags(drop_source)
+    else:
+        # メソッドを実行 tyep_id と count だけのデータフレームを送る
+        with pytest.raises(KeyError) as exc_info:
+            importer._normalize_tags(drop_source)
+        print(exc_info.value)
 
 
 @pytest.mark.parametrize("sample_case", sample_data_cases, ids=sample_data_ids)
 def test_normalize_translation_normal(importer, sample_case, mock_get_format_id):
     """翻訳の処理をテスト"""
     # テスト用のデータフレームを作成
-    df = pl.DataFrame(sample_case["data"])
+    case_df = pl.DataFrame(sample_case["data"])
 
     # `self.tag_search.get_format_id` を `mock_get_format_id` でモック
     user_inputs = (
@@ -466,15 +482,18 @@ def test_normalize_translation_normal(importer, sample_case, mock_get_format_id)
         + sample_case["mapping_input"]
         + [sample_case.get("format_id_input", "")]
     )
-
     with patch.object(importer.tag_search, "get_format_id", mock_get_format_id):
         # 入力をモック化（必要に応じて変更）
         with patch("builtins.input", side_effect=user_inputs):
-            add_db_df, _ = importer.configure_import(df)  # 新しいデータフレームを取得
+            add_db_df, _ = importer.configure_import(case_df)
 
     if "translation" in add_db_df.columns:
-        # メソッドを実行
-        df_normalize_translation = importer._normalize_translations(add_db_df)
+        df_normalized = importer._normalize_typing(add_db_df)
+        # 暫定的な tag_id を追加
+        df_with_tag_id = df_normalized.with_columns(
+            pl.arange(1, df_normalized.height + 1).alias("tag_id")
+        )
+        df_normalize_translation = importer._normalize_translations(df_with_tag_id)
 
         # translation 中の カンマ が含まれていないことを確認
         for translation in df_normalize_translation["translation"]:
@@ -487,6 +506,18 @@ def test_normalize_translation_normal(importer, sample_case, mock_get_format_id)
     else:
         # translation がない場合は何もしない
         assert True
+
+
+@pytest.mark.parametrize("sample_case", sample_data_cases, ids=sample_data_ids)
+def test_import_data(
+    importer: TagDataImporter, sample_case, sample_config: ImportConfig
+):
+    """インポートデータのテスト"""
+    case_df = pl.DataFrame(sample_case["data"])
+    importer.import_data(case_df, sample_config)
+
+    # 途中でキャンセルされていないことを確認
+    assert importer._cancel_flag is False
 
 
 def test_cancel_import(importer: TagDataImporter):

@@ -185,12 +185,15 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
             column_names=list(mapping.values()),
         )
 
-        # UI要素の状態を更新
-        self.setControlsEnabled(False)
-        self.cancelButton.setText("キャンセル")
+        try:
+            # UI要素の状態を更新
+            self.setControlsEnabled(False)
+            self.cancelButton.setText("キャンセル")
 
-        # インポート開始
-        self.importer.import_data(new_df, config)
+            # インポート開始
+            self.importer.import_data(new_df, config)
+        except ValueError as e:
+            self.setControlsEnabled(True)
 
     @Slot()
     def on_sourceTagCheckBox_stateChanged(self):
@@ -244,9 +247,8 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
         self.on_sourceTagCheckBox_stateChanged()
 
     @Slot()
-    def on_languageComboBox_currentTextChanged(self, language: str):
+    def on_languageComboBox_currentTextChanged(self):
         """言語が変更されたときの処理"""
-        self.language = language
         self.on_sourceTagCheckBox_stateChanged()
 
     def showHeaderMenu(self, pos):
@@ -256,7 +258,7 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
 
         # マッピング選択のサブメニューを作成
         mapping_menu = menu.addMenu("マッピング")
-        for mapped_name in ["未選択"] + AVAILABLE_COLUMNS:
+        for mapped_name in ["未選択"] + list(AVAILABLE_COLUMNS.keys()):
             action = mapping_menu.addAction(mapped_name)
             # アクションがトリガーされたときに対応するメソッドを呼び出す
             # functools.partialを使用して引数を渡す
@@ -265,7 +267,7 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
             )
 
         # メニューを表示
-        menu.exec_(self.dataPreviewTable.horizontalHeader().mapToGlobal(pos))
+        menu.exec(self.dataPreviewTable.horizontalHeader().mapToGlobal(pos))
 
     def set_column_mapping(self, column, mapped_name):
         """指定されたカラムにマッピングを設定する"""

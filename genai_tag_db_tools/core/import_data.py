@@ -5,7 +5,7 @@ import sqlite3
 from dataclasses import dataclass, field
 
 import polars as pl
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, Slot
 
 from genai_tag_db_tools.core.tag_search import TagSearcher
 from genai_tag_db_tools.cleanup_str import TagCleaner
@@ -52,9 +52,9 @@ class TagDataImporter(QObject):
             pl.DataFrame: 読み込んだデータフレーム
         """
         # 一行目だけを読み込んで `AVAILABLE_COLUMNS` に含まれるカラム名があるか確認
-        with open(csv_file_path, "r") as f:
+        with open(csv_file_path, "r", encoding="utf-8") as f:
             first_line = f.readline().strip()
-            if any(col in first_line for col in AVAILABLE_COLUMNS.keys()):
+            if any(col in first_line for col in AVAILABLE_COLUMNS):
                 TagDataImporter.logger.info(
                     f"ヘッダありとしてCSVファイルを読み込み: {csv_file_path}"
                 )
@@ -66,7 +66,7 @@ class TagDataImporter(QObject):
                 return pl.read_csv(csv_file_path, has_header=False)
 
     @staticmethod
-    def load_hf_dataser(repository: str) -> pl.DataFrame:
+    def load_hf_dataset(repository: str) -> pl.DataFrame:
         """Hugging Face Datasetのデータを読み込む
 
         Args:
@@ -134,6 +134,7 @@ class TagDataImporter(QObject):
 
         # カラムのリネームを実行
         add_db_df = source_df.rename(column_mappings)
+        add_db_df = self._normalize_tags(add_db_df)
 
         # 最終的なカラム名を取得
         final_columns = [
@@ -188,57 +189,156 @@ class TagDataImporter(QObject):
         Returns:
             pl.DataFrame: 正規化されたデータフレーム
         """
-        for col, col_type in AVAILABLE_COLUMNS.items():
-            dtype = getattr(pl, col_type)
+        typed_columns = []
+        for col, expected_type in AVAILABLE_COLUMNS.items():
             if col not in df.columns:
                 continue
-            if dtype == "List":
-                df = df.with_columns(pl.col(col).str.split(",").alias(col))
-            else:
-                df = df.with_columns(pl.col(col).cast(dtype).alias(col))
-        return df
+
+            actual_type = df[col].dtype
+            if actual_type != expected_type:
+                self.logger.debug(
+                    f"列 '{col}' の型を {actual_type} から {expected_type} に変換します。"
+                )
+                try:
+                    typed_columns.append(pl.col(col).cast(expected_type).alias(col))
+                except Exception as e:
+                    self.logger.error(
+                        f"列 '{col}' を {expected_type} にキャスト中にエラーが発生しました: {e}"
+                    )
+                    raise
+
+        if typed_columns:
+            typed_df = df.with_columns(typed_columns)
+        else:
+            self.logger.debug(
+                "キャストが必要な列がありません。元のデータフレームを返します。"
+            )
+            typed_df = df
+
+        # deprecated_tags の分割
+        if "deprecated_tags" in typed_df.columns:
+            typed_df = typed_df.with_columns(
+                pl.col("deprecated_tags")
+                .str.split(",")
+                .str.strip_chars()
+                .alias("deprecated_tags")
+            )
+
+        return typed_df
 
     def _normalize_tags(self, df: pl.DataFrame) -> pl.DataFrame:
-        """データフレームに source_tag から tag へ変換したデータを追加
+        """データフレームのタグを正規化する
+
+        以下のケースを処理:
+        1. source_tagのみ存在: source_tagから正規化したtagを生成
+        2. tagのみ存在: tagをsource_tagとして追加
+        3. 両方存在: そのまま使用
 
         Args:
             df (pl.DataFrame): 処理するデータフレーム
 
         Returns:
             pl.DataFrame: 正規化されたデータフレーム
+
+        Raises:
+            KeyError: source_tagとtagの両方がない場合
+            ValueError: source_tagにNone値が含まれている場合
         """
-        if "source_tag" not in df.columns:
-            error_msg = "「source_tag」列がデータフレームにありません"
+        has_source = "source_tag" in df.columns
+        has_tag = "tag" in df.columns
+
+        if not has_source and not has_tag:
+            # ケース4: 両方なし
+            error_msg = "「source_tag」または「tag」列が必要"
             TagDataImporter.logger.error(error_msg)
             raise KeyError(error_msg)
 
-        if df["source_tag"].is_null().all():
-            error_msg = "「source_tag」列にデータがありません"
-            TagDataImporter.logger.error(error_msg)
-            raise ValueError(error_msg)
+        # ケース1: source_tagのみ
+        if has_source and not has_tag:
+            for tag in df["source_tag"]:
+                if df["source_tag"].null_count() > 0:
+                    raise ValueError("'source_tag' カラムに None 値が含まれています。")
+                cleaned_tags = [
+                    TagCleaner.clean_format(tag) for tag in df["source_tag"]
+                ]
+                cleaned_tags_df = df.with_columns(pl.Series("tag", cleaned_tags))
+            return cleaned_tags_df
 
-        if "tag" not in df.columns:
-            cleaned_tags = [TagCleaner.clean_format(tag) for tag in df["source_tag"]]
-            df = df.with_columns(pl.Series("tag", cleaned_tags))
+        # ケース2: tagのみ
+        if not has_source and has_tag:
+            tag = [tag for tag in df["tag"]]
+            df = df.with_columns(pl.Series("source_tag", tag))
+            return df
+
+        # ケース3: 両方あり
         return df
 
-    def _insert_tags_to_db(self, df: pl.DataFrame) -> None:
-        """TAGSテーブルにデータを登録
+    def insert_tags(self, df: pl.DataFrame) -> None:
+        """TAGSテーブルに新規タグを登録
 
         Args:
-            df (pl.DataFrame): 処理するデータフレーム
+            df (pl.DataFrame): source_tagとtagカラムを含むデータフレーム
+
+        Raises:
+            Exception: データベース操作でエラーが発生した場合
         """
-        tag_df = df.select(["source_tag", "tag"])
-        tag_df.write_database("TAGS", self.conn)
+        try:
+            # 既存のタグを取得
+            existing_tags = pl.read_database(
+                "SELECT tag FROM TAGS WHERE tag IN {}".format(
+                    tuple(df["tag"].unique())
+                ),
+                self.conn,
+            )
+
+            # 新規タグを特定して登録
+            new_tags = df.filter(~pl.col("tag").is_in(existing_tags["tag"])).select(
+                ["source_tag", "tag"]
+            )
+
+            if not new_tags.is_empty():
+                new_tags.write_database("TAGS", self.conn)
+                self.logger.info(f"{len(new_tags)}件のタグを登録しました")
+
+        except Exception as e:
+            self.conn.rollback()
+            self.logger.error(f"タグ登録中にエラーが発生: {str(e)}")
+            raise
 
     def add_tag_id_column(self, df: pl.DataFrame) -> pl.DataFrame:
-        """データベースから  tag_id を取得 df にカラムとして追加
+        """データフレームにtag_idカラムを追加
 
         Args:
-            df (pl.DataFrame): 処理するデータフレーム
+            df (pl.DataFrame): source_tagとtagカラムを含むデータフレーム
+
+        Returns:
+            pl.DataFrame: tag_idカラムが追加されたデータフレーム
+
+        Raises:
+            Exception: データベース操作でエラーが発生した場合
         """
-        tag_ids = [self.tag_search.find_tag_id(tag) for tag in df["tag"]]
-        return df.with_columns(pl.Series("tag_id", tag_ids))
+        try:
+            # タグIDを一括で取得
+            tag_ids = pl.read_database(
+                "SELECT tag_id, tag FROM TAGS WHERE tag IN {}".format(
+                    tuple(df["tag"].unique())
+                ),
+                self.conn,
+            )
+
+            # タグとIDのマッピングを作成
+            tag_id_map = {
+                row["tag"]: row["tag_id"] for row in tag_ids.iter_rows(named=True)
+            }
+
+            # tag_idカラムを作成
+            tag_id_column = [tag_id_map.get(tag) for tag in df["tag"]]
+
+            return df.with_columns(pl.Series("tag_id", tag_id_column))
+
+        except Exception as e:
+            self.logger.error(f"タグID付与中にエラーが発生: {str(e)}")
+            raise
 
     def _normalize_translations(self, df: pl.DataFrame) -> pl.DataFrame:
         """翻訳データを正規化
@@ -251,10 +351,17 @@ class TagDataImporter(QObject):
         Returns:
             sprit_translation_df (pl.DataFrame): 翻訳語がカンマ区切りを分割したデータフレーム
         """
-        sprit_translation_df = df.explode("translation").with_columns(
-            pl.col("translation").cast(pl.Utf8)
-        )
-        return sprit_translation_df
+        df = df.select(["tag_id", "language", "translation"])
+        try:
+            # 1. translation カラム内の文字列をカンマで分割してリストに変換
+            sprit_translation_df = df.with_columns(
+                pl.col("translation").str.split(",")
+            ).explode("translation")
+
+            return sprit_translation_df
+        except Exception as e:
+            self.logger.error(f"翻訳データの正規化中にエラーが発生: {str(e)}")
+            raise
 
     def _process_tag_status(self, df: pl.DataFrame, config: ImportConfig) -> None:
         """TAG_STATUSテーブルの処理
@@ -288,14 +395,7 @@ class TagDataImporter(QObject):
             )
 
         if status_records:
-            self.cursor.executemany(
-                """
-                INSERT OR REPLACE INTO TAG_STATUS
-                (tag_id, format_id, type_id, alias, preferred_tag_id)
-                VALUES (?, ?, ?, ?, ?)
-            """,
-                status_records,
-            )
+            pass
 
     def _process_usage_counts(
         self, df: pl.DataFrame, tag_ids: dict[str, int], format_id: int
@@ -307,35 +407,27 @@ class TagDataImporter(QObject):
             tag_ids (dict[str, int]): source_tagからtag_idへのマッピング
             format_id (int): フォーマットID
         """
-        usage_counts = []
-        for row in df.iter_rows(named=True):
-            if "count" in row and row["count"]:
-                tag_id = tag_ids[row["source_tag"]]
-                count = int(row["count"])
-                usage_counts.append((tag_id, format_id, count))
-
-        if usage_counts:
-            self.cursor.executemany(
-                """
-                INSERT OR REPLACE INTO TAG_USAGE_COUNTS (tag_id, format_id, count)
-                VALUES (?, ?, ?)
-            """,
-                usage_counts,
-            )
+        pass
 
     def import_data(self, df: pl.DataFrame, config: ImportConfig) -> None:
-        """データをインポートするメソッド"""
+        """データのインポートを実行
+
+        Args:
+            df (pl.DataFrame): インポートするデータフレーム
+            config (ImportConfig): インポート設定
+        """
         try:
             self.process_started.emit("インポート開始")
-            normalized_df = self._normalize_tags(df)
-            self._insert_tags_to_db(normalized_df)
-            tag_ids = self.tag_search.get_tag_ids(normalized_df["tag"].to_list())
-            normalized_df = self._add_tag_id_column(normalized_df)
-            self._process_translations(normalized_df, config.language)
+            typed_df = self._normalize_typing(df)
+            cleaned_tags_df = self._normalize_tags(typed_df)
+            self.insert_tags(cleaned_tags_df)
+            normalized_df = self.add_tag_id_column(cleaned_tags_df)
+            if config.language:
+                self._normalize_translations(normalized_df)
             self._process_tag_status(normalized_df, config)
             self._process_usage_counts(normalized_df, tag_ids, config.format_id)
             self.conn.commit()
-            self.process_finished.emit("インポー���完了")
+            self.process_finished.emit("インポー完了")
         except Exception as e:
             self.error_occurred.emit(str(e))
             self.conn.rollback()
@@ -346,7 +438,6 @@ class TagDataImporter(QObject):
         TagDataImporter.logger.info("処理がキャンセルされました")
 
     def __del__(self):
-        """��ストラクタ - リソースのクリーンアップ"""
         try:
             if hasattr(self, "conn") and self.conn:
                 self.conn.commit()
