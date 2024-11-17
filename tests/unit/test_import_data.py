@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 from PySide6.QtCore import Signal
 
 from genai_tag_db_tools.core.import_data import TagDataImporter, ImportConfig
+from genai_tag_db_tools.cleanup_str import TagCleaner
 from genai_tag_db_tools.config import AVAILABLE_COLUMNS
 
 
@@ -23,7 +24,7 @@ sample_data_cases = [
         "auto_select_columns": ["source_tag", "type_id", "count"],
         # 自動で選択されなかったカラムは手入力で選択する
         # ["言語", 'tag', 'language', 'translation', 'deprecated_tags', 'created_at', 'updated_at', "フォーマット"]
-        "mapping_input": ["", "", "", "", "", "", ""],
+        "mapping_input": ["", "", "", "", "", "", "", ""],
         "language_input": "",
         "format_id_input": "danbooru",
         # assertのフォーマットID
@@ -38,7 +39,7 @@ sample_data_cases = [
             "deprecated_tags": [["tag_4", "tag_5"], ["tag_6", "tag_7"]],
         },
         "auto_select_columns": ["tag", "deprecated_tags"],
-        "mapping_input": ["", "", "", "", "", "", "", ""],
+        "mapping_input": ["", "", "", "", "", "", "", "", ""],
         "language_input": "",
         "format_id_input": "danbooru",
         "format_id": 1,
@@ -55,6 +56,7 @@ sample_data_cases = [
         },
         "auto_select_columns": ["source_tag", "type_id", "count", "deprecated_tags"],
         "mapping_input": [
+            "",
             "",
             "",
             "",
@@ -97,7 +99,7 @@ sample_data_cases = [
             "created_at",
             "updated_at",
         ],
-        "mapping_input": ["", "", "", "", ""],
+        "mapping_input": ["", "", "", "", "", ""],
         "language_input": "",
         "format_id_input": "e621",
         "format_id": 2,
@@ -144,7 +146,7 @@ sample_data_cases = [
             "zh-Hant": ["標籤1", "標籤2"],
         },
         "auto_select_columns": ["source_tag", "type_id"],
-        "mapping_input": ["", "", "", "", "", "", "", ""],
+        "mapping_input": ["", "", "", "", "", "", "", "", ""],
         "language_input": "zh-Hant",
         "format_id_input": "",
         "format_id": 0,
@@ -162,6 +164,7 @@ sample_data_cases = [
             "column_3",
             "",
             "",
+            "",
             "column_4",
             "",
             "",
@@ -176,6 +179,8 @@ sample_data_cases = [
         "name": "e621_tags_jsonl",
         "data": TagDataImporter.read_csv(Path("tests/resource/case_04.csv")),
         "mapping_input": [
+            "",
+            "",
             "",
             "",
             "",
@@ -202,6 +207,7 @@ sample_data_cases = [
         "mapping_input": [
             "other_names",
             "title",
+            "",
             "",
             "",
             "",
@@ -243,7 +249,7 @@ sample_csv_cases = [
             "tag_4, tag_5": [["tag_6", "tag_7"], ["tag_8", "tag_9"]],
             "format_id": 1,
         },
-        "auto_select_columns": ["", "", "", "", "format_id"],
+        "auto_select_columns": ["", "", "", "", "", "format_id"],
         "mapping_input": ["source_tag", "type_id", "count", "deprecated_tags", ""],
     }
 ]
@@ -553,3 +559,66 @@ def test_import_data_signals(
     start_signal.assert_called_once_with("import")
     assert progress_signal.called
     finish_signal.assert_called_once_with("import")
+
+
+@pytest.mark.parametrize("sample_case", sample_data_cases, ids=sample_data_ids)
+def test_normalize_deprecated_tags(importer: TagDataImporter, sample_case):
+    """
+    非推奨タグの正規化をテスト
+    """
+    # テスト用のデータフレームを作成
+    df = pl.DataFrame(sample_case["data"])
+
+    if "deprecated_tags" in df.columns:
+        # tag_idカラムを追加
+        df = df.with_columns(pl.arange(1, df.height + 1).alias("tag_id"))
+        # メソッドを実行
+        df_normalized = importer._normalize_deprecated_tags(df)
+
+        # 非推奨タグが正しく分割されていることを確認
+        deprecated_tags = df_normalized["deprecated_tags"].to_list()
+        for tags in deprecated_tags:
+            assert isinstance(tags, str)
+            assert "," not in tags  # カンマが含まれていないことを確認
+
+        # タグが正しく正規化されていることを確認
+        cleaned_tags = [TagCleaner.clean_format(tag) for tag in deprecated_tags]
+        assert deprecated_tags == cleaned_tags
+    else:
+        # 非推奨タグが存在しない場合は何もしない
+        assert True
+
+
+def test_normalize_deprecated_tags_empty(importer: TagDataImporter):
+    """
+    非推奨タグが空の場合のテスト
+    """
+    # テスト用のデータフレームを作成
+    df = pl.DataFrame(
+        {
+            "tag_id": [1, 2],
+            "deprecated_tags": [None, None],
+        }
+    )
+
+    # メソッドを実行
+    df_normalized = importer._normalize_deprecated_tags(df)
+
+    # 非推奨タグが空の場合は空のままであることを確認
+    assert df_normalized["deprecated_tags"].to_list() == [None, None]
+
+
+def test_normalize_deprecated_tags_no_column(importer: TagDataImporter):
+    """
+    非推奨タグのカラムが存在しない場合のテスト
+    """
+    # テスト用のデータフレームを作成
+    df = pl.DataFrame(
+        {
+            "tag_id": [1, 2],
+        }
+    )
+
+    # メソッドを実行
+    with pytest.raises(Exception):
+        importer._normalize_deprecated_tags(df)

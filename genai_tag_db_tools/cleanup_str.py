@@ -1,4 +1,5 @@
 import re
+from functools import lru_cache
 from typing import Set
 
 from genai_tag_db_tools.core.tag_search import initialize_tag_searcher
@@ -60,6 +61,7 @@ class TagCleaner:
     def __init__(self):
         self.tag_searcher = initialize_tag_searcher()
 
+    @lru_cache(maxsize=None)
     @staticmethod
     def clean_format(text: str) -> str:
         """

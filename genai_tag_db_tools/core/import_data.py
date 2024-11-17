@@ -181,7 +181,7 @@ class TagDataImporter(QObject):
             return self.tag_search.get_format_id(format_name)
 
     def _normalize_typing(self, df: pl.DataFrame) -> pl.DataFrame:
-        """データフレームの型を正規化"""
+        """dfの型を正規化"""
         for col, expected_type in AVAILABLE_COLUMNS.items():
             if col not in df.columns:
                 continue
@@ -316,7 +316,12 @@ class TagDataImporter(QObject):
             # tag_idカラムを作成
             tag_id_column = [tag_id_map.get(tag) for tag in df["tag"]]
 
-            return df.with_columns(pl.Series("tag_id", tag_id_column))
+            df = df.with_columns(pl.Series("tag_id", tag_id_column))
+            columns = list(AVAILABLE_COLUMNS.keys())
+            # データフレーム内に存在する列だけを選択
+            existing_columns = [col for col in columns if col in df.columns]
+            df_selected = df.select(existing_columns)
+            return df_selected
 
         except Exception as e:
             self.logger.error(f"タグID付与中にエラーが発生: {str(e)}")
@@ -336,13 +341,46 @@ class TagDataImporter(QObject):
         df = df.select(["tag_id", "language", "translation"])
         try:
             # 1. translation カラム内の文字列をカンマで分割してリストに変換
-            sprit_translation_df = df.with_columns(
-                pl.col("translation").str.split(",")
-            ).explode("translation")
+            sprit_translation_df = df.select(["tag_id", pl.col("translation")]).explode(
+                "translation"
+            )
 
             return sprit_translation_df
         except Exception as e:
             self.logger.error(f"翻訳データの正規化中にエラーが発生: {str(e)}")
+            raise
+
+    def _normalize_deprecated_tags(self, df: pl.DataFrame) -> pl.DataFrame:
+        """非推奨タグの正規化
+
+        非推奨タグがリストである場合、それぞれの非推奨タグを別の行に分割する
+        分割後にタグの正則化処理
+
+        Args:
+            df (pl.DataFrame): 処理するデータフレーム
+
+        Returns:
+            split_deprecated_df (pl.DataFrame): 非推奨タグがカンマ区切りを分割したデータフレーム
+        """
+        df = df.select(["tag_id", "deprecated_tags"])
+        try:
+            # deprecated_tags カラムが存在するか確認
+            if "deprecated_tags" not in df.columns:
+                raise Exception("deprecated_tags カラムが存在しません")
+
+            # deprecated_tags を展開
+            split_deprecated_df = df.select(
+                ["tag_id", pl.col("deprecated_tags")]
+            ).explode("deprecated_tags")
+
+            # deprecated_tags のタグを正規化
+            normalized_deprecated_tags = split_deprecated_df.with_columns(
+                pl.col("deprecated_tags").map_elements(TagCleaner.clean_format)
+            )
+
+            return normalized_deprecated_tags
+        except Exception as e:
+            self.logger.error(f"非推奨タグの正規化中にエラーが発生: {str(e)}")
             raise
 
     def _process_tag_status(self, df: pl.DataFrame, config: ImportConfig) -> None:
@@ -403,9 +441,11 @@ class TagDataImporter(QObject):
             typed_df = self._normalize_typing(df)
             cleaned_tags_df = self._normalize_tags(typed_df)
             self.insert_tags(cleaned_tags_df)
-            normalized_df = self.add_tag_id_column(cleaned_tags_df)
-            if config.language:
-                self._normalize_translations(normalized_df)
+            add_id_df = self.add_tag_id_column(cleaned_tags_df)
+            if config.language != "None":
+                sprit_translation_df = self._normalize_translations(add_id_df)
+            if "deprecated_tags" in add_id_df.columns:
+                sprit_deprecated_df = self._normalize_deprecated_tags(add_id_df)
             self._process_tag_status(normalized_df, config)
             self._process_usage_counts(normalized_df, tag_ids, config.format_id)
             self.conn.commit()

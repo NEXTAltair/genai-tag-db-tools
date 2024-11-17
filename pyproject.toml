@@ -10,13 +10,13 @@ name = "genai-tag-db-tools"  # パッケージ名 ハイフン推奨なぜかは
 version = "0.1.0"  # バージョン番号
 description = "AI生成画像のタグ管理ツール"  # プロジェクトの説明
 requires-python = ">=3.12"  # 必要なPythonバージョン
+SQLAlchemy = ">=2.0.0"  # データベースライブラリ
 
 # 必要なパッケージの依存関係
 dependencies = [
     "PySide6>=6.8.0.2",        # Qt GUIフレームワーク
-    "pandas>=2.2.2",           # データ分析ライブラリ
     "superqt>=0.6.7",          # PySide6の拡張機能
-    "polars>=1.9.0",           # 高性能データフレームライブラリ
+    "polars[all]>=1.9.0",           # 高性能データフレームライブラリ [all] は全機能をインストール必要ない部分は後で削る
 ]
 
 # プロジェクトの分類情報
@@ -30,6 +30,18 @@ dev = [
     "pytest>=8.3.3",          # テストフレームワーク
     "pytest-cov>=6.0.0",      # テストカバレッジツール
     "pytest-qt",        # Qtアプリケーションのテストツール
+]
+
+[tool.ruff]
+exclude = [
+    "*/genai_tag_db_tools/config.py", # 改行位置を変更されるととても見づらい
+    "*/__pycache__",
+    "*/tests/*",
+    "*/shibokensupport/*",
+    "*/site-packages/*",
+    "*/pyscript",
+    "*/signature_bootstrap.py",
+    "*/__init__.py",
 ]
 
 # pytestの設定オプション

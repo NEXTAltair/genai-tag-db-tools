@@ -97,7 +97,7 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
         self.logger = logging.getLogger(__name__)
         self.setupUi(self)
         self.tag_searcher = TagSearcher()
-        self.format_id = 1
+        self.format_id = 0
         self.language = "None"
 
         # モデルの設定
@@ -193,6 +193,7 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
             # インポート開始
             self.importer.import_data(new_df, config)
         except ValueError as e:
+            self.logger.error("インポートエラー: %s", e)
             self.setControlsEnabled(True)
 
     @Slot()
