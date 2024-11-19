@@ -367,6 +367,13 @@ class TagDatabase:
             TagTypeFormatMapping(format_id=2, type_id=7, type_name_id=7),  # meta
             TagTypeFormatMapping(format_id=2, type_id=8, type_name_id=8),  # lore
             # Format 3 (derpibooru)
+            TagTypeFormatMapping(format_id=3, type_id=0, type_name_id=1),  # general
+            TagTypeFormatMapping(
+                format_id=3, type_id=1, type_name_id=15
+            ),  # content-official
+            TagTypeFormatMapping(format_id=3, type_id=2, type_name_id=1),  # general
+            TagTypeFormatMapping(format_id=3, type_id=3, type_name_id=5),  # species
+            TagTypeFormatMapping(format_id=3, type_id=4, type_name_id=9),  # oc
             TagTypeFormatMapping(format_id=3, type_id=5, type_name_id=10),  # rating
             TagTypeFormatMapping(format_id=3, type_id=6, type_name_id=11),  # body-type
             TagTypeFormatMapping(format_id=3, type_id=7, type_name_id=7),  # meta
