@@ -4,11 +4,18 @@ gtdt/
 genai-tag-db-tools.pyproject
 genai-tag-db-tools.pyproject.user
 initial-analysis.json
-*/alembic.ini
-*/alembic/
+
+# database mygration files
+alembic.ini
+extracted_models.py
+tag_database_alembic/
+extract_schema.py
+xml/
 
 #database backup files
 tags_v3.db.*
+tags_v*_*.db
+
 
 #workspace file
 .pytest_cache/
