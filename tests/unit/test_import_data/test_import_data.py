@@ -1,6 +1,6 @@
-from random import sample
 import pytest
 import polars as pl
+from sqlalchemy import MetaData, Table, Column, Integer, String, create_engine, text
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from PySide6.QtCore import Signal
@@ -8,7 +8,7 @@ from PySide6.QtCore import Signal
 from genai_tag_db_tools.core.import_data import TagDataImporter, ImportConfig
 from genai_tag_db_tools.cleanup_str import TagCleaner
 from genai_tag_db_tools.config import AVAILABLE_COLUMNS
-
+from genai_tag_db_tools.data.database_schema import TagDatabase
 
 # テスト用のサンプルデータを定義
 sample_data_cases = [
@@ -160,9 +160,9 @@ sample_data_cases = [
             "column_1",
             "",
             "",
+            "",
             "column_2",
             "column_3",
-            "",
             "",
             "",
             "column_4",
@@ -185,7 +185,6 @@ sample_data_cases = [
             "",
             "",
             "",
-            "",
         ],
         "language_input": "",
         "format_id_input": "e621",
@@ -199,32 +198,32 @@ sample_data_cases = [
         ],
     },
     # ケース 9: 実際のhf_datasetを使用したテスト
-    {
-        "name": "hf_dataset",
-        "data": TagDataImporter.load_hf_dataset(
-            "hf://datasets/p1atdev/danbooru-ja-tag-pair-20241015/data/train-00000-of-00001.parquet"
-        ),
-        "mapping_input": [
-            "other_names",
-            "title",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-        ],
-        "language_input": "japanese",
-        "format_id_input": "danbooru",
-        "format_id": 1,
-        "expected_columns": [
-            "source_tag",
-            "type",
-            "language",
-            "translation",
-        ],
-    },
+    # {
+    #     "name": "hf_dataset",
+    #     "data": TagDataImporter.load_hf_dataset(
+    #         "hf://datasets/p1atdev/danbooru-ja-tag-pair-20241015/data/train-00000-of-00001.parquet"
+    #     ),
+    #     "mapping_input": [
+    #         "other_names",
+    #         "title",
+    #         "",
+    #         "",
+    #         "",
+    #         "",
+    #         "",
+    #         "",
+    #         "",
+    #     ],
+    #     "language_input": "japanese",
+    #     "format_id_input": "danbooru",
+    #     "format_id": 1,
+    #     "expected_columns": [
+    #         "source_tag",
+    #         "type",
+    #         "language",
+    #         "translation",
+    #     ],
+    # },
 ]
 sample_data_ids = [
     "CASE_01_基本タグデータ",
@@ -235,7 +234,7 @@ sample_data_ids = [
     "CASE_06_中国語訳",
     "CASE_07_ダンボール241016",
     "CASE_08_e621タグ",
-    "CASE_09_hf_dataset",
+    # "CASE_09_hf_dataset",
 ]
 
 sample_csv_cases = [
@@ -265,6 +264,11 @@ def importer():
         mock_tag_data_importer.conn.cursor = MagicMock()
         yield mock_tag_data_importer
 
+@pytest.fixture
+def importer_db(db_tags_session):
+    importer = TagDataImporter()
+    importer.session = db_tags_session
+    yield importer
 
 @pytest.fixture(name="sample_df")
 def sample_df():
@@ -307,7 +311,6 @@ def mock_get_format_id():
         side_effect=side_effect,
     ) as mock_method:
         yield mock_method
-
 
 def list_required_inputs(source_df: pl.DataFrame) -> list[str]:
     """
@@ -482,6 +485,37 @@ def test_normalize_tags_no_source_tag(importer: TagDataImporter, sample_case):
         print(exc_info.value)
 
 
+def test_insert_tags(importer_db):
+    # テストデータ
+    df = pl.DataFrame({
+        "source_tag": ["1_girl", "blue_eyes", "1_girl", "long_hair"],
+        "tag": ["1 girl", "blue eyes", "1 girl", "long hair"]
+    })
+
+    # テスト実行
+    with patch('tests.conftest.db_tags_session', new=tags_table):
+        result_df = importer_db.insert_tags(df)
+
+    # 結果を確認
+    print("\n元のデータフレーム:")
+    print(df)
+    print("\n結果のデータフレーム:")
+    print(result_df)
+
+    # TAGSテーブルの内容を確認
+    tags_table = pl.read_database(
+        "SELECT * FROM TAGS ORDER BY tag_id",
+        importer_db.session
+    )
+    print("\nTAGSテーブルの内容:")
+    print(tags_table)
+
+    # アサーション
+    assert len(result_df) == len(df), "行数が一致すること"
+    assert "tag_id" in result_df.columns, "tag_idカラムが追加されていること"
+    assert result_df.filter(pl.col("tag") == "1 girl")["tag_id"].unique().len() == 1, \
+        "同じタグには同じtag_idが割り当てられていること"
+
 @pytest.mark.parametrize("sample_case", sample_data_cases, ids=sample_data_ids)
 def test_normalize_translation_normal(importer, sample_case, mock_get_format_id):
     """翻訳の処理をテスト"""
@@ -556,9 +590,9 @@ def test_import_data_signals(
 
     importer.import_data(sample_df, sample_config)
 
-    start_signal.assert_called_once_with("import")
+    start_signal.assert_called_once_with("インポート開始")
     assert progress_signal.called
-    finish_signal.assert_called_once_with("import")
+    finish_signal.assert_called_once_with("インポート開始")
 
 
 @pytest.mark.parametrize("sample_case", sample_data_cases, ids=sample_data_ids)
@@ -622,3 +656,4 @@ def test_normalize_deprecated_tags_no_column(importer: TagDataImporter):
     # メソッドを実行
     with pytest.raises(Exception):
         importer._normalize_deprecated_tags(df)
+

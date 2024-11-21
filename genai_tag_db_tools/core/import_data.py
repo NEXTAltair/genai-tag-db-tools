@@ -6,9 +6,13 @@ from dataclasses import dataclass, field
 
 import polars as pl
 from PySide6.QtCore import QObject, Signal, Slot
+from sqlalchemy import select, Table, Column, String, Integer, MetaData
+
 
 from genai_tag_db_tools.core.tag_search import TagSearcher
 from genai_tag_db_tools.cleanup_str import TagCleaner
+from genai_tag_db_tools.data.database_schema import TagDatabase
+from genai_tag_db_tools.data.tag_repository import TagRepository
 
 # パッケージのグローバル変数をインポート
 from genai_tag_db_tools.config import db_path, AVAILABLE_COLUMNS
@@ -37,7 +41,10 @@ class TagDataImporter(QObject):
 
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
+        self.logger = TagDataImporter.logger
         self.conn = sqlite3.connect(db_path)
+        self.tag_db = TagDatabase()
+        self.tag_repo = TagRepository(self.tag_db.session)
         self.tag_search = TagSearcher()
         self._cancel_flag = False
 
@@ -255,36 +262,63 @@ class TagDataImporter(QObject):
         # ケース3: 両方あり
         return df
 
-    def insert_tags(self, df: pl.DataFrame) -> None:
-        """TAGSテーブルに新規タグを登録
+    def insert_tags(self, df: pl.DataFrame) -> pl.DataFrame:
+        """データフレームに tag_id カラムを追加し、必要に応じて新規タグをデータベースに登録
 
         Args:
-            df (pl.DataFrame): source_tagとtagカラムを含むデータフレーム
+            df: source_tag と tag カラムを含むデータフレーム
+
+        Returns:
+            pl.DataFrame: tag_id カラムが追加されたデータフレーム
 
         Raises:
+            KeyError: 必要なカラムが存在しない場合
             Exception: データベース操作でエラーが発生した場合
         """
         try:
             # 既存のタグを取得
-            existing_tags = pl.read_database(
-                "SELECT tag FROM TAGS WHERE tag IN {}".format(
-                    tuple(df["tag"].unique())
-                ),
-                self.conn,
+            unique_tags = df["tag"].unique().to_list()
+            existing_tag_map = self.tag_repo.get_tag_id_mapping(unique_tags)
+
+            # 既存タグの記録
+            for tag in existing_tag_map:
+                self.logger.info(f"既存タグを検出: {tag}")
+
+            # 新規タグを特定
+            new_tags = [
+                {"source_tag": row["source_tag"], "tag": row["tag"]}
+                for row in df.filter(
+                    ~pl.col("tag").is_in(existing_tag_map.keys())
+                ).to_dicts()
+            ]
+
+            if new_tags:
+                try:
+                    # 新規タグを登録
+                    self.tag_repo.bulk_insert_tags(new_tags)
+                    self.logger.info(f"新規タグを登録: {len(new_tags)}件")
+
+                    # 新規タグのIDを取得して既存のマッピングを更新
+                    new_tag_map = self.tag_repo.get_tag_id_mapping(
+                        [t["tag"] for t in new_tags]
+                    )
+                    existing_tag_map.update(new_tag_map)
+
+                except Exception as e:
+                    self.logger.error(f"新規タグ登録中にエラー: {str(e)}")
+                    raise
+
+            # tag_idカラムを追加
+            df = df.with_columns(
+                pl.Series(
+                    "tag_id", df["tag"].map_elements(lambda x: existing_tag_map.get(x))
+                )
             )
 
-            # 新規タグを特定して登録
-            new_tags = df.filter(~pl.col("tag").is_in(existing_tags["tag"])).select(
-                ["source_tag", "tag"]
-            )
-
-            if not new_tags.is_empty():
-                new_tags.write_database("TAGS", self.conn)
-                self.logger.info(f"{len(new_tags)}件のタグを登録しました")
+            return df
 
         except Exception as e:
-            self.conn.rollback()
-            self.logger.error(f"タグ登録中にエラーが発生: {str(e)}")
+            self.logger.error(f"df へ tag id 追加中にエラー: {str(e)}")
             raise
 
     def add_tag_id_column(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -440,6 +474,7 @@ class TagDataImporter(QObject):
             self.process_started.emit("インポート開始")
             typed_df = self._normalize_typing(df)
             cleaned_tags_df = self._normalize_tags(typed_df)
+            self.progress_updated.emit(10, "進行中")
             self.insert_tags(cleaned_tags_df)
             add_id_df = self.add_tag_id_column(cleaned_tags_df)
             if config.language != "None":
@@ -449,7 +484,7 @@ class TagDataImporter(QObject):
             self._process_tag_status(normalized_df, config)
             self._process_usage_counts(normalized_df, tag_ids, config.format_id)
             self.conn.commit()
-            self.process_finished.emit("インポー完了")
+            self.process_finished.emit("インポート完了")
         except Exception as e:
             self.error_occurred.emit(str(e))
             self.conn.rollback()

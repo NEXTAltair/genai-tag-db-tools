@@ -2,8 +2,8 @@ from logging import getLogger
 from typing import Optional
 from pathlib import Path
 from datetime import datetime
-from venv import create
 import polars as pl
+
 from sqlalchemy import (
     create_engine,
     StaticPool,
@@ -16,6 +16,8 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     CheckConstraint,
 )
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.orm import relationship, sessionmaker, Mapped, mapped_column
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -278,22 +280,80 @@ class TagTranslation(Base):
 
 
 class TagDatabase:
-    def __init__(self):
+    """タグデータベース管理クラス"""
+
+    def __init__(
+        self,
+        engine: Optional[Engine] = None,
+        session: Optional[Session] = None,
+        init_master: bool = True,
+    ):
+        """
+        Args:
+            engine: SQLAlchemyのエンジン。Noneの場合はデフォルトのエンジンを作成
+            session: SQLAlchemyのセッション。Noneの場合はエンジンから新規作成
+            init_master: マスターデータを初期化するかどうか。デフォルトはTrue
+        """
         self.logger = getLogger(__name__)
-        self.engine = engine
-        self.conn = self.engine.connect()
-        self.ctx = pl.SQLContext()
-        self.Session = sessionmaker(bind=self.engine)
-        self.create_tables()
+
+        if engine is None and session is None:
+            # デフォルトの設定でエンジンを作成
+            self.engine = create_engine(
+                f"sqlite:///{db_path.absolute()}",
+                connect_args={"check_same_thread": False},
+                poolclass=StaticPool,
+                echo=True,
+            )
+        elif engine is not None:
+            self.engine = engine
+        else:
+            self.engine = session.get_bind()
+
+        # セッションの設定
+        if session is not None:
+            self.session = session
+        else:
+            self.Session = sessionmaker(bind=self.engine)
+            self.session = Session()
+
+        # デフォルトの場合のみテーブルとマスターデータを作成
+        if init_master:
+            self.create_tables()
+            self.init_master_data()
+
+    def init_master_data(self):
+        """マスターデータの初期化をまとめて実行"""
         self.init_tagformat()
         self.init_tagtypename()
         self.init_tagtypeformatmapping()
 
+    def create_tables(self):
+        """テーブルの作成"""
+        Base.metadata.create_all(self.engine)
+
+    @classmethod
+    def create_test_instance(cls, engine: Engine) -> "TagDatabase":
+        """テスト用のインスタンスを作成
+
+        Args:
+            engine: テスト用のエンジン
+
+        Returns:
+            TagDatabase: テスト用のインスタンス
+        """
+        return cls(engine=engine, init_master=False)
+
+    def cleanup(self):
+        """リソースのクリーンアップ"""
+        if hasattr(self, "session"):
+            self.session.close()
+
+    def __del__(self):
+        """デストラクタでクリーンアップを実行"""
+        self.cleanup()
+
     def create_session(self):
         return self.Session()
-
-    def create_tables(self):
-        Base.metadata.create_all(self.engine)
 
     def init_tagformat(self):
         """Initialize format data that should be registered at creation"""

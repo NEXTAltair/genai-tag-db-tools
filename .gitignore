@@ -34,3 +34,4 @@ tags_csv/
 # GOlemi-llm-apprentice/generate-project-summary 用除外設定
 .summaryignore
 *_project_summary.txt
+*/*/# Code Citations.md
