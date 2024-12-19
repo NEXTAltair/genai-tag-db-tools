@@ -75,10 +75,9 @@ python -m genai_tag_db_tools
 ```python
 from genai_tag_db_tools import some_module
 
-# 他プロジェクト内でのタグ管理機能の例
 ```
 
-## プロジェクト構造（例）
+## プロジェクト構造
 
 ```bash
 genai-tag-db-tools/
@@ -88,6 +87,8 @@ genai-tag-db-tools/
 │   ├── data/               # データファイル (SQLite DB 等)
 │   └── main.py             # エントリーポイント
 ├── tests/                  # テストコード
+├── tools/                  # ツールスクリプト
+├── docs/                   # ドキュメント
 ├── pyproject.toml          # プロジェクト設定
 └── README.md
 ```
@@ -95,7 +96,7 @@ genai-tag-db-tools/
 ## データベース概要
 
 主にSQLiteを用いてタグデータを管理する。
-以下はエンティティとリレーションを示したER図の例である。
+以下はエンティティとリレーションを示したER図。
 
 ### ER図
 
@@ -186,31 +187,6 @@ erDiagram
 6. [p1atdev/danbooru-ja-tag-pair-20241015](https://huggingface.co/datasets/p1atdev/danbooru-ja-tag-pair-20241015): danbooruタグの日本語翻訳データベース
 7. [toynya/Z3D-E621-Convnext](https://huggingface.co/toynya/Z3D-E621-Convnext): e621 tagger convnext model のタグcsv #TODO: まだ反映させてない
 8. [Updated danbooru.csv(2024-10-16) for WebUI Tag Autocomplete](https://civitai.com/models/862893?modelVersionId=965482): WebUI Tag Autocompleteのデフォルトのdanbooru.csvはやや古くなっているようなので、2024年10月16日時点での新しいデータに更新しました。#TODO: まだ反映させてない
-
-
-## 開発者向け情報
-
-### テスト実行
-
-```bash
-pytest
-```
-
-カバレッジ表示：
-
-```bash
-pytest --cov=genai_tag_db_tools --cov-report=term-missing
-```
-
-### コードスタイル
-
-`black`、`ruff`、`pyright`などを用いてコード品質・型チェックを実行可能。詳細は `pyproject.toml`を参照。
-
-```bash
-black genai_tag_db_tools
-ruff check genai_tag_db_tools
-pyright
-```
 
 ## ライセンス
 
