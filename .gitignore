@@ -4,6 +4,7 @@ gtdt/
 genai-tag-db-tools.pyproject
 genai-tag-db-tools.pyproject.user
 initial-analysis.json
+docs/_build
 
 # database mygration files
 alembic.ini
