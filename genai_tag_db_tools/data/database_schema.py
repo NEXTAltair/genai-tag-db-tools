@@ -1,5 +1,5 @@
 from logging import getLogger
-from typing import Optional
+from typing import Optional, Set
 from pathlib import Path
 from datetime import datetime
 import polars as pl
@@ -17,9 +17,15 @@ from sqlalchemy import (
     CheckConstraint,
 )
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.orm import relationship, sessionmaker, Mapped, mapped_column
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import (
+    sessionmaker,
+    Session,
+    relationship,
+    sessionmaker,
+    Mapped,
+    mapped_column,
+    declarative_base,
+)
 
 # グローバル変数として db_path を定義
 db_path = Path("genai_tag_db_tools/data/tags_v4.db")
@@ -295,31 +301,39 @@ class TagDatabase:
             init_master: マスターデータを初期化するかどうか。デフォルトはTrue
         """
         self.logger = getLogger(__name__)
+        self._sessions: Set[Session] = set()  # セッション追跡セット
 
-        if engine is None and session is None:
-            # デフォルトの設定でエンジンを作成
+        if engine is not None:
+            self.engine = engine
+        elif session is not None:
+            self.engine = session.get_bind()
+        else:
             self.engine = create_engine(
                 f"sqlite:///{db_path.absolute()}",
                 connect_args={"check_same_thread": False},
                 poolclass=StaticPool,
                 echo=True,
             )
-        elif engine is not None:
-            self.engine = engine
-        else:
-            self.engine = session.get_bind()
 
         # セッションの設定
         if session is not None:
             self.session = session
         else:
-            self.Session = sessionmaker(bind=self.engine)
-            self.session = Session()
+            self.sessionmaker = sessionmaker(bind=self.engine)
+            self.session = self.create_session()
+
+        if init_master:
+            self.init_master_data()
 
         # デフォルトの場合のみテーブルとマスターデータを作成
         if init_master:
             self.create_tables()
             self.init_master_data()
+
+    def create_session(self) -> Session:
+        session = self.sessionmaker()
+        self._sessions.add(session)
+        return session
 
     def init_master_data(self):
         """マスターデータの初期化をまとめて実行"""
@@ -345,15 +359,18 @@ class TagDatabase:
 
     def cleanup(self):
         """リソースのクリーンアップ"""
-        if hasattr(self, "session"):
-            self.session.close()
+        for session in list(self._sessions):
+            if session:
+                try:
+                    session._close_impl(invalidate=True)
+                except Exception as e:
+                    self.logger.error(f"セッションのクローズ中にエラー: {e}")
+                finally:
+                    self._sessions.discard(session)
 
     def __del__(self):
         """デストラクタでクリーンアップを実行"""
         self.cleanup()
-
-    def create_session(self):
-        return self.Session()
 
     def init_tagformat(self):
         """Initialize format data that should be registered at creation"""
@@ -364,14 +381,23 @@ class TagDatabase:
             TagFormat(format_id=3, format_name="derpibooru", description=""),
         ]
         session = self.create_session()
-        for data in initial_data:
-            existing = (
-                session.query(TagFormat).filter_by(format_name=data.format_name).first()
-            )
-            if not existing:
-                session.add(data)
-        session.commit()
-        session.close()
+        try:
+            for data in initial_data:
+                existing = (
+                    session.query(TagFormat)
+                    .filter_by(format_name=data.format_name)
+                    .first()
+                )
+                if not existing:
+                    session.add(data)
+            session.commit()
+        except Exception as e:
+            self.logger.error(f"TagFormatの初期化中にエラー: {e}")
+            session.rollback()
+            raise
+        finally:
+            session.close()
+            self._sessions.discard(session)
 
     def init_tagtypename(self):
         """Initialize tag type names"""
@@ -395,16 +421,23 @@ class TagDatabase:
             TagTypeName(type_name_id=16, type_name="content-fanmade", description=""),
         ]
         session = self.create_session()
-        for data in initial_data:
-            existing = (
-                session.query(TagTypeName)
-                .filter_by(type_name_id=data.type_name_id)
-                .first()
-            )
-            if not existing:
-                session.add(data)
-        session.commit()
-        session.close()
+        try:
+            for data in initial_data:
+                existing = (
+                    session.query(TagTypeName)
+                    .filter_by(type_name_id=data.type_name_id)
+                    .first()
+                )
+                if not existing:
+                    session.add(data)
+            session.commit()
+        except Exception as e:
+            self.logger.error(f"TagTypeNameの初期化中にエラー: {e}")
+            session.rollback()
+            raise
+        finally:
+            session.close()
+            self._sessions.discard(session)
 
     def init_tagtypeformatmapping(self):
         """Initialize tag type format mappings"""
@@ -445,16 +478,23 @@ class TagDatabase:
             ),  # content-fanmade
         ]
         session = self.create_session()
-        for data in initial_data:
-            existing = (
-                session.query(TagTypeFormatMapping)
-                .filter_by(format_id=data.format_id, type_id=data.type_id)
-                .first()
-            )
-            if not existing:
-                session.add(data)
-        session.commit()
-        session.close()
+        try:
+            for data in initial_data:
+                existing = (
+                    session.query(TagTypeFormatMapping)
+                    .filter_by(format_id=data.format_id, type_id=data.type_id)
+                    .first()
+                )
+                if not existing:
+                    session.add(data)
+            session.commit()
+        except Exception as e:
+            self.logger.error(f"TagTypeFormatMappingの初期化中にエラー: {e}")
+            session.rollback()
+            raise
+        finally:
+            session.close()
+            self._sessions.discard(session)
 
     def get_formatnames(self):
         """Test function to get TAG_TYPE_NAME table"""

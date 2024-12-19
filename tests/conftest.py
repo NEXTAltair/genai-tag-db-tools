@@ -7,12 +7,12 @@ from sqlalchemy.pool import StaticPool
 from pathlib import Path
 from typing import Optional
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def engine():
-    """Create an SQLite in-memory database for testing"""
+    """テスト用に SQLite インメモリ データベースを作成"""
     engine = create_engine(
         "sqlite:///:memory:",
-        echo=False,
+        echo=True,
         connect_args={"check_same_thread": False},
         poolclass=StaticPool
     )
@@ -20,7 +20,9 @@ def engine():
 
 @pytest.fixture(scope="function")
 def db_session(engine) -> Session:
-    """Create a new database session for a test"""
+    """テスト用に新しいデータベース セッションを作成"""
+    connection = engine.connect()
+    transaction = connection.begin()
     Session = sessionmaker(bind=engine)
     session = Session()
 
@@ -28,4 +30,5 @@ def db_session(engine) -> Session:
         yield session
     finally:
         session.rollback()
-        session.close()
+        transaction.rollback()
+        connection.close()
