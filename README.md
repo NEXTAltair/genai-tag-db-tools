@@ -24,11 +24,11 @@
 ### 環境要件
 
 - Python 3.12以上
-- Windows 11対応（他OSは未検証）
+- Windows 11対応(他OSは未検証)
 
 ### インストール手順
 
-1. 仮想環境の作成（任意）
+1. 仮想環境の作成(任意)
 
    ```bash
    py -3.12 -m venv venv
@@ -173,7 +173,7 @@ erDiagram
 - **TAG_TYPE_NAME**: タグタイプ定義
 - **TAG_TYPE_FORMAT_MAPPING**: 各フォーマットとタイプを対応付け
 - **TAG_USAGE_COUNTS**: タグのフォーマット別使用回数
-- **TAG_STATUS**: タグの状態（エイリアス、推奨タグなど）を管理
+- **TAG_STATUS**: タグの状態(エイリアス、推奨タグなど)を管理
 
 ## データソース
 

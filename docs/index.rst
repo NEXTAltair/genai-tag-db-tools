@@ -9,7 +9,7 @@ genai-tag-db-tools ドキュメント
 
 主な機能
 ---------
-- タグの管理（登録、更新、検索、翻訳管理）
+- タグの管理(登録、更新、検索、翻訳管理)
 - SQLiteデータベース操作
 - PySide6ベースのGUIインタフェース
 - 他プロジェクトからのモジュール利用
@@ -19,12 +19,13 @@ genai-tag-db-tools ドキュメント
 
 .. toctree::
     :maxdepth: 2
-    :caption: コンテンツ
+    :caption: Contents
 
     getting_started
     usage_guide
     database_design
     dev_guide
+    source/modules
 
 索引
 ----

@@ -129,7 +129,7 @@ def migrate_tag_status(src_conn: sqlite3.Connection, dst_conn: sqlite3.Connectio
 def merge_master_data(
     src_conn: sqlite3.Connection, dst_conn: sqlite3.Connection, table_name: str
 ):
-    """マスターデータの統合（既存データを保持しつつ新規データを追加）"""
+    """マスターデータの統合(既存データを保持しつつ新規データを追加)"""
     logging.info(f"Merging master data for table: {table_name}")
 
     src_cursor = src_conn.cursor()

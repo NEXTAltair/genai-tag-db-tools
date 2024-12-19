@@ -33,7 +33,7 @@ def test_create_tables(tag_database_test):
 
     db = tag_database_test
 
-    # SQLAlchemyのインスペクター（Inspector）は、データベースのスキーマ情報を取得する
+    # SQLAlchemyのインスペクター(Inspector)は、データベースのスキーマ情報を取得する
     inspector = inspect(db.engine)
 
     db.create_tables()

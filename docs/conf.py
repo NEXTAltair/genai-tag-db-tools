@@ -2,13 +2,13 @@
 from pathlib import Path
 import sys
 
-# プロジェクトのルートディレクトリをパスに追加（必要に応じて調整）
+# プロジェクトのルートディレクトリをパスに追加(必要に応じて調整)
 sys.path.insert(0, Path(__file__).parents[1].as_posix())
 
 project = "genai-tag-db-tools"
 author = "NEXTAltair"
 
-# バージョン情報（必要に応じて記載）
+# バージョン情報(必要に応じて記載)
 version = "0.1.0"
 release = "0.1.0"
 
@@ -20,7 +20,7 @@ extensions = [
     "sphinx_rtd_theme",
 ]
 
-# Napoleon設定（Googleスタイル、NumPyスタイルDocstring対応など）
+# Napoleon設定(Googleスタイル、NumPyスタイルDocstring対応など)
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True
 
@@ -37,8 +37,8 @@ html_static_path = ["_static"]
 # テーマ設定
 html_theme = "sphinx_rtd_theme"
 
-# html_title設定（必要に応じて）
+# html_title設定(必要に応じて)
 html_title = "genai-tag-db-tools ドキュメント"
 
-# highlight設定等（必要に応じて）
+# highlight設定等(必要に応じて)
 pygments_style = "sphinx"

@@ -344,7 +344,7 @@ def test_configure_import(importer: TagDataImporter, sample_case, mock_get_forma
     )
 
     with patch.object(importer.tag_search, "get_format_id", mock_get_format_id):
-        # 入力をモック化（必要に応じて変更）
+        # 入力をモック化(必要に応じて変更)
         with patch("builtins.input", side_effect=user_inputs):
             add_db_df, config = importer.configure_import(
                 df
@@ -529,7 +529,7 @@ def test_normalize_translation_normal(importer, sample_case, mock_get_format_id)
         + [sample_case.get("format_id_input", "")]
     )
     with patch.object(importer.tag_search, "get_format_id", mock_get_format_id):
-        # 入力をモック化（必要に応じて変更）
+        # 入力をモック化(必要に応じて変更)
         with patch("builtins.input", side_effect=user_inputs):
             add_db_df, _ = importer.configure_import(case_df)
 

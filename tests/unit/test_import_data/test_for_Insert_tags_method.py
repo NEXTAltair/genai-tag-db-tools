@@ -68,8 +68,8 @@ def test_insert_tags_with_new_data(importer, caplog):
     mock_repo.get_tag_id_mapping.return_value = {}
     # bulk_insert_tags後の新規タグのIDマッピング
     mock_repo.get_tag_id_mapping.side_effect = [
-        {},  # 1回目の呼び出し（既存タグ検索）
-        {"new tag 1": 1, "new tag 2": 2}  # 2回目の呼び出し（新規タグ検索）
+        {},  # 1回目の呼び出し(既存タグ検索)
+        {"new tag 1": 1, "new tag 2": 2}  # 2回目の呼び出し(新規タグ検索)
     ]
     importer.tag_repo = mock_repo
 
