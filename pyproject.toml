@@ -33,6 +33,9 @@ dev = [
     "pytest-qt",        # Qtアプリケーションのテストツール
     "sphinx",           # ドキュメント生成ツール
     "sphinx-rtd-theme", # Sphinxのテーマ
+    "sphinx-autobuild", # Sphinxの自動ビルドツール
+    "restructuredtext_lint", # RST文法チェックツール
+    "esbonio",          # ドキュメント生成ツール
 ]
 
 [tool.ruff]
