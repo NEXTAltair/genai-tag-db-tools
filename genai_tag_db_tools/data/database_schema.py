@@ -37,7 +37,7 @@ engine = create_engine(
     f"sqlite:///{db_path.absolute()}",
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
-    echo=True,
+    echo=False,
 )
 
 # このデータベースで扱えるデータラベルとそのデータ型
@@ -312,8 +312,10 @@ class TagDatabase:
                 f"sqlite:///{db_path.absolute()}",
                 connect_args={"check_same_thread": False},
                 poolclass=StaticPool,
-                echo=True,
+                echo=False,
             )
+
+        self.sessionmaker = sessionmaker(bind=self.engine)
 
         # セッションの設定
         if session is not None:

@@ -1,13 +1,13 @@
 import pytest
 from unittest.mock import Mock, patch
 from sqlalchemy import inspect, create_engine, StaticPool
-from sqlalchemy.orm import sessionmaker
-
+from sqlalchemy.orm import sessionmaker, Session
 from genai_tag_db_tools.data.database_schema import (
     TagDatabase,
     Tag,
     TagFormat,
     TagTranslation,
+    TagStatus
 )
 
 @pytest.fixture(scope="function")
@@ -161,10 +161,97 @@ def test_tagdatabase_with_existing_session(tag_database_test):
     )
     db = tag_database_test
     db.engine = engine
-    db.sessionmaker = sessionmaker(bind=engine)
-    session = Session()
-    db = TagDatabase(session=session)
+
+    # sessionmaker() でローカルな Session クラスを定義
+    SessionLocal = sessionmaker(bind=engine)
+
+    # ここで session を作成
+    session = SessionLocal()
+
+    # TagDatabase のコンストラクタ引数に session を渡す
+    db = TagDatabase(session=session, init_master=False)
+
     db.create_tables()
     db.init_master_data()
+
     assert db.engine == session.get_bind()
     assert db.session == session
+
+def test_tagstatus_primarykey_violation(tag_database_test):
+    """
+    TagStatusテーブルの複合主キー(tag_id, format_id)が既に存在する状態で
+    さらに同じキーを挿入しようとしてUniqueViolation(IntegrityError)が出るかを確認するテスト
+    """
+    db = tag_database_test
+    session = db.session
+
+    # 事前にTagを1件挿入
+    new_tag = Tag(tag_id=1, source_tag="source_tag", tag="test_tag")
+    session.add(new_tag)
+    session.commit()
+
+    # 1件目のTagStatusレコード
+    status1 = TagStatus(
+        tag_id=1,
+        format_id=1,    # 例えば 'danbooru'
+        type_id=0,      # general
+        alias=False,
+        preferred_tag_id=1,
+    )
+    session.add(status1)
+    session.commit()
+
+    # 2件目: 同じtag_id=1, format_id=1を意図的に再度挿入し、IntegrityErrorが発生するか確認
+    status2 = TagStatus(
+        tag_id=1,
+        format_id=1,
+        type_id=3,
+        alias=False,
+        preferred_tag_id=1
+    )
+
+    from sqlalchemy.exc import IntegrityError
+    with pytest.raises(IntegrityError):
+        session.add(status2)
+        session.commit()
+
+def test_tagstatus_checkconstraint_violation(tag_database_test):
+    """
+    TagStatusテーブルのCheckConstraint:
+      (alias = false AND preferred_tag_id = tag_id) OR
+      (alias = true AND preferred_tag_id != tag_id)
+    を違反するレコードを挿入してエラーになることを確認
+    """
+    db = tag_database_test
+    session = db.session
+
+    # 事前にTagを2件挿入 (tag_id=1, tag_id=2)
+    session.add_all([
+        Tag(tag_id=1, source_tag="source1", tag="test_tag1"),
+        Tag(tag_id=2, source_tag="source2", tag="test_tag2"),
+    ])
+    session.commit()
+
+    # 普通に挿入: alias=False, preferred_tag_id=tag_id => OK
+    status_ok = TagStatus(
+        tag_id=1,
+        format_id=1,
+        type_id=0,
+        alias=False,
+        preferred_tag_id=1  # same as tag_id => valid
+    )
+    session.add(status_ok)
+    session.commit()
+
+    # 違反ケース: alias=Falseなのにpreferred_tag_id != tag_id => CheckConstraint違反
+    status_ng = TagStatus(
+        tag_id=2,
+        format_id=1,
+        type_id=3,
+        alias=False,
+        preferred_tag_id=1  # ここを2ではなく1にすると矛盾が生じる
+    )
+    from sqlalchemy.exc import IntegrityError
+    with pytest.raises(IntegrityError):
+        session.add(status_ng)
+        session.commit()
