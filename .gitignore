@@ -1,4 +1,5 @@
 __pycache__/
+.pyc
 venv/
 gtdt/
 genai-tag-db-tools.pyproject
@@ -15,7 +16,7 @@ extract_schema.py
 xml/
 
 #database backup files
-tags_v3.db.*
+*.db.*
 tags_v*_*.db
 
 
