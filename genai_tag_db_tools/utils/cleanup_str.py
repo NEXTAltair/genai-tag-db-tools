@@ -2,7 +2,7 @@ import re
 from functools import lru_cache
 from typing import Set
 
-from genai_tag_db_tools.core.tag_search import initialize_tag_searcher
+from genai_tag_db_tools.services.tag_search import initialize_tag_searcher
 
 HAIR_PATTERNS = {
     "length": re.compile(r"(long|short|medium) hair"),

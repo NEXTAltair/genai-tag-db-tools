@@ -4,7 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
 # グローバル変数として db_path を定義
-db_path = Path("genai_tag_db_tools/data/tags_v3.db")
+db_path = Path("genai_tag_db_tools/data/tags_v4.db")
 
 #
 engine = create_engine(

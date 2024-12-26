@@ -2,7 +2,7 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 from genai_tag_db_tools.gui.windows.main_window import MainWindow
-from genai_tag_db_tools.core.tag_search import initialize_tag_searcher
+from genai_tag_db_tools.services.tag_search import initialize_tag_searcher
 
 
 def main():

@@ -11,8 +11,8 @@ from genai_tag_db_tools.gui.designer.TagDataImportDialog_ui import (
     Ui_TagDataImportDialog,
 )
 
-from genai_tag_db_tools.core.import_data import TagDataImporter, ImportConfig
-from genai_tag_db_tools.core.tag_search import TagSearcher
+from genai_tag_db_tools.services.import_data import TagDataImporter, ImportConfig
+from genai_tag_db_tools.services.tag_search import TagSearcher
 from genai_tag_db_tools.config import AVAILABLE_COLUMNS
 
 

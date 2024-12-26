@@ -6,7 +6,7 @@ from pathlib import Path
 import polars as pl
 
 from genai_tag_db_tools.config import db_path
-from genai_tag_db_tools.core.processor import CSVToDatabaseProcessor
+from genai_tag_db_tools.services.processor import CSVToDatabaseProcessor
 
 
 class TagSearcher:
@@ -49,7 +49,7 @@ class TagSearcher:
             ValueError: 複数または0件のタグが見つかった場合
         """
         query = "SELECT tag_id FROM TAGS WHERE tag = ?"
-        df = self.execute_query(query,keyword)
+        df = self.execute_query(query, keyword)
 
         if df.empty:
             return None

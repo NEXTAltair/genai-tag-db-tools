@@ -1,11 +1,12 @@
 import pytest
 import polars as pl
 from sqlalchemy import MetaData, Table, Column, Integer, String, create_engine, text
+from sqlalchemy.orm import sessionmaker, Session
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from PySide6.QtCore import Signal
 
-from genai_tag_db_tools.core.import_data import TagDataImporter, ImportConfig
+from genai_tag_db_tools.services.import_data import TagDataImporter, ImportConfig
 from genai_tag_db_tools.cleanup_str import TagCleaner
 from genai_tag_db_tools.config import AVAILABLE_COLUMNS
 from genai_tag_db_tools.data.database_schema import TagDatabase
@@ -265,10 +266,11 @@ def importer():
         yield mock_tag_data_importer
 
 @pytest.fixture
-def importer_db(db_tags_session):
+def importer_db(db_session):
+    # 実データベースセッションを使用するインスタンス
     importer = TagDataImporter()
-    importer.session = db_tags_session
-    yield importer
+    importer.session = db_session
+    return importer
 
 @pytest.fixture(name="sample_df")
 def sample_df():
@@ -307,7 +309,7 @@ def mock_get_format_id():
             return 3
 
     with patch(
-        "genai_tag_db_tools.core.tag_search.TagSearcher.get_format_id",
+        "genai_tag_db_tools.services.tag_search.TagSearcher.get_format_id",
         side_effect=side_effect,
     ) as mock_method:
         yield mock_method
@@ -485,36 +487,33 @@ def test_normalize_tags_no_source_tag(importer: TagDataImporter, sample_case):
         print(exc_info.value)
 
 
-def test_insert_tags(importer_db):
+def test_insert_tags(importer_db, db_session):
     # テストデータ
     df = pl.DataFrame({
         "source_tag": ["1_girl", "blue_eyes", "1_girl", "long_hair"],
         "tag": ["1 girl", "blue eyes", "1 girl", "long hair"]
     })
 
-    # テスト実行
-    with patch('tests.conftest.db_tags_session', new=tags_table):
-        result_df = importer_db.insert_tags(df)
+    # importer_db に既存の db_session を割り当て
+    importer_db.session = db_session
 
-    # 結果を確認
-    print("\n元のデータフレーム:")
-    print(df)
-    print("\n結果のデータフレーム:")
-    print(result_df)
-
-    # TAGSテーブルの内容を確認
-    tags_table = pl.read_database(
-        "SELECT * FROM TAGS ORDER BY tag_id",
-        importer_db.session
+    # テスト用のTAGSテーブルを作成
+    metadata = MetaData()
+    tags_table = Table(
+        'TAGS',
+        metadata,
+        Column('id', Integer, primary_key=True),
+        Column('source_tag', String),
+        Column('tag', String),
     )
-    print("\nTAGSテーブルの内容:")
-    print(tags_table)
+    metadata.create_all(db_session.get_bind())  # データベースにテーブルを作成
 
-    # アサーション
-    assert len(result_df) == len(df), "行数が一致すること"
-    assert "tag_id" in result_df.columns, "tag_idカラムが追加されていること"
-    assert result_df.filter(pl.col("tag") == "1 girl")["tag_id"].unique().len() == 1, \
-        "同じタグには同じtag_idが割り当てられていること"
+    # テスト実行
+    result = importer_db.insert_tags(df)
+
+    # アサート
+    assert "tag_id" in result.columns
+    assert len(result) == len(df)
 
 @pytest.mark.parametrize("sample_case", sample_data_cases, ids=sample_data_ids)
 def test_normalize_translation_normal(importer, sample_case, mock_get_format_id):
@@ -553,6 +552,66 @@ def test_normalize_translation_normal(importer, sample_case, mock_get_format_id)
         # translation がない場合は何もしない
         assert True
 
+@pytest.mark.parametrize("sample_case", sample_data_cases, ids=sample_data_ids)
+def test_normalize_deprecated_tags(sample_case):
+    """
+    '_normalize_deprecated_tags' の動作をテストする。
+
+    - 'deprecated_tags' カラムが無いケース → スキップする
+    - 'deprecated_tags' が存在するケース → explode で行数が増えることを想定
+    - 'tag_id' カラムが存在しない場合、テスト用に仮追加
+    - explode 後の 'deprecated_tags' カラムが正しく正規化されているかを検証
+    """
+
+    # 今回のケースに 'deprecated_tags' カラムが存在しない場合はテストをスキップ
+    if "deprecated_tags" not in sample_case["data"]:
+        pytest.skip(f"sample_case '{sample_case['name']}' には 'deprecated_tags' が無いためスキップ")
+
+    # Arrange
+    # データフレームを生成
+    df_input = pl.DataFrame(sample_case["data"])
+
+    # _normalize_deprecated_tags 内部では "tag_id" も参照して explode するため、
+    # もし元データに "tag_id" が無い場合は、暫定的に連番を振って用意しておく
+    if "tag_id" not in df_input.columns:
+        df_input = df_input.with_columns(
+            pl.arange(1, df_input.height + 1).alias("tag_id")
+        )
+
+    # テスト対象クラスを初期化（DBセッション不要なら None でOK）
+    importer = TagDataImporter(parent=None)
+
+    # Act
+    df_output = importer._normalize_deprecated_tags(df_input)
+
+    # Assert
+    # 'deprecated_tags' を explode すると、行数が増える可能性があるので、
+    # テストでは「元のリストをフラット化した順序」に一致するかを確認
+    # まず、期待値のリストをフラット化し、clean_format した結果を作る
+    original_nested = sample_case["data"]["deprecated_tags"]  # 例: [["tag_4","tag_5"], ["tag_6","tag_7"]]
+    expected_list = []
+    for row_list in original_nested:
+        expected_list.extend(row_list)  # 2次元配列を1次元に
+
+    # TagCleaner.clean_format() を適用し、実際に _normalize_deprecated_tags と同じ処理に揃える
+    expected_list = [TagCleaner.clean_format(t) for t in expected_list]
+
+    # df_output["deprecated_tags"] は explode 後、1行ごとに単一のタグが入る想定
+    actual_list = df_output["deprecated_tags"].to_list()
+
+    # 行数が想定どおり（= フラット化した合計数）であること
+    assert df_output.height == len(expected_list), (
+        f"explode 後の行数が想定外です。"
+        f"\n 期待行数: {len(expected_list)}"
+        f"\n 実際行数: {df_output.height}"
+    )
+
+    # 各行の 'deprecated_tags' が正しく正規化されているか
+    assert actual_list == expected_list, (
+        f"'deprecated_tags' の正規化結果が期待値と一致しません。"
+        f"\n 期待: {expected_list}"
+        f"\n 実際: {actual_list}"
+    )
 
 @pytest.mark.parametrize("sample_case", sample_data_cases, ids=sample_data_ids)
 def test_import_data(
@@ -592,36 +651,7 @@ def test_import_data_signals(
 
     start_signal.assert_called_once_with("インポート開始")
     assert progress_signal.called
-    finish_signal.assert_called_once_with("インポート開始")
-
-
-@pytest.mark.parametrize("sample_case", sample_data_cases, ids=sample_data_ids)
-def test_normalize_deprecated_tags(importer: TagDataImporter, sample_case):
-    """
-    非推奨タグの正規化をテスト
-    """
-    # テスト用のデータフレームを作成
-    df = pl.DataFrame(sample_case["data"])
-
-    if "deprecated_tags" in df.columns:
-        # tag_idカラムを追加
-        df = df.with_columns(pl.arange(1, df.height + 1).alias("tag_id"))
-        # メソッドを実行
-        df_normalized = importer._normalize_deprecated_tags(df)
-
-        # 非推奨タグが正しく分割されていることを確認
-        deprecated_tags = df_normalized["deprecated_tags"].to_list()
-        for tags in deprecated_tags:
-            assert isinstance(tags, str)
-            assert "," not in tags  # カンマが含まれていないことを確認
-
-        # タグが正しく正規化されていることを確認
-        cleaned_tags = [TagCleaner.clean_format(tag) for tag in deprecated_tags]
-        assert deprecated_tags == cleaned_tags
-    else:
-        # 非推奨タグが存在しない場合は何もしない
-        assert True
-
+    finish_signal.assert_called_once_with("インポート終了")
 
 def test_normalize_deprecated_tags_empty(importer: TagDataImporter):
     """

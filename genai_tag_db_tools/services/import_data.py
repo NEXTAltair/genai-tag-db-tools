@@ -9,7 +9,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 from sqlalchemy import select, Table, Column, String, Integer, MetaData
 
 
-from genai_tag_db_tools.core.tag_search import TagSearcher
+from genai_tag_db_tools.services.tag_search import TagSearcher
 from genai_tag_db_tools.cleanup_str import TagCleaner
 from genai_tag_db_tools.data.database_schema import TagDatabase
 from genai_tag_db_tools.data.tag_repository import TagRepository
@@ -400,7 +400,7 @@ class TagDataImporter(QObject):
         try:
             # deprecated_tags カラムが存在するか確認
             if "deprecated_tags" not in df.columns:
-                raise Exception("deprecated_tags カラムが存在しません")
+                raise KeyError("deprecated_tags カラムが存在しません")
 
             # deprecated_tags を展開
             split_deprecated_df = df.select(
@@ -478,14 +478,16 @@ class TagDataImporter(QObject):
             self.insert_tags(cleaned_tags_df)
             add_id_df = self.add_tag_id_column(cleaned_tags_df)
             if config.language != "None":
-                sprit_translation_df = self._normalize_translations(add_id_df)
+                add_id_df = self._normalize_translations(add_id_df)
             if "deprecated_tags" in add_id_df.columns:
-                sprit_deprecated_df = self._normalize_deprecated_tags(add_id_df)
-            self._process_tag_status(normalized_df, config)
-            self._process_usage_counts(normalized_df, tag_ids, config.format_id)
+                add_id_df = self._normalize_deprecated_tags(add_id_df)
+            self._process_tag_status(add_id_df, config)
+            self._process_usage_counts(add_id_df, config)
             self.conn.commit()
-            self.process_finished.emit("インポート完了")
+            print("Committing changes")
+            self.process_finished.emit("インポート終了")
         except Exception as e:
+            print(f"Error occurred: {e}")
             self.error_occurred.emit(str(e))
             self.conn.rollback()
 

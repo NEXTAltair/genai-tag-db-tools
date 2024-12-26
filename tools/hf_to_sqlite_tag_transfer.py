@@ -4,7 +4,7 @@ import sqlite3
 
 import polars as pl
 
-from genai_tag_db_tools.core.processor import CSVToDatabaseProcessor
+from genai_tag_db_tools.services.processor import CSVToDatabaseProcessor
 
 
 class DanbooruJaTagBatch:

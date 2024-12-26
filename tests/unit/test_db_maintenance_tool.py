@@ -1,6 +1,6 @@
 import sqlite3
 import pytest
-from genai_tag_db_tools.core.db_maintenance_tool import DatabaseMaintenanceTool
+from genai_tag_db_tools.db.db_maintenance_tool import DatabaseMaintenanceTool
 
 
 @pytest.fixture

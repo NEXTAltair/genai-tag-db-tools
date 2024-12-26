@@ -9,7 +9,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.sql import func
 
-from genai_tag_db_tools.core.import_data import TagDataImporter
+from genai_tag_db_tools.services.import_data import TagDataImporter
 from genai_tag_db_tools.data.database_schema import Tag
 
 # テストスキーマを定義する

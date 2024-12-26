@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QWidget, QMessageBox
 from PySide6.QtCore import Slot
 from genai_tag_db_tools.gui.designer.TagRegisterWidget_ui import Ui_TagRegisterWidget
-from genai_tag_db_tools.core.processor import CSVToDatabaseProcessor
+from genai_tag_db_tools.services.processor import CSVToDatabaseProcessor
 
 
 class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
