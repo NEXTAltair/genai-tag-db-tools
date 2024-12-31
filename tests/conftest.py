@@ -12,7 +12,7 @@ def engine():
     """テスト用に SQLite インメモリ データベースを作成"""
     engine = create_engine(
         "sqlite:///:memory:",
-        echo=True,
+        echo=False,
         connect_args={"check_same_thread": False},
         poolclass=StaticPool
     )

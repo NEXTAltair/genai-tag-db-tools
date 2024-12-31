@@ -186,8 +186,8 @@ class TagTranslation(Base):
 
     translation_id: Mapped[int] = mapped_column(primary_key=True)
     tag_id: Mapped[int] = mapped_column(ForeignKey("TAGS.tag_id"))
-    language: Mapped[Optional[str]] = mapped_column()
-    translation: Mapped[Optional[str]] = mapped_column()
+    language: Mapped[str] = mapped_column()
+    translation: Mapped[str] = mapped_column()
     created_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, server_default=func.now(), nullable=True
     )
