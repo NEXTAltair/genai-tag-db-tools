@@ -1,6 +1,9 @@
+from __future__ import annotations  # 循環参照や古いバージョン対策に入れておくと安全
+
 from logging import getLogger
 from typing import Optional, Set
 from datetime import datetime
+from matplotlib.pylab import f
 import polars as pl
 
 from sqlalchemy import (
@@ -20,7 +23,6 @@ from sqlalchemy.orm import (
     sessionmaker,
     Session,
     relationship,
-    sessionmaker,
     Mapped,
     mapped_column,
     declarative_base,
@@ -28,80 +30,10 @@ from sqlalchemy.orm import (
 
 Base = declarative_base()
 
-class Tag(Base):
-    __tablename__ = "TAGS"
 
-    tag_id: Mapped[int] = mapped_column(primary_key=True)
-    source_tag: Mapped[str] = mapped_column()
-    created_at: Mapped[Optional[datetime]] = mapped_column(
-        server_default=func.now(), nullable=True
-    )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
-        server_default=func.now(), nullable=True
-    )
-    tag: Mapped[str] = mapped_column()
-
-    # 多対多の関係として明確化
-    formats_status: Mapped[list["TagStatus"]] = relationship(
-        back_populates="tag",
-        foreign_keys="[TagStatus.tag_id]",
-        cascade="all, delete-orphan",
-    )
-
-    # エイリアス関係として明確化
-    preferred_by: Mapped[list["TagStatus"]] = relationship(
-        "TagStatus",
-        back_populates="preferred_tag",
-        foreign_keys="[TagStatus.preferred_tag_id]",
-        cascade="all, delete-orphan",
-    )
-
-    # 翻訳を一体多の関係として明確化
-    translations: Mapped[list["TagTranslation"]] = relationship(
-        back_populates="tag",
-        foreign_keys="[TagTranslation.tag_id]",
-        cascade="all, delete-orphan",
-    )
-
-
-class TagFormat(Base):
-    __tablename__ = "TAG_FORMATS"
-
-    format_id: Mapped[int] = mapped_column(primary_key=True)
-    format_name: Mapped[str] = mapped_column(unique=True)
-    description: Mapped[Optional[str]]
-
-    # 多対多の関係として明確化
-    tags_status: Mapped[list["TagStatus"]] = relationship(back_populates="format")
-
-
-class TagTypeName(Base):
-    __tablename__ = "TAG_TYPE_NAME"
-
-    type_name_id: Mapped[int] = mapped_column(primary_key=True)
-    type_name: Mapped[str] = mapped_column(unique=True)
-    description: Mapped[Optional[str]] = mapped_column(nullable=True)
-
-
-class TagTypeFormatMapping(Base):
-    __tablename__ = "TAG_TYPE_FORMAT_MAPPING"
-
-    format_id: Mapped[int] = mapped_column(
-        ForeignKey("TAG_FORMATS.format_id"), primary_key=True
-    )
-    type_id: Mapped[int] = mapped_column(primary_key=True)
-    type_name_id: Mapped[int] = mapped_column(ForeignKey("TAG_TYPE_NAME.type_name_id"))
-    description: Mapped[Optional[str]] = mapped_column(nullable=True)
-
-    type_name: Mapped["TagTypeName"] = relationship()
-    # overlaps パラメータを追加して警告を解消
-    statuses: Mapped[list["TagStatus"]] = relationship(
-        back_populates="type_mapping",
-        overlaps="tags_status",  # 重複を明示的に許可
-        viewonly=True,  # 読み取り専用に設定
-    )
-
-
+# --------------------------------------------------------------------------
+# TagStatus モデル
+# --------------------------------------------------------------------------
 class TagStatus(Base):
     __tablename__ = "TAG_STATUS"
 
@@ -109,9 +41,10 @@ class TagStatus(Base):
     format_id: Mapped[int] = mapped_column(
         ForeignKey("TAG_FORMATS.format_id"), primary_key=True
     )
-    type_id: Mapped[int] = mapped_column()
+    type_id: Mapped[Optional[int]] = mapped_column(nullable=True)
     alias: Mapped[bool] = mapped_column(Boolean, nullable=False)
     preferred_tag_id: Mapped[int] = mapped_column(ForeignKey("TAGS.tag_id"))
+
     created_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, server_default=func.now(), nullable=True
     )
@@ -119,24 +52,36 @@ class TagStatus(Base):
         DateTime, server_default=func.now(), nullable=True
     )
 
-    # リレーションシップの定義
+    # リレーション TagStatus → Tag (tag_id)
     tag: Mapped["Tag"] = relationship(
-        foreign_keys=[tag_id], back_populates="formats_status"
+        "Tag",
+        foreign_keys=[tag_id],
+        back_populates="formats_status",
     )
+
+    # リレーション TagStatus → TagFormat
     format: Mapped["TagFormat"] = relationship(
+        "TagFormat",
+        foreign_keys=[format_id],
         back_populates="tags_status",
-        overlaps="type_mapping,statuses",  # 重複を明示的に許可
     )
+
+    # リレーション TagStatus → Tag (preferred_tag_id)
     preferred_tag: Mapped["Tag"] = relationship(
-        foreign_keys=[preferred_tag_id], back_populates="preferred_by"
+        "Tag",
+        foreign_keys=[preferred_tag_id],
+        back_populates="preferred_by",
     )
+
+    # (format_id, type_id) → TagTypeFormatMapping
     type_mapping: Mapped["TagTypeFormatMapping"] = relationship(
         "TagTypeFormatMapping",
-        primaryjoin="and_(TagStatus.format_id == TagTypeFormatMapping.format_id, "
-        "TagStatus.type_id == TagTypeFormatMapping.type_id)",
-        back_populates="statuses",
-        overlaps="format,tags_status",  # 重複を明示的に許可
-        viewonly=True,  # 読み取り専用に設定
+        primaryjoin=(
+            "and_(TagStatus.format_id == TagTypeFormatMapping.format_id, "
+            "TagStatus.type_id == TagTypeFormatMapping.type_id)"
+        ),
+        viewonly=True,
+        # back_populates="statuses",  # TagTypeFormatMapping側に書くなら相互に
     )
 
     __table_args__ = (
@@ -151,36 +96,10 @@ class TagStatus(Base):
         ),
     )
 
-class TagUsageCounts(Base):
-    """タグの使用回数を管理するテーブル
 
-    このテーブルはTAGSとTAG_FORMATSの両方を親に持ち、
-    それぞれのタグのフォーマット別使用回数を記録します。
-    """
-
-    __tablename__ = "TAG_USAGE_COUNTS"
-
-    # 複合主キーの定義
-    tag_id: Mapped[int] = mapped_column(ForeignKey("TAGS.tag_id"), primary_key=True)
-    format_id: Mapped[int] = mapped_column(
-        ForeignKey("TAG_FORMATS.format_id"), primary_key=True
-    )
-    count: Mapped[int] = mapped_column()
-    created_at: Mapped[Optional[datetime]] = mapped_column(
-        server_default=func.now(), nullable=True
-    )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
-        server_default=func.now(), nullable=True
-    )
-
-    # テーブル全体の制約とインデックス
-    __table_args__ = (
-        UniqueConstraint("tag_id", "format_id", name="uix_tag_format"),
-        Index("idx_tag_id", "tag_id"),  # パフォーマンス向上のためのインデックス
-        Index("idx_format_id", "format_id"),  # パフォーマンス向上のためのインデックス
-    )
-
-
+# --------------------------------------------------------------------------
+# TagTranslation モデル
+# --------------------------------------------------------------------------
 class TagTranslation(Base):
     __tablename__ = "TAG_TRANSLATIONS"
 
@@ -188,6 +107,7 @@ class TagTranslation(Base):
     tag_id: Mapped[int] = mapped_column(ForeignKey("TAGS.tag_id"))
     language: Mapped[str] = mapped_column()
     translation: Mapped[str] = mapped_column()
+
     created_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, server_default=func.now(), nullable=True
     )
@@ -195,16 +115,145 @@ class TagTranslation(Base):
         DateTime, server_default=func.now(), nullable=True
     )
 
-    # Relationship
-    tag: Mapped["Tag"] = relationship(back_populates="translations")
+    tag: Mapped["Tag"] = relationship("Tag", back_populates="translations")
 
     __table_args__ = (
-        UniqueConstraint(
-            "tag_id", "language", "translation", name="uix_tag_lang_trans"
-        ),
+        UniqueConstraint("tag_id", "language", "translation", name="uix_tag_lang_trans"),
     )
 
 
+# --------------------------------------------------------------------------
+# TagUsageCounts モデル
+# --------------------------------------------------------------------------
+class TagUsageCounts(Base):
+    __tablename__ = "TAG_USAGE_COUNTS"
+
+    tag_id: Mapped[int] = mapped_column(ForeignKey("TAGS.tag_id"), primary_key=True)
+    format_id: Mapped[int] = mapped_column(
+        ForeignKey("TAG_FORMATS.format_id"), primary_key=True
+    )
+    count: Mapped[int] = mapped_column()
+
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        server_default=func.now(), nullable=True
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        server_default=func.now(), nullable=True
+    )
+
+    tag: Mapped["Tag"] = relationship("Tag", back_populates="usage_counts")
+
+    __table_args__ = (
+        UniqueConstraint("tag_id", "format_id", name="uix_tag_format"),
+        Index("idx_tag_id", "tag_id"),
+        Index("idx_format_id", "format_id"),
+    )
+
+
+# --------------------------------------------------------------------------
+# Tag モデル
+# --------------------------------------------------------------------------
+class Tag(Base):
+    __tablename__ = "TAGS"
+
+    tag_id: Mapped[int] = mapped_column(primary_key=True)
+    tag: Mapped[str] = mapped_column()
+    source_tag: Mapped[str] = mapped_column()
+
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        server_default=func.now(), nullable=True
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        server_default=func.now(), nullable=True
+    )
+
+    # 1対多: Tag → TagStatus
+    formats_status: Mapped[list["TagStatus"]] = relationship(
+        "TagStatus",
+        back_populates="tag",
+        foreign_keys=[TagStatus.tag_id],
+        cascade="all, delete-orphan",
+    )
+
+    # 1対多: Tag → TagStatus (preferred_tag 参照用)
+    preferred_by: Mapped[list["TagStatus"]] = relationship(
+        "TagStatus",
+        back_populates="preferred_tag",
+        foreign_keys=[TagStatus.preferred_tag_id],
+        cascade="all, delete-orphan",
+    )
+
+    # 1対多: Tag → TagTranslation
+    translations: Mapped[list["TagTranslation"]] = relationship(
+        "TagTranslation",
+        back_populates="tag",
+        foreign_keys=[TagTranslation.tag_id],
+        cascade="all, delete-orphan",
+    )
+
+    # 1対多: Tag → TagUsageCounts
+    usage_counts: Mapped[list["TagUsageCounts"]] = relationship(
+        "TagUsageCounts",
+        back_populates="tag",
+        foreign_keys=[TagUsageCounts.tag_id],
+        cascade="all, delete-orphan",
+    )
+
+
+# --------------------------------------------------------------------------
+# TagFormat モデル
+# --------------------------------------------------------------------------
+class TagFormat(Base):
+    __tablename__ = "TAG_FORMATS"
+
+    format_id: Mapped[int] = mapped_column(primary_key=True)
+    format_name: Mapped[str] = mapped_column(unique=True)
+    description: Mapped[Optional[str]] = mapped_column(nullable=True)
+
+    # 1対多: TagFormat → TagStatus
+    tags_status: Mapped[list["TagStatus"]] = relationship(
+        "TagStatus",
+        back_populates="format"
+    )
+
+
+# --------------------------------------------------------------------------
+# TagTypeName モデル
+# --------------------------------------------------------------------------
+class TagTypeName(Base):
+    __tablename__ = "TAG_TYPE_NAME"
+
+    type_name_id: Mapped[int] = mapped_column(primary_key=True)
+    type_name: Mapped[str] = mapped_column(unique=True)
+    description: Mapped[Optional[str]] = mapped_column(nullable=True)
+
+
+# --------------------------------------------------------------------------
+# TagTypeFormatMapping モデル
+# --------------------------------------------------------------------------
+class TagTypeFormatMapping(Base):
+    __tablename__ = "TAG_TYPE_FORMAT_MAPPING"
+
+    format_id: Mapped[int] = mapped_column(
+        ForeignKey("TAG_FORMATS.format_id"), primary_key=True
+    )
+    type_id: Mapped[int] = mapped_column(primary_key=True)
+    type_name_id: Mapped[int] = mapped_column(ForeignKey("TAG_TYPE_NAME.type_name_id"))
+    description: Mapped[Optional[str]] = mapped_column(nullable=True)
+
+    # リレーション: (format_id, type_id) → TagTypeName
+    type_name: Mapped["TagTypeName"] = relationship("TagTypeName")
+
+    statuses: Mapped[list["TagStatus"]] = relationship(
+        "TagStatus",
+        back_populates="type_mapping",
+        viewonly=True,
+    )
+
+
+# --------------------------------------------------------------------------
+# TagDatabase クラス
+# --------------------------------------------------------------------------
 class TagDatabase:
     """タグデータベース管理クラス"""
 
@@ -228,12 +277,11 @@ class TagDatabase:
         elif session is not None:
             self.engine = session.get_bind()
         else:
-            self.engine = create_engine(
-                f"sqlite:///{db_path.absolute()}",
-                connect_args={"check_same_thread": False},
-                poolclass=StaticPool,
-                echo=False,
-            )
+            # ここで db_path が未定義の場合など、どうするか？
+            # from pathlib import Path
+            # db_path = Path("some_default.db")
+            # self.engine = create_engine( ... )
+            raise ValueError("Need either an engine or a session with a bound engine.")
 
         self.sessionmaker = sessionmaker(bind=self.engine)
 
@@ -241,13 +289,8 @@ class TagDatabase:
         if session is not None:
             self.session = session
         else:
-            self.sessionmaker = sessionmaker(bind=self.engine)
             self.session = self.create_session()
 
-        if init_master:
-            self.init_master_data()
-
-        # デフォルトの場合のみテーブルとマスターデータを作成
         if init_master:
             self.create_tables()
             self.init_master_data()
@@ -257,52 +300,36 @@ class TagDatabase:
         self._sessions.add(session)
         return session
 
+    def cleanup(self):
+        """リソースのクリーンアップ"""
+        for sess in list(self._sessions):
+            try:
+                sess.close()
+            except Exception as e:
+                self.logger.error(f"セッションのクローズ中にエラー: {e}")
+            finally:
+                self._sessions.discard(sess)
+
+    def __del__(self):
+        self.cleanup()
+
+    def create_tables(self):
+        Base.metadata.create_all(self.engine)
+
     def init_master_data(self):
-        """マスターデータの初期化をまとめて実行"""
+        """マスターデータを初期化"""
         self.init_tagformat()
         self.init_tagtypename()
         self.init_tagtypeformatmapping()
 
-    def create_tables(self):
-        """テーブルの作成"""
-        Base.metadata.create_all(self.engine)
-
-    @classmethod
-    def create_test_instance(cls, engine: Engine) -> "TagDatabase":
-        """テスト用のインスタンスを作成
-
-        Args:
-            engine: テスト用のエンジン
-
-        Returns:
-            TagDatabase: テスト用のインスタンス
-        """
-        return cls(engine=engine, init_master=False)
-
-    def cleanup(self):
-        """リソースのクリーンアップ"""
-        for session in list(self._sessions):
-            if session:
-                try:
-                    session._close_impl(invalidate=True)
-                except Exception as e:
-                    self.logger.error(f"セッションのクローズ中にエラー: {e}")
-                finally:
-                    self._sessions.discard(session)
-
-    def __del__(self):
-        """デストラクタでクリーンアップを実行"""
-        self.cleanup()
-
     def init_tagformat(self):
-        """Initialize format data that should be registered at creation"""
+        session = self.create_session()
         initial_data = [
             TagFormat(format_id=0, format_name="unknown", description=""),
             TagFormat(format_id=1, format_name="danbooru", description=""),
             TagFormat(format_id=2, format_name="e621", description=""),
             TagFormat(format_id=3, format_name="derpibooru", description=""),
         ]
-        session = self.create_session()
         try:
             for data in initial_data:
                 existing = (
@@ -322,7 +349,7 @@ class TagDatabase:
             self._sessions.discard(session)
 
     def init_tagtypename(self):
-        """Initialize tag type names"""
+        session = self.create_session()
         initial_data = [
             TagTypeName(type_name_id=0, type_name="unknown", description=""),
             TagTypeName(type_name_id=1, type_name="general", description=""),
@@ -342,7 +369,6 @@ class TagDatabase:
             TagTypeName(type_name_id=15, type_name="content-official", description=""),
             TagTypeName(type_name_id=16, type_name="content-fanmade", description=""),
         ]
-        session = self.create_session()
         try:
             for data in initial_data:
                 existing = (
@@ -362,9 +388,8 @@ class TagDatabase:
             self._sessions.discard(session)
 
     def init_tagtypeformatmapping(self):
-        """Initialize tag type format mappings"""
+        session = self.create_session()
         initial_data = [
-            # Format 0 (unknown)
             TagTypeFormatMapping(format_id=0, type_id=0, type_name_id=0),
             # Format 1 (danbooru)
             TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=1),  # general
@@ -399,7 +424,6 @@ class TagDatabase:
                 format_id=3, type_id=11, type_name_id=16
             ),  # content-fanmade
         ]
-        session = self.create_session()
         try:
             for data in initial_data:
                 existing = (
@@ -418,13 +442,23 @@ class TagDatabase:
             session.close()
             self._sessions.discard(session)
 
+    @classmethod
+    def create_test_instance(cls, engine: Engine) -> TagDatabase:
+        return cls(engine=engine, init_master=False)
+
     def get_formatnames(self):
-        """Test function to get TAG_TYPE_NAME table"""
         query = "SELECT * FROM TAG_TYPE_NAME"
         df = pl.read_database(query, connection=self.engine)
         print(df)
 
 
 if __name__ == "__main__":
-    db = TagDatabase()
+    # テスト起動
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        echo=False,
+    )
+    db = TagDatabase(engine=engine, init_master=True)
     db.get_formatnames()
