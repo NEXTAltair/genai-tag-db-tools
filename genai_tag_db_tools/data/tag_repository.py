@@ -1,9 +1,13 @@
 from logging import getLogger
 from typing import Optional
+
 import polars as pl
-from sqlalchemy.orm import sessionmaker, scoped_session, aliased
+from sqlalchemy_filters import apply_sort, apply_pagination, apply_filters
+
 from sqlalchemy import or_
-import polars as pl
+from sqlalchemy.orm import aliased
+from sqlalchemy.exc import IntegrityError
+
 from genai_tag_db_tools.db.database_setup import SessionLocal
 from genai_tag_db_tools.data.database_schema import (
     Tag,
@@ -15,6 +19,7 @@ from genai_tag_db_tools.data.database_schema import (
     TagUsageCounts,
 )
 
+from genai_tag_db_tools.utils.messages import LogMessages, ErrorMessages
 
 class TagRepository:
     logger = getLogger(__name__)
@@ -22,13 +27,13 @@ class TagRepository:
     タグおよび関連テーブルへのアクセスを一元管理するリポジトリクラス
 
     主に以下のテーブルを扱う:
-      - TAGS
-      - TAG_FORMATS
-      - TAG_TYPE_NAME
-      - TAG_STATUS
-      - TAG_USAGE_COUNTS
-      - TAG_TRANSLATIONS
-      - TAG_FORMATS / TAG_TYPE_NAME / TAG_TYPE_FORMAT_MAPPING (検索系)
+      - TAGS: タグの基本情報を管理
+      - TAG_FORMATS: タグのフォーマット定義
+      - TAG_TYPE_NAME: タグの種類定義
+      - TAG_STATUS: タグのステータス情報
+      - TAG_USAGE_COUNTS: タグの使用回数
+      - TAG_TRANSLATIONS: タグの翻訳情報
+      - TAG_TYPE_FORMAT_MAPPING: タグタイプとフォーマットの紐付け
     """
     def __init__(self):
         self.session_factory = SessionLocal
@@ -47,6 +52,17 @@ class TagRepository:
         Returns:
             int: 作成(または取得)したタグID
         """
+        missing_fields: list[str] = []
+        if not tag:
+            missing_fields.append("tag")
+        if not source_tag:
+            missing_fields.append("source_tag")
+
+        if missing_fields:
+            msg = ErrorMessages.MISSING_REQUIRED_FIELDS.format(fields=", ".join(missing_fields))
+            self.logger.error(msg)  # ロギング
+            raise ValueError(msg)   # エラーをスロー
+
         # 1) 同名tagの有無をチェック
         existing_id = self.get_tag_id_by_name(tag, partial=False)
         if existing_id is not None:
@@ -60,7 +76,9 @@ class TagRepository:
         # 3) もう一度 ID を取得して返す
         tag_id = self.get_tag_id_by_name(tag, partial=False)
         if tag_id is None:
-            raise ValueError("挿入後にタグ ID が見つかりませんでした。")
+            msg = ErrorMessages.TAG_ID_NOT_FOUND_AFTER_INSERT
+            self.logger.error(msg)
+            raise ValueError(msg)
         return tag_id
 
     def get_tag_id_by_name(self, keyword: str, partial: bool = False) -> Optional[int]:
@@ -167,9 +185,12 @@ class TagRepository:
         """
         with self.session_factory() as session:
             tag_obj = session.query(Tag).get(tag_id)
-            if tag_obj:
-                session.delete(tag_obj)
-                session.commit()
+            if not tag_obj:
+                msg = ErrorMessages.INVALID_TAG_ID_DELETION_ATTEMPT.format(tag_id=tag_id)
+                self.logger.error(msg)
+                raise ValueError(msg)
+            session.delete(tag_obj)
+            session.commit()
 
     def list_tags(self) -> list[Tag]:
         """
@@ -285,11 +306,12 @@ class TagRepository:
                 .one_or_none()
             )
 
-    def update_tag_status(self, tag_id: int, format_id: int, type_id: int,
-                          alias: bool, preferred_tag_id: int) -> None:
+    def update_tag_status(self, tag_id: int, format_id: int,
+                          alias: bool, preferred_tag_id: int, type_id: Optional[int]= None) -> None:
         """
-        TAG_STATUS テーブルを新規作成。
-        既存レコードが無ければINSERT、あればValueErrorを投げる。
+        DB へ TagStatus を INSERT/UPDATE するメソッド。
+        DB 側で外部キー制約などに違反した場合は IntegrityError が発生する。
+        ここではそれをキャッチし、ValueError に変換して上位に投げる。
 
         Args:
             tag_id (int): タグID
@@ -299,27 +321,24 @@ class TagRepository:
             preferred_tag_id (int): 優先タグID
         """
         with self.session_factory() as session:
-            status_obj = (
-                session.query(TagStatus)
-                .filter(TagStatus.tag_id == tag_id, TagStatus.format_id == format_id)
-                .one_or_none()
-            )
-
-            if status_obj:
-                # 既存レコードがあればエラー
-                # TODO: GUIでその都度目視で確認するか、上書きするか選択できるようにする
-                raise ValueError(f"既に存在するタグステータス: {status_obj}")
-            else:
-                # 新規作成
+            try:
                 status_obj = TagStatus(
                     tag_id=tag_id,
                     format_id=format_id,
                     type_id=type_id,
                     alias=alias,
-                    preferred_tag_id=preferred_tag_id,
+                    preferred_tag_id=preferred_tag_id
                 )
                 session.add(status_obj)
-            session.commit()
+                # DB制約を発火させたい場合はflush()しておくと良い
+                session.flush()
+                session.commit()
+
+            except IntegrityError as e:
+                session.rollback()
+                # 共通メッセージに DB のエラー内容だけ埋め込む
+                msg = ErrorMessages.DB_OPERATION_FAILED.format(error_msg=str(e))
+                raise ValueError(msg) from e
 
     def delete_tag_status(self, tag_id: int, format_id: int) -> None:
         """
@@ -457,118 +476,156 @@ class TagRepository:
             session.commit()
 
     # --- 複雑検索 ---
-    def search_tags(
+    def search_tag_ids_by_translation(
         self,
         keyword: str,
-        partial: bool = True,
-        format_name: str = "All"
-    ) -> list[dict]:
+        partial: bool = False
+    ) -> list[int]:
         """
-        複数テーブルをJOINし、タグ・翻訳・ステータス・使用回数などをまとめて検索。
+        TagTranslationテーブルのtranslationカラムに対して、
+        部分一致/完全一致/ワイルドカード検索を行い、該当するtag_idのリストを返す。
 
         Args:
-            keyword (str): 検索キーワード
-            partial (bool): Trueなら部分一致、Falseなら完全一致
-            format_name (str): 'All'（すべて）または特定のフォーマット名
+            keyword (str): 検索キーワード ('cat' / 'ca*' / '*cat*' 等)
+            partial (bool): TrueならLIKE検索、Falseなら完全一致検索。
+                '*' を含むキーワードは自動的にワイルドカード検索扱いになる。
 
         Returns:
-            list[dict]:
-                [
-                {
-                    'tag_id': int,
-                    'tag': str,
-                    'source_tag': str,
-                    'language': str,
-                    'translation': str,
-                    'alias': bool,
-                    'preferred_tag': str,
-                    'format_name': str,
-                    'usage_count': int,
-                    'type_name': str
-                },
-                ...
-                ]
+            list[int]: 検索にヒットしたtag_idのリスト
         """
+        if '*' in keyword:
+            keyword = keyword.replace('*', '%')
 
-        # 1) session 取得
         with self.session_factory() as session:
-            PreferredTag = aliased(Tag, name="PreferredTag")
-            # 2) 基本クエリ構築
-            #   モデル名: Tag, TagTranslation, TagStatus, TagFormat, TagUsageCounts, TagTypeName
-            #   カラムを指定し、outerjoinしていく
-            query = (
-                session.query(
-                    Tag.tag_id,
-                    Tag.tag,
-                    Tag.source_tag,
-                    TagTranslation.language,
-                    TagTranslation.translation,
-                    TagStatus.alias,
-                    # 「preferred_tag」 は TagStatus.preferred_tag_id をJOINして Tag.tag を取りたい場合
-                    PreferredTag.tag.label("preferred_tag"),
-                    TagFormat.format_name,
-                    TagUsageCounts.count.label("usage_count"),
-                    TagTypeName.type_name,
-                )
-                # JOIN構造はORM定義(relationship)か、明示的に outerjoin(モデル, 条件)
-                # 例: outerjoin(TagTranslation, Tag.tag_id==TagTranslation.tag_id), ...
-                .outerjoin(TagTranslation, Tag.tag_id == TagTranslation.tag_id)
-                .outerjoin(TagStatus, Tag.tag_id == TagStatus.tag_id)
-                .outerjoin(TagFormat, TagStatus.format_id == TagFormat.format_id)
-                .outerjoin(TagUsageCounts, (Tag.tag_id == TagUsageCounts.tag_id) & (TagStatus.format_id == TagUsageCounts.format_id))
-                # preferred_tag も TagsをJOIN
-                .outerjoin(PreferredTag, TagStatus.preferred_tag_id == PreferredTag.tag_id)
-                .outerjoin(TagTypeFormatMapping, (TagStatus.format_id == TagTypeFormatMapping.format_id) & (TagStatus.type_id == TagTypeFormatMapping.type_id))
-                .outerjoin(TagTypeName, TagTypeFormatMapping.type_name_id == TagTypeName.type_name_id)
-            )
+            query = session.query(TagTranslation.tag_id)
 
-            # 3) 部分一致 or 完全一致のフィルタ
-            if partial:
-                # 部分一致: tag OR translation が "%keyword%"
-                like_keyword = f"%{keyword}%"
-                query = query.filter(
-                    or_(
-                        Tag.tag.like(like_keyword),
-                        TagTranslation.translation.like(like_keyword)
-                    )
-                )
+            # partial=True もしくは '%' が含まれているならLIKE検索
+            if partial or '%' in keyword:
+                if not keyword.startswith('%'):
+                    keyword = '%' + keyword
+                if not keyword.endswith('%'):
+                    keyword = keyword + '%'
+                query = query.filter(TagTranslation.translation.like(keyword))
             else:
-                # 完全一致: tag OR translation == keyword
-                query = query.filter(
-                    or_(
-                        Tag.tag == keyword,
-                        TagTranslation.translation == keyword
-                    )
-                )
+                query = query.filter(TagTranslation.translation == keyword)
 
-            # 4) フォーマット指定があればフィルタ
-            if format_name != "All":
-                query = query.filter(TagFormat.format_name == format_name)
+            # tag_id を取り出してリスト化
+            rows = query.all()  # rows = [(123,), (456,), ...]
+            tag_ids = {r[0] for r in rows} #setで重複排除
+            return list(tag_ids)
 
-            # 5) 実行
+    def search_tag_ids_by_usage_count_range(
+        self,
+        min_count: Optional[int] = None,
+        max_count: Optional[int] = None,
+        format_id: Optional[int] = None
+    ) -> list[int]:
+        """
+        TagUsageCountsテーブルから使用回数(count)の範囲で検索し、
+        一致するtag_idのリストを返す。
+        フォーマットIDを指定すると、そのフォーマットだけに限定。
+
+        Args:
+            min_count (Optional[int]): 最低使用回数 (Noneなら下限なし)
+            max_count (Optional[int]): 最大使用回数 (Noneなら上限なし)
+            format_id (Optional[int]): フォーマットID (Noneなら制限なし)
+
+        Returns:
+            list[int]: 検索条件に一致するtag_idのリスト
+        """
+        with self.session_factory() as session:
+            query = session.query(TagUsageCounts.tag_id)
+
+            if format_id is not None:
+                query = query.filter(TagUsageCounts.format_id == format_id)
+
+            if min_count is not None:
+                query = query.filter(TagUsageCounts.count >= min_count)
+
+            if max_count is not None:
+                query = query.filter(TagUsageCounts.count <= max_count)
+
+            rows = query.all()  # [(tag_id,), (tag_id,)]
+            tag_ids = {r[0] for r in rows} #setで重複排除
+            return list(tag_ids)
+
+    def search_tag_ids_by_alias(
+        self,
+        alias: bool = True,
+        format_id: Optional[int] = None
+    ) -> list[int]:
+        """
+        TagStatusテーブルのaliasカラムが指定の真偽値に一致するtag_idを取得。
+        フォーマットIDを指定すると、そのフォーマットだけに限定。
+
+        Args:
+            alias (bool): Trueのときalias=Trueのタグだけ、Falseのときalias=Falseのタグだけを検索
+            format_id (Optional[int]): フォーマットIDを指定すると、そのフォーマットだけに限定
+
+        Returns:
+            list[int]: 検索条件に合致するtag_idのリスト
+        """
+        with self.session_factory() as session:
+            query = session.query(TagStatus.tag_id).filter(TagStatus.alias == alias)
+            if format_id is not None:
+                query = query.filter(TagStatus.format_id == format_id)
+
             rows = query.all()
+            return [r[0] for r in rows]
 
-        # 6) 結果を list[dict] へ整形
-        result_list = []
-        for row in rows:
-            # row は namedtuple or sqlalchemy.util._collections.result
-            # usage_count が None なら 0 に変換
-            usage_count = row.usage_count if row.usage_count is not None else 0
+    def search_tag_ids_by_type_name(
+        self,
+        type_name: str,
+        format_id: Optional[int] = None
+    ) -> list[int]:
+        """
+        指定されたタイプ名を持つタグIDを検索する。
+        フォーマットIDが指定されていればさらに絞り込む。
 
-            result_list.append({
-                "tag_id": row.tag_id,
-                "tag": row.tag,
-                "source_tag": row.source_tag,
-                "language": row.language,
-                "translation": row.translation,
-                "alias": row.alias,
-                "preferred_tag": row.preferred_tag,
-                "format_name": row.format_name,
-                "usage_count": usage_count,
-                "type_name": row.type_name,
-            })
+        内部的には、TagStatus.type_id と TagTypeName.type_name_id をJOINして
+        一致するtag_idを取得する。
 
-        return result_list
+        Args:
+            type_name (str): タイプ名 (例: 'Character', 'Artist' など)
+            format_id (Optional[int]): フォーマットID。指定されると TagStatus.format_id も絞り込みに使用。
+
+        Returns:
+            list[int]: 一致するtag_idのリスト
+        """
+        with self.session_factory() as session:
+            # type_name から type_name_id を取得
+            type_obj = session.query(TagTypeName).filter(TagTypeName.type_name == type_name).one_or_none()
+            if not type_obj:
+                return []
+
+            type_id = type_obj.type_name_id
+
+            query = session.query(TagStatus.tag_id).filter(TagStatus.type_id == type_id)
+            if format_id is not None:
+                query = query.filter(TagStatus.format_id == format_id)
+
+            rows = query.all()  # [(tag_id,), (tag_id,)]
+            return [r[0] for r in rows]
+
+    def search_tag_ids_by_format_name(self, format_name: str) -> list[int]:
+        """
+        指定されたフォーマット名を持つ TagStatus から、tag_id のリストを取得する。
+
+        Args:
+            format_name (str): フォーマット名 (例: 'StableDiffusion', 'LoRA' など)
+
+        Returns:
+            list[int]: 一致するtag_idのリスト
+        """
+        with self.session_factory() as session:
+            # format_name から format_id を取得
+            fmt_obj = session.query(TagFormat).filter(TagFormat.format_name == format_name).one_or_none()
+            if not fmt_obj:
+                return []
+
+            query = session.query(TagStatus.tag_id).filter(TagStatus.format_id == fmt_obj.format_id)
+            rows = query.all()
+            return [r[0] for r in rows]
 
     def find_preferred_tag(self, tag_id: int, format_id: int) -> Optional[int]:
         """

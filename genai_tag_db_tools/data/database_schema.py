@@ -187,7 +187,6 @@ class Tag(Base):
     translations: Mapped[list["TagTranslation"]] = relationship(
         "TagTranslation",
         back_populates="tag",
-        foreign_keys=[TagTranslation.tag_id],
         cascade="all, delete-orphan",
     )
 
@@ -195,7 +194,6 @@ class Tag(Base):
     usage_counts: Mapped[list["TagUsageCounts"]] = relationship(
         "TagUsageCounts",
         back_populates="tag",
-        foreign_keys=[TagUsageCounts.tag_id],
         cascade="all, delete-orphan",
     )
 
