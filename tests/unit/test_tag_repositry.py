@@ -348,7 +348,7 @@ def test_search_tag_ids_by_usage_count_range(tag_repository):
 import pytest
 from unittest.mock import PropertyMock
 
-def test_search_tag_ids_by_alias(tag_repository, mocker):
+def test_search_tag_ids_by_alias(tag_repository):
     with tag_repository.session_factory() as session:
         # 1) Tag, Format
         tag_x = Tag(tag="X", source_tag="X_src")
@@ -361,43 +361,12 @@ def test_search_tag_ids_by_alias(tag_repository, mocker):
         tid_y = tag_y.tag_id
 
         # 2) TagStatus:
-        #
-        #   要件: alias=False の場合は preferred_tag_id=tag_id (自身のID)
-        #         alias=True  の場合は別のタグ(999など)にしたいが、
-        #         DBには本当に999を作れないので、DB保存時は自分とは別の有効なIDを入れておく。
-        #         （もしくは別の既存Tagを作っておき、そのIDを指すなど。）
-        #
-        #   ここでは簡単のため:
-        #     - alias=True → preferred_tag_id = tid_y (Xのエイリアス先はYとする)
-        #     - alias=False → preferred_tag_id = tid_x
-        #
-        #   もし "Y" タグを推奨とするルールにしたくない場合は
-        #   もう1つ適当なタグを作ってそちらに紐づけても良いです。
-        #
+        # alias=True の場合は別のタグを参照
+        # alias=False の場合は自分自身を参照
         ts_x = TagStatus(tag_id=tid_x, format_id=10, alias=True, preferred_tag_id=tid_y)
-        ts_y = TagStatus(tag_id=tid_y, format_id=10, alias=False, preferred_tag_id=tid_y)}
+        ts_y = TagStatus(tag_id=tid_y, format_id=10, alias=False, preferred_tag_id=tid_y)
         session.add_all([ts_x, ts_y])
         session.commit()
-
-    # ---------- Mockで alias=Trueの場合だけ 999 に見せたい場合の例 ----------
-    original_getter = TagStatus.preferred_tag_id.fget
-
-    def mock_pref_tag_id(self):
-        """
-        alias=True の場合だけ 999 を返してみる (実際にはDBには tid_y が保存されている)。
-        alias=False の場合は、DBに入っている値(= tid_y)をそのまま返す。
-        """
-        if self.alias:
-            return 2
-        return original_getter(self)
-
-    mocker.patch.object(
-        TagStatus.__class__,
-        'preferred_tag_id',
-        new_callable=PropertyMock,
-        side_effect=mock_pref_tag_id
-    )
-    # -----------------------------------------------------------
 
     # --- テスト本体: 検索結果を確認 ---
     res_true = tag_repository.search_tag_ids_by_alias(alias=True, format_id=10)
@@ -432,23 +401,27 @@ def test_search_tag_ids_by_type_name(tag_repository):
         tag_n = Tag(tag="N", source_tag="N_src")
         fmt_2 = TagFormat(format_id=2, format_name="fmt2")
         ttype_char = TagTypeName(type_name_id=100, type_name="Character")
-        ttype_obj  = TagTypeName(type_name_id=101, type_name="Object")
-
+        ttype_obj = TagTypeName(type_name_id=101, type_name="Object")
         session.add_all([tag_m, tag_n, fmt_2, ttype_char, ttype_obj])
+        session.commit()
+
+        # 2) TagTypeFormatMapping
+        mapping_char = TagTypeFormatMapping(format_id=2, type_id=100, type_name_id=100)
+        mapping_obj = TagTypeFormatMapping(format_id=2, type_id=101, type_name_id=101)
+        session.add_all([mapping_char, mapping_obj])
         session.commit()
 
         tid_m = tag_m.tag_id
         tid_n = tag_n.tag_id
-        # format_id=2 はそのまま使用可
 
-        # 2) TagStatus
+        # 3) TagStatus
         status_m = TagStatus(
             tag_id=tid_m, format_id=2, type_id=100,
-            alias=False, preferred_tag_id=None
+            alias=False, preferred_tag_id=tid_m
         )
         status_n = TagStatus(
             tag_id=tid_n, format_id=2, type_id=101,
-            alias=False, preferred_tag_id=None
+            alias=False, preferred_tag_id=tid_n
         )
         session.add_all([status_m, status_n])
         session.commit()
@@ -495,8 +468,8 @@ def test_search_tag_ids_by_format_name(tag_repository):
         # 200, 300 はそのまま使える
 
         # 3) TagStatus (tag_r→200, tag_s→300)
-        ts_r = TagStatus(tag_id=tid_r, format_id=200, alias=False, preferred_tag_id=None)
-        ts_s = TagStatus(tag_id=tid_s, format_id=300, alias=False, preferred_tag_id=None)
+        ts_r = TagStatus(tag_id=tid_r, format_id=200, alias=False, preferred_tag_id=tid_r)
+        ts_s = TagStatus(tag_id=tid_s, format_id=300, alias=False, preferred_tag_id=tid_s)
         session.add_all([ts_r, ts_s])
         session.commit()
 

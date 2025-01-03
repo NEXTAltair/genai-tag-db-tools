@@ -447,8 +447,16 @@ class TagRepository:
             tag_id (int): タグID
             language (str): 言語
             translation (str): 翻訳
+
+        Raises:
+            ValueError: 存在しないtag_idが指定された場合
         """
         with self.session_factory() as session:
+            # タグの存在確認
+            tag = session.query(Tag).filter(Tag.tag_id == tag_id).one_or_none()
+            if not tag:
+                raise ValueError(f"存在しないタグID: {tag_id}")
+
             # 1) 事前に全て同じ行があるかを確認
             existing = (
                 session.query(TagTranslation)
@@ -465,15 +473,18 @@ class TagRepository:
                 # 同じ3列が全て同じ = 完全重複 => 何も更新しない
                 return
 
-            #  "完全一致ならスキップ、それ以外なら新規作成"
-            # 4) 新規作成
-            translation_obj = TagTranslation(
-                tag_id=tag_id,
-                language=language,
-                translation=translation
-            )
-            session.add(translation_obj)
-            session.commit()
+            try:
+                # 4) 新規作成
+                translation_obj = TagTranslation(
+                    tag_id=tag_id,
+                    language=language,
+                    translation=translation
+                )
+                session.add(translation_obj)
+                session.commit()
+            except IntegrityError as e:
+                session.rollback()
+                raise ValueError(f"データベース操作に失敗しました: {e}") from e
 
     # --- 複雑検索 ---
     def search_tag_ids_by_translation(
