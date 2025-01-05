@@ -13,11 +13,7 @@ from genai_tag_db_tools.data.database_schema import (
 @pytest.fixture(scope="function")
 def tag_database_test(engine, db_session):
     """テスト用データベースへ接続した TagDatabase インスタンスを返す"""
-    db = TagDatabase(init_master=False)
-
-    # エンジンとセッションはテスト用のものに差し替える
-    db.engine = engine
-    db.session = db_session
+    db = TagDatabase(engine=engine, session=db_session, init_master=False)
 
     db.create_tables()
     db.init_master_data()
@@ -57,16 +53,16 @@ def test_init_master_data(tag_database_test):
     # TagFormatのモックオブジェクトを作成
     mock_formats = []
     format_data = [
-        {"format_id": 0, "name": "Unknown"},
-        {"format_id": 1, "name": "Danbooru"},
-        {"format_id": 2, "name": "e621"},
-        {"format_id": 3, "name": "derpibooru"}
+        {"format_id": 0, "format_name": "unknown"},
+        {"format_id": 1, "format_name": "danbooru"},
+        {"format_id": 2, "format_name": "e621"},
+        {"format_id": 3, "format_name": "derpibooru"}
     ]
 
     for data in format_data:
         mock_format = Mock(spec=TagFormat)  # TagFormatの仕様に基づくモック
         mock_format.format_id = data["format_id"]
-        mock_format.name = data["name"]
+        mock_format.format_name = data["format_name"]
         mock_formats.append(mock_format)
 
     mock_query = Mock()
@@ -76,10 +72,10 @@ def test_init_master_data(tag_database_test):
     with patch.object(db.session, 'query', return_value=mock_query):
         tag_formats = db.session.query(TagFormat).all()
         assert len(tag_formats) == 4
-        assert tag_formats[0].name == "Unknown"
-        assert tag_formats[1].name == "Danbooru"
-        assert tag_formats[2].name == "e621"
-        assert tag_formats[3].name == "derpibooru"
+        assert tag_formats[0].format_name == "unknown"
+        assert tag_formats[1].format_name == "danbooru"
+        assert tag_formats[2].format_name == "e621"
+        assert tag_formats[3].format_name == "derpibooru"
 
 def test_insert_tag(tag_database_test):
     """ タグが正しく挿入されるかの確認 """
@@ -169,10 +165,7 @@ def test_tagdatabase_with_existing_session(tag_database_test):
     session = SessionLocal()
 
     # TagDatabase のコンストラクタ引数に session を渡す
-    db = TagDatabase(session=session, init_master=False)
-
-    db.create_tables()
-    db.init_master_data()
+    db = TagDatabase(session=session, init_master=True)
 
     assert db.engine == session.get_bind()
     assert db.session == session

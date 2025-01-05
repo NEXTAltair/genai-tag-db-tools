@@ -310,17 +310,46 @@ class TagRepository:
                           alias: bool, preferred_tag_id: int, type_id: Optional[int]= None) -> None:
         """
         DB へ TagStatus を INSERT/UPDATE するメソッド。
-        DB 側で外部キー制約などに違反した場合は IntegrityError が発生する。
-        ここではそれをキャッチし、ValueError に変換して上位に投げる。
+        スキーマ制約に従ってデータを検証し、違反する場合はValueErrorを発生させる。
 
         Args:
             tag_id (int): タグID
             format_id (int): フォーマットID
-            type_id (int): タイプID
+            type_id (Optional[int]): タイプID。指定する場合はTAG_TYPE_FORMAT_MAPPINGに存在する必要がある
             alias (bool): 非推奨タグかどうか
-            preferred_tag_id (int): 優先タグID
+            preferred_tag_id (int): 優先タグID。alias=Falseの場合はtag_idと同じ値である必要がある
+
+        Raises:
+            ValueError:
+                - alias=Falseなのにpreferred_tag_id!=tag_idの場合
+                - type_idを指定したがTAG_TYPE_FORMAT_MAPPINGに存在しない場合
+                - DB操作でIntegrityError等が発生した場合
         """
+        # 1. aliasとpreferred_tag_idの整合性チェック
+        if not alias and preferred_tag_id != tag_id:
+            msg = ErrorMessages.DB_OPERATION_FAILED.format(
+                error_msg="alias=Falseの場合、preferred_tag_idはtag_idと同じ値である必要があります"
+            )
+            raise ValueError(msg)
+
         with self.session_factory() as session:
+            # 2. type_idが指定された場合、TAG_TYPE_FORMAT_MAPPINGの存在チェック
+            if type_id is not None:
+                mapping = (
+                    session.query(TagTypeFormatMapping)
+                    .filter(
+                        TagTypeFormatMapping.format_id == format_id,
+                        TagTypeFormatMapping.type_id == type_id
+                    )
+                    .first()
+                )
+                if not mapping:
+                    msg = ErrorMessages.DB_OPERATION_FAILED.format(
+                        error_msg=f"指定されたformat_id={format_id}とtype_id={type_id}の組み合わせが"
+                                "TAG_TYPE_FORMAT_MAPPINGテーブルに存在しません"
+                    )
+                    raise ValueError(msg)
+
             try:
                 status_obj = TagStatus(
                     tag_id=tag_id,
@@ -330,13 +359,11 @@ class TagRepository:
                     preferred_tag_id=preferred_tag_id
                 )
                 session.add(status_obj)
-                # DB制約を発火させたい場合はflush()しておくと良い
                 session.flush()
                 session.commit()
 
             except IntegrityError as e:
                 session.rollback()
-                # 共通メッセージに DB のエラー内容だけ埋め込む
                 msg = ErrorMessages.DB_OPERATION_FAILED.format(error_msg=str(e))
                 raise ValueError(msg) from e
 
@@ -676,6 +703,19 @@ class TagRepository:
         with self.session_factory() as session:
             return [format.format_id for format in session.query(TagFormat).all()]
 
+    def get_tag_formats(self) -> list[str]:
+        """
+        TAG_FORMATSテーブルからすべてのフォーマット名を取得し、"All"を追加して返す。
+
+        Returns:
+            list[str]: フォーマット名のリスト。最後に"All"が追加される。
+        """
+        with self.session_factory() as session:
+            rows = session.query(TagFormat.format_name).distinct().all()
+            format_list = [row[0] for row in rows]
+            format_list.append("All")
+            return format_list
+
     def get_tag_languages(self) -> list[str]:
         """
         TAG_TRANSLATIONSテーブルからすべての言語を取得する
@@ -683,6 +723,10 @@ class TagRepository:
             list[str]: すべての言語のリスト。
         """
         with self.session_factory() as session:
+
+            languages = {translation.language for translation in session.query(TagTranslation).all()}
+            return list(languages)
+
             return [translation.language for translation in session.query(TagTranslation).all()]
 
     def get_tag_types(self, format_id: int) -> list[str]:

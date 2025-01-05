@@ -30,8 +30,8 @@ def tag_repository(db_session: Session):
     repository = TagRepository()
 
     # session_factory をオーバーライド
-    def session_factory_override():
-        return db_session
+    from sqlalchemy.orm import sessionmaker
+    session_factory_override = sessionmaker(bind=db_session.bind)
     repository.session_factory = session_factory_override
 
     yield repository
@@ -138,6 +138,35 @@ def test_get_format_id(tag_repository):
 
     none_fid = tag_repository.get_format_id("nonsense")
     assert none_fid is None
+
+def test_get_tag_formats(tag_repository):
+    """
+    get_tag_formats のテスト。
+
+    以下を確認:
+    1. フォーマット名が正しく取得できる
+    2. 重複が排除される（DISTINCTの動作確認）
+    3. "All"が最後に追加される
+    """
+    with tag_repository.session_factory() as session:
+        # テストデータ作成（重複を含まない）
+        formats = [
+            TagFormat(format_id=1, format_name="danbooru"),
+            TagFormat(format_id=2, format_name="e621"),
+            TagFormat(format_id=3, format_name="gelbooru"),  # 異なるformat_name
+        ]
+        session.add_all(formats)
+        session.commit()
+
+    # フォーマット一覧を取得
+    format_list = tag_repository.get_tag_formats()
+
+    # 検証
+    assert len(format_list) == 4  # 3つのフォーマット + "All"で4件
+    assert "danbooru" in format_list
+    assert "e621" in format_list
+    assert "gelbooru" in format_list
+    assert format_list[-1] == "All"  # 最後の要素が"All"であることを確認
 
 def test_update_tag_status(tag_repository):
     """

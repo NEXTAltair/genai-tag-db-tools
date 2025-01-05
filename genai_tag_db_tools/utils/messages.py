@@ -13,6 +13,9 @@
 6. テストの容易さ: エラーメッセージが集中管理されているため、メッセージの内容や形式を一括でテストしやすくなる。
 """
 
+from dataclasses import MISSING
+
+
 class ErrorMessages:
     # --- 共通エラーメッセージ ---
     INVALID_INPUT = "無効な入力が指定されました。"
@@ -20,11 +23,11 @@ class ErrorMessages:
     FILE_NOT_FOUND = "指定されたファイルが見つかりませんでした。"
 
     # --- データベース関連のエラーメッセージ ---
-    # --- tag_repository.py ---
     DB_OPERATION_FAILED = "データベース操作に失敗しました: {error_msg}"
     TAG_ID_NOT_FOUND_AFTER_INSERT = "挿入後にタグ ID が見つかりませんでした。"
     INVALID_TAG_ID_DELETION_ATTEMPT = "存在しないタグID {tag_id} の削除を試みました。"
     MISSING_REQUIRED_FIELDS = "登録時に必要なデータが欠けています: {fields}"
+    MISSING_TAG_FORMAT = "指定されたタグフォーマットが見つかりません。: {format_name}"
 
 class LogMessages:
     START_PROCESS = "プロセスを開始しました。"
