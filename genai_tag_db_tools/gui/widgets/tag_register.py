@@ -1,14 +1,11 @@
 from PySide6.QtWidgets import QWidget, QMessageBox
 from PySide6.QtCore import Slot
 from genai_tag_db_tools.gui.designer.TagRegisterWidget_ui import Ui_TagRegisterWidget
-from genai_tag_db_tools.services.processor import CSVToDatabaseProcessor
-
-
+from genai_tag_db_tools.utils.cleanup_str import TagCleaner
 class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
-        self.tag_searcher = None
 
     def initialize(self, tag_searcher):
         self.tag_searcher = tag_searcher
@@ -23,6 +20,9 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
     @Slot(int)
     def on_comboBoxFormat_currentIndexChanged(self, index=0):
         format_name = self.comboBoxFormat.currentText()
+        # format_name が空文字の場合は `danbooru`
+        if not format_name:
+            format_name = "danbooru"
         tag_types = self.tag_searcher.get_tag_types(format_name)
         self.comboBoxType.clear()
         self.comboBoxType.addItems([""] + tag_types)
@@ -51,7 +51,7 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
         if source_tag == tag:
             source_tag = tag
         else:
-            normalized_tag = CSVToDatabaseProcessor.normalize_tag(source_tag)
+            normalized_tag = TagCleaner.clean_tags(source_tag)
 
         return {
             "normalized_tag": normalized_tag,
@@ -93,7 +93,7 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
 if __name__ == "__main__":
     from genai_tag_db_tools.gui.widgets.tag_register import initialize_tag_searcher
     from PySide6.QtWidgets import QApplication
-    from ..designer.TagRegisterWidget import TagRegisterWidget
+    from genai_tag_db_tools.gui.designer.TagRegisterWidget_ui import TagRegisterWidget
 
     app = QApplication([])
     tag_searcher = initialize_tag_searcher()

@@ -24,10 +24,10 @@ class TagCleanerWidget(QWidget, Ui_TagCleanerWidget):
 if __name__ == "__main__":
     import sys
     from PySide6.QtWidgets import QApplication
-    from .tag_cleaner import initialize_tag_searcher
+    from genai_tag_db_tools.utils.cleanup_str import TagCleaner
 
     app = QApplication(sys.argv)
-    tag_searcher = initialize_tag_searcher()
+    tag_searcher = TagCleaner()
     window = TagCleanerWidget()
     window.initialize(tag_searcher)
     window.show()

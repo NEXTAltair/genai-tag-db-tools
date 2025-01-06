@@ -128,16 +128,19 @@ def test_bulk_insert_tags(tag_repository):
 def test_get_format_id(tag_repository):
     """
     get_format_id のテスト。
+    存在しないformat_nameの場合はValueErrorを返すことを確認。
     """
     with tag_repository.session_factory() as session:
         session.add(TagFormat(format_id=10, format_name="danbooru"))
         session.commit()
 
+    # 正常系: 存在するformat_nameの場合はIDを返す
     fid = tag_repository.get_format_id("danbooru")
     assert fid == 10
 
-    none_fid = tag_repository.get_format_id("nonsense")
-    assert none_fid is None
+    # 異常系: 存在しないformat_nameの場合はValueErrorを返す
+    with pytest.raises(ValueError):
+        tag_repository.get_format_id("nonsense")
 
 def test_get_tag_formats(tag_repository):
     """

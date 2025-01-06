@@ -1,6 +1,6 @@
 import sys
 from PySide6.QtWidgets import QApplication, QMainWindow
-from ..designer.MainWindow_ui import Ui_MainWindow
+from genai_tag_db_tools.gui.designer.MainWindow_ui import Ui_MainWindow
 
 
 class MainWindow(QMainWindow, Ui_MainWindow):
@@ -26,10 +26,10 @@ if __name__ == "__main__":
     current_dir = Path(__file__).parent
     project_root = current_dir.parent
     sys.path.insert(0, str(project_root))
-    from tag_search import initialize_tag_searcher
+    from genai_tag_db_tools.services.tag_search import TagSearcher
 
     app = QApplication(sys.argv)
-    tag_searcher = initialize_tag_searcher()
+    tag_searcher = TagSearcher()
     window = MainWindow()
     window.initialize(tag_searcher)
     window.show()

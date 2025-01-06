@@ -1,5 +1,5 @@
 import pytest
-from genai_tag_db_tools.cleanup_str import TagCleaner
+from genai_tag_db_tools.utils.cleanup_str import TagCleaner
 
 
 @pytest.fixture
@@ -10,13 +10,13 @@ def tag_cleaner():
 def test_clean_format(tag_cleaner):
     text = "This is a test. This is only a test."
     expected = "This is a test, This is only a test, "
-    assert tag_cleaner.clean_format(text) == expected
+    assert TagCleaner.clean_format(text) == expected
 
 
 def test_clean_format_01(tag_cleaner):
     text = "This_is_a_test.\n (This) is only a test."
     expected = "This is a test, \(This\) is only a test, "
-    assert tag_cleaner.clean_format(text) == expected
+    assert TagCleaner.clean_format(text) == expected
 
 
 def test_clean_tags(tag_cleaner):

@@ -1,5 +1,4 @@
 import logging
-import traceback
 from functools import partial
 
 import polars as pl
@@ -13,7 +12,7 @@ from genai_tag_db_tools.gui.designer.TagDataImportDialog_ui import (
 
 from genai_tag_db_tools.services.import_data import TagDataImporter, ImportConfig
 from genai_tag_db_tools.services.tag_search import TagSearcher
-from genai_tag_db_tools.config import AVAILABLE_COLUMNS
+from genai_tag_db_tools.services.polars_schema import AVAILABLE_COLUMNS
 
 
 class PolarsModel(QAbstractTableModel):
@@ -119,11 +118,11 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
         langs = self.tag_searcher.get_tag_languages()
 
         # 検索とは違い `ALL` は不要なので消す
-        formats = formats.filter(pl.col("format_name") != "All")
-        langs = langs.filter(pl.col("language") != "All")
+        formats = [f for f in formats if f != "All"]
+        langs = [l for l in langs if l != "All"]
 
-        self.formatComboBox.addItems(formats["format_name"].to_list())
-        self.languageComboBox.addItems(langs["language"].to_list())
+        self.formatComboBox.addItems(formats)
+        self.languageComboBox.addItems(langs)
         # インポートボタンは初期状態で無効化
         self.importButton.setEnabled(False)
 
@@ -244,7 +243,7 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
     def on_formatComboBox_currentTextChanged(self):
         """フォーマットが変更されたときの処理"""
         format_name = self.formatComboBox.currentText()
-        self.format_id = self.tag_searcher.get_format_id(format_name)
+        self.format_id = self.tag_searcher.tag_repo.get_format_id(format_name)
         self.on_sourceTagCheckBox_stateChanged()
 
     @Slot()

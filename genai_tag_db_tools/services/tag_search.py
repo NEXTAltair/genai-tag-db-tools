@@ -99,8 +99,6 @@ class TagSearcher:
         """
         return self.tag_repo.get_tag_formats()
 
-
-
 if __name__ == "__main__":
     word = "1boy"
     prompt = "1boy, 1girl, 2boys, 2girls, 3boys, 3girls, 4boys, 4girls, 5boys"
