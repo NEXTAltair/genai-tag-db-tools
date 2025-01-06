@@ -1,43 +1,48 @@
 import logging
-from socket import MsgFlag
-from typing import Optional
 
 from genai_tag_db_tools.data.tag_repository import TagRepository
-from genai_tag_db_tools.utils.messages import LogMessages, ErrorMessages
+from genai_tag_db_tools.utils.messages import ErrorMessages
 
 class TagSearcher:
-    """
-    """
+    """タグ検索・変換等を行うビジネスロジッククラス"""
+
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        # リポジトリはとりあえず自前でインスタンス化（本来はDIするのが望ましい）
+        # リポジトリはとりあえず自前でインスタンス化
         self.tag_repo = TagRepository()
 
-    def convert_tag(self, search_tag: str, target_format_name: str) -> str:
+    def convert_tag(self, search_tag: str, format_name: str) -> str:
         """
         入力された `search_tag` を指定フォーマットの「推奨タグ」に変換して返す。
         - alias=True の場合などは preferred_tag を取得して置き換え。
         - DBになければそのまま返す。
-        - もしデータベース的に 'invalid tag' 扱いであれば無視する or ログ出し (運用次第)
-        """
+        - 'invalid tag' はログに残して元タグを返す。
 
+        Args:
+            search_tag (str): 変換対象のタグ
+            format_name (str): 対象のフォーマット名
+
+        Returns:
+            str: 変換後のタグ
+        """
         # 1) 対象フォーマットID取得
-        format_id = self.tag_repo.get_format_id(target_format_name)
+        format_id = self.tag_repo.get_format_id(format_name)
+
+        # 見つからなかったらエラーを投げる
         if format_id is None:
-            msg = ErrorMessages.MISSING_TAG_FORMAT.format(format_name=target_format_name)
-            self.logger.error(msg)
+            # NOTE: DBに初期値として登録してるので起こりえないが、念のため
             return search_tag
 
-        # 2) タグIDを検索 (完全一致検索にするか部分一致にするかは運用次第)
+        # 2) タグIDを検索 (完全一致検索)
         tag_id = self.tag_repo.get_tag_id_by_name(search_tag, partial=False)
         if tag_id is None:
             # DBになければ変換しない
             return search_tag
 
-        # 3) preferred_tag_id を取得 (alias=Trueのときに別タグを指している可能性)
+        # 3) preferred_tag_id を取得 (alias=Trueのときのみ)
         preferred_tag_id = self.tag_repo.find_preferred_tag(tag_id, format_id)
         if preferred_tag_id is None:
-            # 対応する TagStatus がない or alias=False で自分自身がpreferred_tagになってるケース
+            # 対応する TagStatus がない場合はそのまま返す
             return search_tag
 
         # 4) preferred_tag_id から実際のタグ文字列を取得
@@ -48,9 +53,11 @@ class TagSearcher:
 
         preferred_tag = preferred_tag_obj.tag
         if preferred_tag == "invalid tag":
-            # FIXME: DB上に 'invalid tag' が登録されていたらどう扱うか？
-            # ここでは「変換せず元のタグを返す」か、あるいは "" (空文字) にするなど運用次第
-            self.logger.warning(f"「優先タグは {search_tag} に対して「無効なタグ」です。オリジナルを使用してください。」")
+            # ログを出しておいて、後で手動修正できるようにする
+            self.logger.warning(
+                f"[convert_tag] '{search_tag}' → 優先タグが 'invalid tag' です。"
+                "オリジナルタグを使用します。"
+            )
             return search_tag
 
         if search_tag != preferred_tag:
@@ -61,42 +68,50 @@ class TagSearcher:
     def get_tag_types(self, format_name: str) -> list[str]:
         """
         指定フォーマットに紐づくタグタイプ名の一覧を取得する。
+
+        Args:
+            format_name (str): フォーマット名
+
+        Returns:
+            list[str]: タグタイプ名のリスト
         """
         format_id = self.tag_repo.get_format_id(format_name)
         if format_id is None:
             return []
-
-        # リポジトリの get_tag_types(format_id) を使う
         return self.tag_repo.get_tag_types(format_id)
 
     def get_tag_languages(self) -> list[str]:
         """
         DB上に登録されている言語の一覧を返す。
+
+        Returns:
+            list[str]: 言語コードのリスト
         """
         return self.tag_repo.get_tag_languages()
 
-def initialize_tag_searcher() -> TagSearcher:
-    return TagSearcher()
+    def get_tag_formats(self) -> list[str]:
+        """
+        利用可能なタグフォーマットの一覧を取得する。
+        "All"を含む全フォーマット名のリストを返す。
+
+        Returns:
+            list[str]: フォーマット名のリスト。最後に"All"が追加される。
+        """
+        return self.tag_repo.get_tag_formats()
+
 
 
 if __name__ == "__main__":
     word = "1boy"
-    match_mode = "partial"
     prompt = "1boy, 1girl, 2boys, 2girls, 3boys, 3girls, 4boys, 4girls, 5boys"
     format_name = "e621"
-    tagsearcher = initialize_tag_searcher()
 
-    # 修正ポイント:
-    # 旧コードでは for tag in prompt.split(", "): の中で convert_tag(prompt, format_name) を呼んでいた → バグ
-    # → 修正し、tag を渡す
-    tags = []
-    for tag in prompt.split(", "):
-        converted = tagsearcher.convert_tag(tag, format_name)
-        tags.append(converted)
-    clean_prompt = ", ".join(tags)
+    tagsearcher = TagSearcher()
 
-    print("元のプロンプト:", prompt)
-    print("変換後のプロンプト:", clean_prompt)
+    # 単一タグを部分一致で変換してみる例
+    # (複数ヒットした場合の挙動はリポジトリ側 or さらに上位で検討)
+    converted_single = tagsearcher.convert_tag(word, format_name)
+    print(f"[single] '{word}' → '{converted_single}'")
 
     # タグタイプ一覧を取得
     types = tagsearcher.get_tag_types("e621")
@@ -105,3 +120,7 @@ if __name__ == "__main__":
     # 言語一覧を取得
     langs = tagsearcher.get_tag_languages()
     print("登録されている言語:", langs)
+
+    # フォーマット一覧を取得
+    formats = tagsearcher.get_tag_formats()
+    print("利用可能なフォーマット:", formats)

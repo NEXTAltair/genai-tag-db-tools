@@ -2,7 +2,7 @@ import re
 from functools import lru_cache
 from typing import Set
 
-from genai_tag_db_tools.services.tag_search import initialize_tag_searcher
+from genai_tag_db_tools.services.tag_search import TagSearcher
 
 HAIR_PATTERNS = {
     "length": re.compile(r"(long|short|medium) hair"),
@@ -59,7 +59,7 @@ CAPTION_REPLACEMENTS = [
 
 class TagCleaner:
     def __init__(self):
-        self.tag_searcher = initialize_tag_searcher()
+        self.tag_searcher = TagSearcher()
 
     @lru_cache(maxsize=None)
     @staticmethod

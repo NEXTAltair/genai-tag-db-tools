@@ -258,7 +258,7 @@ class TagRepository:
     def get_format_id(self, format_name: str) -> Optional[int]:
         """
         指定されたフォーマット名に対応するフォーマットIDを取得する。
-
+        存在しない場合は例外をスロー。
         Args:
             format_name (str): フォーマット名
 
@@ -267,7 +267,9 @@ class TagRepository:
         """
         with self.session_factory() as session:
             format_obj = session.query(TagFormat).filter(TagFormat.format_name == format_name).one_or_none()
-            return format_obj.format_id if format_obj else None
+            if not format_obj:
+                raise ValueError(f"Format not found: {format_name}")
+            return format_obj.format_id
 
 
     # --- TAG_TYPE_NAME ---
