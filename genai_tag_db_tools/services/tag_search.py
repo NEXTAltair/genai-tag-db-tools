@@ -1,8 +1,6 @@
 import logging
 
 from genai_tag_db_tools.data.tag_repository import TagRepository
-from genai_tag_db_tools.utils.messages import ErrorMessages
-
 class TagSearcher:
     """タグ検索・変換等を行うビジネスロジッククラス"""
 
@@ -11,7 +9,7 @@ class TagSearcher:
         # リポジトリはとりあえず自前でインスタンス化
         self.tag_repo = TagRepository()
 
-    def convert_tag(self, search_tag: str, format_name: str) -> str:
+    def convert_tag(self, search_tag: str, format_id: int) -> str:
         """
         入力された `search_tag` を指定フォーマットの「推奨タグ」に変換して返す。
         - alias=True の場合などは preferred_tag を取得して置き換え。
@@ -20,32 +18,24 @@ class TagSearcher:
 
         Args:
             search_tag (str): 変換対象のタグ
-            format_name (str): 対象のフォーマット名
+            format_id (int): 対象のフォーマットID
 
         Returns:
             str: 変換後のタグ
         """
-        # 1) 対象フォーマットID取得
-        format_id = self.tag_repo.get_format_id(format_name)
-
-        # 見つからなかったらエラーを投げる
-        if format_id is None:
-            # NOTE: DBに初期値として登録してるので起こりえないが、念のため
-            return search_tag
-
-        # 2) タグIDを検索 (完全一致検索)
+        # 1) タグIDを検索 (完全一致検索)
         tag_id = self.tag_repo.get_tag_id_by_name(search_tag, partial=False)
         if tag_id is None:
             # DBになければ変換しない
             return search_tag
 
-        # 3) preferred_tag_id を取得 (alias=Trueのときのみ)
+        # 2) preferred_tag_id を取得 (alias=Trueのときのみ)
         preferred_tag_id = self.tag_repo.find_preferred_tag(tag_id, format_id)
         if preferred_tag_id is None:
             # 対応する TagStatus がない場合はそのまま返す
             return search_tag
 
-        # 4) preferred_tag_id から実際のタグ文字列を取得
+        # 3) preferred_tag_id から実際のタグ文字列を取得
         preferred_tag_obj = self.tag_repo.get_tag_by_id(preferred_tag_id)
         if not preferred_tag_obj:
             # DB異常 → 元のタグのまま返す
@@ -92,12 +82,23 @@ class TagSearcher:
     def get_tag_formats(self) -> list[str]:
         """
         利用可能なタグフォーマットの一覧を取得する。
-        "All"を含む全フォーマット名のリストを返す。
 
         Returns:
-            list[str]: フォーマット名のリスト。最後に"All"が追加される。
+            list[str]: フォーマット名のリスト。
         """
         return self.tag_repo.get_tag_formats()
+
+    def get_format_id(self, format_name: str) -> int:
+        """
+        フォーマット名からフォーマットIDを取得する。
+
+        Args:
+            format_name (str): フォーマット名
+
+        Returns:
+            int: フォーマットID
+        """
+        return self.tag_repo.get_format_id(format_name)
 
 if __name__ == "__main__":
     word = "1boy"

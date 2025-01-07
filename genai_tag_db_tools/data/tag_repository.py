@@ -252,7 +252,7 @@ class TagRepository:
 
 
     # --- TAG_FORMATS ---
-    def get_format_id(self, format_name: str) -> Optional[int]:
+    def get_format_id(self, format_name: str) -> int:
         """
         指定されたフォーマット名に対応するフォーマットIDを取得する。
         存在しない場合は例外をスロー。
@@ -702,15 +702,14 @@ class TagRepository:
 
     def get_tag_formats(self) -> list[str]:
         """
-        TAG_FORMATSテーブルからすべてのフォーマット名を取得し、"All"を追加して返す。
+        TAG_FORMATSテーブルからすべてのフォーマット名を取得して返す。
 
         Returns:
-            list[str]: フォーマット名のリスト。最後に"All"が追加される。
+            list[str]: フォーマット名のリスト。
         """
         with self.session_factory() as session:
             rows = session.query(TagFormat.format_name).distinct().all()
             format_list = [row[0] for row in rows]
-            format_list.append("All")
             return format_list
 
     def get_tag_languages(self) -> list[str]:
