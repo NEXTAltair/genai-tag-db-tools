@@ -2,10 +2,7 @@ from logging import getLogger
 from typing import Optional
 
 import polars as pl
-from sqlalchemy_filters import apply_sort, apply_pagination, apply_filters
 
-from sqlalchemy import or_
-from sqlalchemy.orm import aliased
 from sqlalchemy.exc import IntegrityError
 
 from genai_tag_db_tools.db.database_setup import SessionLocal
@@ -19,7 +16,7 @@ from genai_tag_db_tools.data.database_schema import (
     TagUsageCounts,
 )
 
-from genai_tag_db_tools.utils.messages import LogMessages, ErrorMessages
+from genai_tag_db_tools.utils.messages import ErrorMessages
 
 class TagRepository:
     logger = getLogger(__name__)

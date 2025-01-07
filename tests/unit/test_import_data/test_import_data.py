@@ -1,14 +1,11 @@
 import pytest
 from unittest.mock import ANY
 import polars as pl
-from unittest.mock import MagicMock, patch
-from PySide6.QtCore import Signal
+from unittest.mock import MagicMock
 from pathlib import Path
 
 from genai_tag_db_tools.services.import_data import TagDataImporter, ImportConfig
-from genai_tag_db_tools.data.database_schema import TagDatabase
 from genai_tag_db_tools.data.tag_repository import TagRepository
-from genai_tag_db_tools.db.database_setup import SessionLocal, engine, db_path
 
 """
 本ファイルでは TagDataImporter の主要メソッドを一通りテストします。

@@ -4,13 +4,11 @@ from typing import Optional
 
 import polars as pl
 from PySide6.QtCore import QObject, Signal
-
 from dataclasses import dataclass, field
 
-# DBアクセスまわり（TagDatabase, TagRepositoryなど）
-from genai_tag_db_tools.data.database_schema import TagDatabase
+# DBアクセスまわり（TagRepositoryのみを利用）
 from genai_tag_db_tools.data.tag_repository import TagRepository
-from genai_tag_db_tools.db.database_setup import SessionLocal, engine, db_path
+from genai_tag_db_tools.db.database_setup import engine, db_path
 
 # ユーティリティ
 from genai_tag_db_tools.utils.cleanup_str import TagCleaner
@@ -42,23 +40,23 @@ class TagDataImporter(QObject):
     """
 
     # --- PySide6 Signals (GUIから進捗確認する際に使用) ---
-    process_started = Signal(str)     # 処理開始 ("インポート開始"など)
-    progress_updated = Signal(int, str)  # 進捗度, メッセージ
-    process_finished = Signal(str)    # 処理完了 ("インポート完了"など)
-    error_occurred = Signal(str)      # エラーメッセージ
+    process_started = Signal(str)         # 処理開始 ("インポート開始"など)
+    progress_updated = Signal(int, str)   # 進捗度, メッセージ
+    process_finished = Signal(str)        # 処理完了 ("インポート完了"など)
+    error_occurred = Signal(str)          # エラーメッセージ
 
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
 
-        # DB 初期化
+        # DB設定
         self._conn_path = db_path  # 必要なら外部から注入できるようにしても良い
         self._engine = engine
 
-        self._tag_db = TagDatabase(engine=self._engine)
+        # TagRepository のインスタンス化のみ
         self._tag_repo = TagRepository()
-        self._tag_repo.session_factory = SessionLocal
 
-        self._cancel_flag = False  # ユーザーによるキャンセルフラグ
+        # ユーザーによるキャンセルフラグ
+        self._cancel_flag = False
 
     # ----------------------------------------------------------------------
     #  1) CSV / Parquet 読み込み
@@ -163,7 +161,6 @@ class TagDataImporter(QObject):
             language=language,
             column_names=list(processed_df.columns)
         )
-
         return processed_df, config
 
     def _ensure_minimum_columns(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -225,11 +222,10 @@ class TagDataImporter(QObject):
             return
 
         try:
-            # 1) タグを正規化 (source_tag → tag) ※旧設計での _normalize_tags 相当
+            # 1) タグを正規化 (source_tag → tag)
             normalized_df = self._normalize_tags(df)
 
-            # 2) タグ登録 (create_tag でDB挿入 or 既存ID取得) → tag_idカラムを付与
-            #    例: bulk_insert_tags() + _fetch_existing_tags_as_map()
+            # 2) タグ登録 (bulk_insert_tags → 既存 + 新規タグID取得) → tag_idカラム付与
             enriched_df = self._insert_tags_and_attach_id(normalized_df)
 
             # 3) Usage Count の登録
@@ -250,9 +246,6 @@ class TagDataImporter(QObject):
             logger.error(f"インポート中にエラーが発生: {e}")
             self.error_occurred.emit(str(e))
             raise
-        finally:
-            # 例: DBセッションは TagRepository の中で都度 commit/rollback している想定
-            pass
 
     def _normalize_tags(self, df: pl.DataFrame) -> pl.DataFrame:
         """
@@ -280,7 +273,6 @@ class TagDataImporter(QObject):
             .otherwise(pl.col("tag"))
             .alias("tag")
         )
-
         return df
 
     def _insert_tags_and_attach_id(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -293,15 +285,14 @@ class TagDataImporter(QObject):
         if "tag" not in df.columns:
             return df
 
-        # 1) 新規タグを登録 + 既存タグのtag_idをまとめて取得
+        # 1) 新規タグを一括登録 (既存のものはスキップされる)
         self._tag_repo.bulk_insert_tags(df.select(["source_tag", "tag"]))
 
-        # 2) DB上の tag_id を引いてDataFrameにマージ
-        #    例: TagRepository._fetch_existing_tags_as_map() を使用
+        # 2) DB上にあるタグ → tag_id をまとめて取得
         unique_tags = df["tag"].unique().to_list()
         tag_map = self._tag_repo._fetch_existing_tags_as_map(unique_tags)
 
-        # map_elementsでtag→tag_idを置換
+        # 3) tag → tag_id へ置換
         df = df.with_columns(
             pl.col("tag")
             .map_elements(lambda t: tag_map.get(t, None), return_dtype=pl.Int64)
@@ -346,21 +337,20 @@ class TagDataImporter(QObject):
         if "tag_id" not in df.columns:
             return
 
-        # 行ごとに deprecated_tags カンマ区切りを展開
         for row in df.iter_rows(named=True):
             tag_id = row["tag_id"]
             dep_str = row.get("deprecated_tags", "")
             if not dep_str:
                 continue
-            # カンマ区切りを分割
+
+            # カンマ区切りを分割 → クリーニング → alias登録
             for dep_tag_raw in dep_str.split(","):
                 dep_tag = TagCleaner.clean_format(dep_tag_raw)
                 if not dep_tag:
                     continue
-                # alias用に作成
+                # alias 用に作成
                 alias_tag_id = self._tag_repo.create_tag(dep_tag, dep_tag)
-                # alias=True, preferred_tag_id=tag_id
-                # format_id 未指定なら 0 or config.format_id
+                # alias=True, preferred_tag_id=tag_id で status 登録
                 self._tag_repo.update_tag_status(
                     tag_id=alias_tag_id,
                     format_id=format_id,
@@ -381,8 +371,7 @@ class TagDataImporter(QObject):
     def __del__(self):
         """
         クラス破棄時のクリーンアップ。
+        以前は TagDatabase の cleanup() を呼んでいたが、Repository 側で都度
+        セッションをクローズするため、特に何も行わない。
         """
-        try:
-            self._tag_db.cleanup()  # もしTagDatabaseがclose()等を実行するなら
-        except Exception as e:
-            logger.error(f"TagDatabaseクリーンアップ中にエラー: {e}")
+        logger.debug("TagDataImporter のインスタンス破棄")
