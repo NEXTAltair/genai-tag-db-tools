@@ -260,13 +260,11 @@ class TagRepository:
             format_name (str): フォーマット名
 
         Returns:
-            Optional[int]: フォーマットID。見つからない場合None。
+            Optional[int]: フォーマットID。見つからない場合は `unknown` を示す 0 。
         """
         with self.session_factory() as session:
             format_obj = session.query(TagFormat).filter(TagFormat.format_name == format_name).one_or_none()
-            if not format_obj:
-                raise ValueError(f"Format not found: {format_name}")
-            return format_obj.format_id
+            return format_obj.format_id if format_obj else 0
 
 
     # --- TAG_TYPE_NAME ---
