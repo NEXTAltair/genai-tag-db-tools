@@ -71,6 +71,8 @@ omit = [
     "*/pyscript",
     "*/signature_bootstrap.py",
     "*/__init__.py",
+    "*/__pycache__",
+    "*/genai_tag_db_tools/gui/designer/*",
 ]
 
 [tool.coverage.report]

@@ -3,7 +3,6 @@ from __future__ import annotations  # 循環参照や古いバージョン対策
 from logging import getLogger
 from typing import Optional, Set
 from datetime import datetime
-from matplotlib.pylab import f
 import polars as pl
 
 from sqlalchemy import (
@@ -252,66 +251,71 @@ class TagTypeFormatMapping(Base):
 # --------------------------------------------------------------------------
 # TagDatabase クラス
 # --------------------------------------------------------------------------
+# ここで共通の engine, SessionLocal を import
+from genai_tag_db_tools.db.database_setup import engine, SessionLocal
+
 class TagDatabase:
     """タグデータベース管理クラス"""
-
     def __init__(
         self,
-        engine: Optional[Engine] = None,
-        session: Optional[Session] = None,
+        external_session: Optional[Session] = None,
         init_master: bool = True,
     ):
         """
         Args:
-            engine: SQLAlchemyのエンジン。Noneの場合はデフォルトのエンジンを作成
-            session: SQLAlchemyのセッション。Noneの場合はエンジンから新規作成
-            init_master: マスターデータを初期化するかどうか。デフォルトはTrue
+            external_session (Optional[Session]): すでに作成された外部セッションを注入する場合
+            init_master (bool): マスターデータを初期化するかどうか。デフォルトはTrue
         """
         self.logger = getLogger(__name__)
-        self._sessions: Set[Session] = set()  # セッション追跡セット
+        self._sessions: Set[Session] = set()
 
-        if engine is not None:
+        # 1) セッションの設定
+        if external_session is not None:
+            # 外部からセッションが注入された場合
+            self.session = external_session
+            # 外部セッションのエンジンを使用
+            self.engine = external_session.get_bind()
+        else:
+            # database_setup.py にある共通の SessionLocal() を利用
             self.engine = engine
-        elif session is not None:
-            self.engine = session.get_bind()
-        else:
-            # ここで db_path が未定義の場合など、どうするか？
-            # from pathlib import Path
-            # db_path = Path("some_default.db")
-            # self.engine = create_engine( ... )
-            raise ValueError("Need either an engine or a session with a bound engine.")
+            self.session = SessionLocal()
+            self._sessions.add(self.session)
 
-        self.sessionmaker = sessionmaker(bind=self.engine)
-
-        # セッションの設定
-        if session is not None:
-            self.session = session
-        else:
-            self.session = self.create_session()
-
+        # 3) 必要ならマスターデータ初期化
         if init_master:
+            # テーブル作成とマスターデータ初期化は同じセッションで行う
             self.create_tables()
             self.init_master_data()
-
-    def create_session(self) -> Session:
-        session = self.sessionmaker()
-        self._sessions.add(session)
-        return session
+            self.session.commit()  # マスターデータの変更を確定
 
     def cleanup(self):
-        """リソースのクリーンアップ"""
+        """
+        テストなどで使ったセッションを全てクローズ。
+        外部セッションも追加されていればここでクローズされるので、
+        テストでは session.is_active == False になるはず。
+        """
         for sess in list(self._sessions):
             try:
+                # トランザクションをロールバックしてからクローズ
+                sess.rollback()
+                # セッションからすべてのオブジェクトを削除
+                sess.expunge_all()
+                # セッションをクローズ
                 sess.close()
+                # (エンジンやbindはdisposeしない方が無難。必要ならdispose()を呼ぶ)
             except Exception as e:
                 self.logger.error(f"セッションのクローズ中にエラー: {e}")
             finally:
                 self._sessions.discard(sess)
 
+
     def __del__(self):
         self.cleanup()
 
     def create_tables(self):
+        """
+        テーブル作成などの初期化。Base.metadata.create_all() を呼び出す。
+        """
         Base.metadata.create_all(self.engine)
 
     def init_master_data(self):
@@ -321,7 +325,10 @@ class TagDatabase:
         self.init_tagtypeformatmapping()
 
     def init_tagformat(self):
-        session = self.create_session()
+        """
+        TagFormatテーブルのマスターデータを初期化する。
+        メインのセッションを使用し、トランザクション内で実行する。
+        """
         initial_data = [
             TagFormat(format_id=0, format_name="unknown", description=""),
             TagFormat(format_id=1, format_name="danbooru", description=""),
@@ -331,23 +338,23 @@ class TagDatabase:
         try:
             for data in initial_data:
                 existing = (
-                    session.query(TagFormat)
+                    self.session.query(TagFormat)
                     .filter_by(format_name=data.format_name)
                     .first()
                 )
                 if not existing:
-                    session.add(data)
-            session.commit()
+                    self.session.add(data)
+            self.session.commit()
         except Exception as e:
             self.logger.error(f"TagFormatの初期化中にエラー: {e}")
-            session.rollback()
+            self.session.rollback()
             raise
-        finally:
-            session.close()
-            self._sessions.discard(session)
 
     def init_tagtypename(self):
-        session = self.create_session()
+        """
+        TagTypeNameテーブルのマスターデータを初期化する。
+        メインのセッションを使用し、トランザクション内で実行する。
+        """
         initial_data = [
             TagTypeName(type_name_id=0, type_name="unknown", description=""),
             TagTypeName(type_name_id=1, type_name="general", description=""),
@@ -370,23 +377,23 @@ class TagDatabase:
         try:
             for data in initial_data:
                 existing = (
-                    session.query(TagTypeName)
+                    self.session.query(TagTypeName)
                     .filter_by(type_name_id=data.type_name_id)
                     .first()
                 )
                 if not existing:
-                    session.add(data)
-            session.commit()
+                    self.session.add(data)
+            self.session.commit()
         except Exception as e:
             self.logger.error(f"TagTypeNameの初期化中にエラー: {e}")
-            session.rollback()
+            self.session.rollback()
             raise
-        finally:
-            session.close()
-            self._sessions.discard(session)
 
     def init_tagtypeformatmapping(self):
-        session = self.create_session()
+        """
+        TagTypeFormatMappingテーブルのマスターデータを初期化する。
+        メインのセッションを使用し、トランザクション内で実行する。
+        """
         initial_data = [
             TagTypeFormatMapping(format_id=0, type_id=0, type_name_id=0),
             # Format 1 (danbooru)
@@ -425,38 +432,14 @@ class TagDatabase:
         try:
             for data in initial_data:
                 existing = (
-                    session.query(TagTypeFormatMapping)
+                    self.session.query(TagTypeFormatMapping)
                     .filter_by(format_id=data.format_id, type_id=data.type_id)
                     .first()
                 )
                 if not existing:
-                    session.add(data)
-            session.commit()
+                    self.session.add(data)
+            self.session.commit()
         except Exception as e:
             self.logger.error(f"TagTypeFormatMappingの初期化中にエラー: {e}")
-            session.rollback()
+            self.session.rollback()
             raise
-        finally:
-            session.close()
-            self._sessions.discard(session)
-
-    @classmethod
-    def create_test_instance(cls, engine: Engine) -> TagDatabase:
-        return cls(engine=engine, init_master=False)
-
-    def get_formatnames(self):
-        query = "SELECT * FROM TAG_TYPE_NAME"
-        df = pl.read_database(query, connection=self.engine)
-        print(df)
-
-
-if __name__ == "__main__":
-    # テスト起動
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-        echo=False,
-    )
-    db = TagDatabase(engine=engine, init_master=True)
-    db.get_formatnames()
