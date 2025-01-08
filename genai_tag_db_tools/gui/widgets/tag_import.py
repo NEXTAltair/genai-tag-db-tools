@@ -1,8 +1,10 @@
+# genai_tag_db_tools/gui/widgets/tag_import.py
+
 import logging
 from functools import partial
+from typing import Optional
 
 import polars as pl
-
 from PySide6.QtCore import Slot, Qt, QAbstractTableModel, Signal
 from PySide6.QtWidgets import QDialog, QMenu, QMessageBox
 
@@ -14,21 +16,24 @@ from genai_tag_db_tools.services.import_data import TagDataImporter, ImportConfi
 from genai_tag_db_tools.services.tag_search import TagSearcher
 from genai_tag_db_tools.services.polars_schema import AVAILABLE_COLUMNS
 
+# 新規作成したサービス層をインポート (TagImportService)
+from genai_tag_db_tools.services.app_services import TagImportService
+
 
 class PolarsModel(QAbstractTableModel):
-    mappingChanged = Signal()  # クラス属性として Signal を定義
+    """
+    Polars DataFrame の表示と、カラムマッピング（元カラム名→新カラム名）の管理を担当するモデル。
+    DB操作やビジネスロジックは含まない。
+    """
+    mappingChanged = Signal()
 
     def __init__(self, data: pl.DataFrame):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self._data = data
-        self.importer = TagDataImporter()
-        self._headers = list(
-            self._data.columns
-        )  # デフォルトのヘッダーを維持､あれば既存のヘッダーを使用､なければ `column1` など
-        self._mapping = {
-            i: "未選択" for i in range(len(self._headers))
-        }  # カラムマッピング
+        self._headers = list(self._data.columns)
+        # 「カラムインデックス → '未選択' or カラム名」の辞書
+        self._mapping = {i: "未選択" for i in range(len(self._headers))}
 
     def rowCount(self, parent=None):
         return self._data.height
@@ -37,124 +42,139 @@ class PolarsModel(QAbstractTableModel):
         return self._data.width
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        """
-        データを取得します。
-
-        Args:
-            index (QModelIndex): 取得するデータのインデックス。
-            role (Qt.ItemDataRole, optional): データの役割。デフォルトは DisplayRole。
-
-        Returns:
-            str:
-                表示用のデータを文字列として返す。データが None の場合は空文字列を返す。
-        """
         if not index.isValid():
             return None
-
         if role == Qt.ItemDataRole.DisplayRole:
-            if index.column() < self._data.width:
-                value = self._data[index.row(), index.column()]
-                return str(value) if value is not None else ""
-
+            value = self._data[index.row(), index.column()]
+            return str(value) if value is not None else ""
         return None
 
     def headerData(self, section, orientation, role):
         if role == Qt.ItemDataRole.DisplayRole:
             if orientation == Qt.Orientation.Horizontal:
-                # マッピング情報も表示
-                mapped = self._mapping[section]
                 original = self._headers[section]
+                mapped = self._mapping[section]
                 return f"{original} → {mapped}" if mapped != "未選択" else original
             if orientation == Qt.Orientation.Vertical:
                 return str(section + 1)
         return None
 
     def setMapping(self, column: int, mapped_name: str):
-        """カラムのマッピングを設定"""
+        """
+        指定カラムのマッピング名を設定。シグナルでUIに通知する。
+        """
+        old = self._mapping[column]
         self._mapping[column] = mapped_name
-        # ヘッダーの更新を通知｡一行目を一列ずつ更新する
-        self.logger.debug(f"マッピング更新: {self._headers[column]} → {mapped_name}")
+        self.logger.debug(f"マッピング更新: {self._headers[column]} → {mapped_name}, (old={old})")
+        # ヘッダーラベルを再表示
         self.headerDataChanged.emit(Qt.Orientation.Horizontal, column, column)
-        self.mappingChanged.emit()  # シグナルを発行
+        self.mappingChanged.emit()
 
     def getMapping(self) -> dict[str, str]:
-        """現在のマッピングを取得"""
+        """
+        { "元カラム名": "新カラム名" } の辞書を返す。
+        '未選択' は含めない。
+        """
         return {
             self._headers[col]: mapped
             for col, mapped in self._mapping.items()
             if mapped != "未選択"
         }
 
-    def hasRequiredMapping(self, required_field: str) -> bool:
-        """指定された必須フィールドがマッピングされているかを確認"""
-        return required_field in self.getMapping().values()
-
 
 class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
-    def __init__(self, source_df: pl.DataFrame, parent=None):
+    """
+    GUIダイアログ。DB操作やインポートロジックはサービス(TagImportService)に任せる。
+    カラムマッピングやUI操作を担当。
+    """
+
+    def __init__(
+        self,
+        source_df: pl.DataFrame,
+        service: TagImportService,
+        parent=None
+    ):
+        """
+        コンストラクタで TagImportService を受け取り、GUI側で使う。
+        source_df はプレビュー表示用のPolars DataFrame。
+        """
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.setupUi(self)
-        self.tag_searcher = TagSearcher()
-        self.format_id = 0
-        self.language = "None"
 
-        # モデルの設定
+        # サービス層 (DBロジック, TagDataImporter) を利用する窓口
+        self._service = service
         self.source_df = source_df
-        self.model = PolarsModel(source_df)
+
+        # PolarsModel を使ってプレビュー & カラムマッピング
+        self.model = PolarsModel(self.source_df)
         self.dataPreviewTable.setModel(self.model)
+        self.model.mappingChanged.connect(self.on_sourceTagCheckBox_stateChanged)
 
-        self.importer = TagDataImporter()
+        # TagDataImporter のシグナルをGUIで受けたい場合は、ここで接続
+        # (サービス内で公開している _importer シグナルを直接使う)
+        self._service._importer.progress_updated.connect(self.update_progress)
+        self._service._importer.process_finished.connect(self.import_finished)
+        self._service._importer.error_occurred.connect(self.on_import_error)
 
-        self.setupConnections()
+        # UI初期状態設定
         self.initializeUI()
-        self.model.mappingChanged.connect(
-            self.on_sourceTagCheckBox_stateChanged
-        )  # シグナルに接続
+
+        # 他のUIイベントを接続
+        self.setupConnections()
 
     def initializeUI(self):
-        """UI初期化"""
-        formats = self.tag_searcher.get_tag_formats()
-        langs = self.tag_searcher.get_tag_languages()
+        """
+        GUI初期化: DBからフォーマット一覧や言語一覧を取得し、ComboBoxに表示する。
+        """
+        formats = self._service.get_tag_formats()
+        langs = self._service.get_tag_languages()
 
-        # 検索とは違い `ALL` は不要なので消す
-        formats = [f for f in formats if f != "All"]
-        langs = [l for l in langs if l != "All"]
-
+        # コンボボックスに追加
         self.formatComboBox.addItems(formats)
         self.languageComboBox.addItems(langs)
-        # インポートボタンは初期状態で無効化
+
+        # インポートボタンは初期状態で無効化しておく
         self.importButton.setEnabled(False)
 
     def setupConnections(self):
-        """UIコンポーネントのイベントとアクションを接続"""
-
-        # テーブルヘッダーメニュー
+        """
+        UIコンポーネントのイベントを接続（ヘッダー右クリックメニューなど）
+        """
         header = self.dataPreviewTable.horizontalHeader()
         header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         header.customContextMenuRequested.connect(self.showHeaderMenu)
 
-        # インポーター(QObject)のシグナル接続
-        self.importer.progress_updated.connect(self.update_progress)
-        self.importer.process_finished.connect(self.import_finished)
+    # --- シグナルのスロット ---
 
     @Slot(int, str)
     def update_progress(self, progress: int, message: str):
-        """進捗状況の更新"""
+        """
+        TagDataImporter からの進捗通知。ウィンドウタイトルに表示する例。
+        """
         self.setWindowTitle(f"インポート中... {progress}%, {message}")
 
     @Slot(str)
     def import_finished(self, process_name: str):
-        """インポート完了時の処理"""
+        """
+        インポート完了時。ボタン有効化やメッセージを表示する。
+        """
         self.importButton.setEnabled(True)
-        self.setWindowTitle(f"インポート完了, {process_name}")
+        self.setWindowTitle(f"インポート完了: {process_name}")
         QMessageBox.information(self, "完了", "インポートが完了しました。")
         self.accept()
 
+    @Slot(str)
+    def on_import_error(self, message: str):
+        """
+        エラー発生時の処理: メッセージを表示し、UI操作を復帰。
+        """
+        QMessageBox.critical(self, "インポートエラー", message)
+        self.setControlsEnabled(True)
+
     def setControlsEnabled(self, enabled: bool):
         """
-        ダイアログ内の主要なUIコントロールを有効化または無効化する
-        :param enabled: True で有効化、False で無効化
+        ダイアログ内の主要コントロールを一括で有効/無効にする。
         """
         controls = [
             self.importButton,
@@ -162,68 +182,67 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
             self.sourceTagCheckBox,
             self.languageComboBox,
             self.dataPreviewTable,
-            # 必要に応じて他のコントロールを追加
         ]
-        for control in controls:
-            control.setEnabled(enabled)
+        for c in controls:
+            c.setEnabled(enabled)
+
+    # --- ボタンやチェックボックスの操作 ---
 
     @Slot()
     def on_importButton_clicked(self):
         """
-        インポートボタンのクリックイベントを処理。
-        検証は既にマッピング時に行われているため、ここではインポート処理のみを実行。
+        インポートボタン押下: カラムマッピング + ImportConfig を組み立てて
+        サービス層へ import_data を依頼する。
         """
         mapping = self.model.getMapping()
-
-        # データフレームのカラム名を直接リネーム
+        # マッピングに従ってデータフレームをリネーム
         new_df = self.source_df.rename(mapping)
 
         config = ImportConfig(
-            format_id=self.format_id,
+            format_id=self._service.get_format_id(self.formatComboBox.currentText()),
             language=self.languageComboBox.currentText(),
             column_names=list(mapping.values()),
         )
 
         try:
-            # UI要素の状態を更新
             self.setControlsEnabled(False)
             self.cancelButton.setText("キャンセル")
 
-            # インポート開始
-            self.importer.import_data(new_df, config)
+            # 実際のインポート処理はサービス層に任せる
+            self._service.import_data(new_df, config)
+
         except ValueError as e:
-            self.logger.error("インポートエラー: %s", e)
+            self.logger.error(f"インポートエラー: {e}")
             self.setControlsEnabled(True)
 
     @Slot()
     def on_sourceTagCheckBox_stateChanged(self):
-        """カラムマッピング変更時に必須フィールドを検証し、インポートボタンの状態を更新
-
-        tag カラムか source_tag カラムは常に必要
-
-        フォーマが不明の場合､言語と訳語が選択されている場合､インポートボタンを有効化
-        翻訳がない場合はフォーマットがある場合インポートボタンを有効化
+        """
+        マッピング変更などのたびに呼ばれ、必須フィールドが揃っていればインポート可にする。
         """
         mapping = self.model.getMapping()
 
-        has_format = self.formatComboBox.currentText() != "unknown"
-        has_language = self.languageComboBox.currentText() != "None"
         has_source_tag = "source_tag" in mapping.values()
         has_tag = "tag" in mapping.values()
         has_translation = "translation" in mapping.values()
 
         self.sourceTagCheckBox.setChecked(has_source_tag)
         self.tagCheckBox.setChecked(has_tag)
-        self.deprecatedTagsCheckBox.setChecked("translation" in mapping.values())
         self.translationTagsCheckBox.setChecked(has_translation)
+        self.deprecatedTagsCheckBox.setChecked("translation" in mapping.values())
 
+        # コンボボックスの状態を確認
+        format_chosen = bool(self.formatComboBox.currentText())
+        language_chosen = (self.languageComboBox.currentText() != "None")
+
+        # 簡易バリデーション
         if not has_source_tag and not has_tag:
             self.importButton.setEnabled(False)
             return
-        if not has_format and not has_language:
+        if not format_chosen and not language_chosen:
             self.importButton.setEnabled(False)
             return
-        if has_language and not has_translation:
+        if language_chosen and not has_translation:
             self.importButton.setEnabled(False)
             return
 
@@ -231,9 +250,11 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
 
     @Slot()
     def on_cancelButton_clicked(self):
-        """キャンセルボタンの処理"""
+        """
+        キャンセルボタン。途中キャンセル or ダイアログ閉じる動作を切り替える。
+        """
         if self.cancelButton.text() == "キャンセル":
-            self.importer.cancel()
+            self._service.cancel_import()
             self.importButton.setEnabled(True)
             self.setWindowTitle("キャンセル")
         else:
@@ -241,18 +262,22 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
 
     @Slot()
     def on_formatComboBox_currentTextChanged(self):
-        """フォーマットが変更されたときの処理"""
-        format_name = self.formatComboBox.currentText()
-        self.format_id = self.tag_searcher.tag_repo.get_format_id(format_name)
+        """
+        フォーマットが変更されたら必須フィールドチェックを更新。
+        """
         self.on_sourceTagCheckBox_stateChanged()
 
     @Slot()
     def on_languageComboBox_currentTextChanged(self):
-        """言語が変更されたときの処理"""
+        """
+        言語が変更されたら必須フィールドチェックを更新。
+        """
         self.on_sourceTagCheckBox_stateChanged()
 
     def showHeaderMenu(self, pos):
-        """ヘッダーの右クリックメニューを表示し、マッピングを設定する"""
+        """
+        テーブルヘッダを右クリックした際のマッピング設定メニュー。
+        """
         column = self.dataPreviewTable.horizontalHeader().logicalIndexAt(pos)
         menu = QMenu(self)
 
@@ -266,7 +291,6 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
                 partial(self.set_column_mapping, column, mapped_name)
             )
 
-        # メニューを表示
         menu.exec(self.dataPreviewTable.horizontalHeader().mapToGlobal(pos))
 
     def set_column_mapping(self, column, mapped_name):
@@ -275,11 +299,14 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
 
 
 if __name__ == "__main__":
+    """
+    単体起動テスト用。テスト用CSVを読み込み、TagImportServiceを生成してダイアログを起動。
+    """
     import sys
     from pathlib import Path
-
     from PySide6.QtWidgets import QApplication
 
+    # テスト用CSV (例)
     csv_path = (
         Path(__file__).resolve().parent.parent.parent.parent
         / "tests"
@@ -287,7 +314,12 @@ if __name__ == "__main__":
         / "case_03.csv"
     )
     df = pl.read_csv(csv_path, has_header=False)
+
+    # サービス層を生成
+    from genai_tag_db_tools.services.app_services import TagImportService
+    service = TagImportService()
+
     app = QApplication(sys.argv)
-    window = TagDataImportDialog(df)
-    window.show()
+    dialog = TagDataImportDialog(df, service)
+    dialog.show()
     sys.exit(app.exec())
