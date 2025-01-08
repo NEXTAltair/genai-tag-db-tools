@@ -42,7 +42,8 @@ def test_convert_tag_found_alias(tag_searcher, mock_tag_repo):
     mock_tag_repo.get_tag_by_id.return_value = mock_preferred_tag_obj
 
     # --- 2. テスト実行 ---
-    result = tag_searcher.convert_tag("original_tag", "e621")
+    format_id = mock_tag_repo.get_format_id("e621")
+    result = tag_searcher.convert_tag("original_tag", format_id)
 
     # --- 3. 結果検証 ---
     assert result == "alias_tag"
@@ -60,7 +61,8 @@ def test_convert_tag_no_alias(tag_searcher, mock_tag_repo):
     mock_tag_repo.find_preferred_tag.return_value = None  # alias=False とか TagStatusなし
     # get_tag_by_id は呼ばれない想定
 
-    result = tag_searcher.convert_tag("some_tag", "danbooru")
+    format_id = mock_tag_repo.get_format_id("danbooru")
+    result = tag_searcher.convert_tag("some_tag", format_id)
     assert result == "some_tag"
     mock_tag_repo.get_tag_by_id.assert_not_called()
 
@@ -71,7 +73,8 @@ def test_convert_tag_no_tag_in_db(tag_searcher, mock_tag_repo):
     mock_tag_repo.get_format_id.return_value = 1
     mock_tag_repo.get_tag_id_by_name.return_value = None  # 見つからない
 
-    result = tag_searcher.convert_tag("unknown_tag", "danbooru")
+    format_id = mock_tag_repo.get_format_id("danbooru")
+    result = tag_searcher.convert_tag("unknown_tag", format_id)
     assert result == "unknown_tag"
     mock_tag_repo.find_preferred_tag.assert_not_called()
     mock_tag_repo.get_tag_by_id.assert_not_called()
@@ -90,7 +93,8 @@ def test_convert_tag_invalid_preferred(tag_searcher, mock_tag_repo, caplog):
     mock_tag_repo.get_tag_by_id.return_value = mock_preferred_tag_obj
 
     with caplog.at_level("WARNING"):
-        result = tag_searcher.convert_tag("test_tag", "derpibooru")
+        format_id = mock_tag_repo.get_format_id("derpibooru")
+        result = tag_searcher.convert_tag("test_tag", format_id)
         assert "invalid tag" in caplog.text  # ログに「invalid tag」が出ているか
     assert result == "test_tag"
 
@@ -104,7 +108,8 @@ def test_convert_tag_db_error(tag_searcher, mock_tag_repo):
     mock_tag_repo.find_preferred_tag.return_value = 20
     mock_tag_repo.get_tag_by_id.return_value = None  # 取得失敗
 
-    result = tag_searcher.convert_tag("tag_in_db", "danbooru")
+    format_id = mock_tag_repo.get_format_id("danbooru")
+    result = tag_searcher.convert_tag("tag_in_db", format_id)
     assert result == "tag_in_db"
 
 def test_get_tag_types(tag_searcher, mock_tag_repo):
