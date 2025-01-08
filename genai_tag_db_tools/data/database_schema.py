@@ -3,11 +3,8 @@ from __future__ import annotations  # 循環参照や古いバージョン対策
 from logging import getLogger
 from typing import Optional, Set
 from datetime import datetime
-import polars as pl
 
 from sqlalchemy import (
-    create_engine,
-    StaticPool,
     ForeignKey,
     UniqueConstraint,
     Boolean,
@@ -19,7 +16,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import (
-    sessionmaker,
     Session,
     relationship,
     Mapped,
