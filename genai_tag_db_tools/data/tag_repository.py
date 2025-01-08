@@ -1,9 +1,11 @@
+# genai_tag_db_tools.data.tag_repository.TagRepository
 from logging import getLogger
 from typing import Optional
 
 import polars as pl
 
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.sql import or_
 
 from genai_tag_db_tools.db.database_setup import SessionLocal
 from genai_tag_db_tools.data.database_schema import (
@@ -266,6 +268,33 @@ class TagRepository:
             format_obj = session.query(TagFormat).filter(TagFormat.format_name == format_name).one_or_none()
             return format_obj.format_id if format_obj else 0
 
+    # --- TAG_TYPE_FORMAT_MAPPING ---
+    def get_type_name_by_format_type_id(self, format_id: int, type_id: int) -> Optional[str]:
+        """
+        (format_id, type_id) に対応する TagTypeFormatMapping を検索し、
+        その type_name (TagTypeName.type_name) を返す。
+
+        Args:
+            format_id (int): フォーマットID
+            type_id (int): タイプID (TagTypeFormatMapping.type_id)
+
+        Returns:
+            Optional[str]: 該当するタイプ名。存在しなければ None。
+        """
+        with self.session_factory() as session:
+            mapping_obj = (
+                session.query(TagTypeFormatMapping)
+                .filter(
+                    TagTypeFormatMapping.format_id == format_id,
+                    TagTypeFormatMapping.type_id == type_id
+                )
+                .one_or_none()
+            )
+            if not mapping_obj:
+                return None
+
+            # mapping_obj.type_name -> TagTypeNameオブジェクト
+            return mapping_obj.type_name.type_name if mapping_obj.type_name else None
 
     # --- TAG_TYPE_NAME ---
     def get_type_id(self, type_name: str) -> Optional[int]:
@@ -511,14 +540,11 @@ class TagRepository:
                 raise ValueError(f"データベース操作に失敗しました: {e}") from e
 
     # --- 複雑検索 ---
-    def search_tag_ids_by_translation(
-        self,
-        keyword: str,
-        partial: bool = False
-    ) -> list[int]:
+    def search_tag_ids(self, keyword: str, partial: bool = False) -> list[int]:
         """
-        TagTranslationテーブルのtranslationカラムに対して、
-        部分一致/完全一致/ワイルドカード検索を行い、該当するtag_idのリストを返す。
+        Tagテーブルの `tag` および `source_tag` カラム、
+        および TagTranslationテーブルの `translation` カラムを検索して、
+        該当する tag_id のリストを返す。
 
         Args:
             keyword (str): 検索キーワード ('cat' / 'ca*' / '*cat*' 等)
@@ -526,28 +552,42 @@ class TagRepository:
                 '*' を含むキーワードは自動的にワイルドカード検索扱いになる。
 
         Returns:
-            list[int]: 検索にヒットしたtag_idのリスト
+            list[int]: 検索にヒットしたtag_idのリスト（重複排除済み）
         """
         if '*' in keyword:
             keyword = keyword.replace('*', '%')
 
         with self.session_factory() as session:
-            query = session.query(TagTranslation.tag_id)
+            # 初期クエリを定義
+            tag_query = session.query(Tag.tag_id)
+            translation_query = session.query(TagTranslation.tag_id)
 
-            # partial=True もしくは '%' が含まれているならLIKE検索
+            # partial=True またはワイルドカード検索の場合
             if partial or '%' in keyword:
                 if not keyword.startswith('%'):
                     keyword = '%' + keyword
                 if not keyword.endswith('%'):
                     keyword = keyword + '%'
-                query = query.filter(TagTranslation.translation.like(keyword))
-            else:
-                query = query.filter(TagTranslation.translation == keyword)
+            # Tagテーブルのクエリ
+            tag_conditions = or_(
+                Tag.tag.like(keyword) if partial or '%' in keyword else Tag.tag == keyword,
+                Tag.source_tag.like(keyword) if partial or '%' in keyword else Tag.source_tag == keyword
+            )
+            tag_query = session.query(Tag.tag_id).filter(tag_conditions)
 
-            # tag_id を取り出してリスト化
-            rows = query.all()  # rows = [(123,), (456,), ...]
-            tag_ids = {r[0] for r in rows} #setで重複排除
-            return list(tag_ids)
+            # TagTranslationテーブルのクエリ
+            translation_condition = (
+                TagTranslation.translation.like(keyword)
+                if partial or '%' in keyword
+                else TagTranslation.translation == keyword
+            )
+            translation_query = session.query(TagTranslation.tag_id).filter(translation_condition)
+
+            # 両テーブルの結果を取得してマージ（重複を排除）
+            tag_ids = {row[0] for row in tag_query.all()}  # Tagテーブルの結果
+            translation_ids = {row[0] for row in translation_query.all()}  # TagTranslationテーブルの結果
+
+            return list(tag_ids | translation_ids)  # SetのUnionで重複排除
 
     def search_tag_ids_by_usage_count_range(
         self,
@@ -723,8 +763,6 @@ class TagRepository:
             languages = {translation.language for translation in session.query(TagTranslation).all()}
             return list(languages)
 
-            return [translation.language for translation in session.query(TagTranslation).all()]
-
     def get_tag_types(self, format_id: int) -> list[str]:
         """
         TAG_TYPE_NAMEテーブルから指定フォーマットのすべてのタイプを取得する
@@ -750,3 +788,13 @@ class TagRepository:
 
         # タプルから文字列だけ取り出して返す
         return [row[0] for row in rows]
+
+    def get_all_types(self) -> list[str]:
+        """
+        TAG_TYPE_NAMEテーブルからすべてのタイプを取得する
+
+        Returns:
+            list[str]: すべてのタイプのリスト。
+        """
+        with self.session_factory() as session:
+            return [type.type_name for type in session.query(TagTypeName).all()]
