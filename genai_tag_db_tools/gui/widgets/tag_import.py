@@ -1,8 +1,6 @@
 # genai_tag_db_tools/gui/widgets/tag_import.py
-
 import logging
 from functools import partial
-from typing import Optional
 
 import polars as pl
 from PySide6.QtCore import Slot, Qt, QAbstractTableModel, Signal
@@ -12,8 +10,7 @@ from genai_tag_db_tools.gui.designer.TagDataImportDialog_ui import (
     Ui_TagDataImportDialog,
 )
 
-from genai_tag_db_tools.services.import_data import TagDataImporter, ImportConfig
-from genai_tag_db_tools.services.tag_search import TagSearcher
+from genai_tag_db_tools.services.import_data import ImportConfig
 from genai_tag_db_tools.services.polars_schema import AVAILABLE_COLUMNS
 
 # 新規作成したサービス層をインポート (TagImportService)
@@ -45,7 +42,7 @@ class PolarsModel(QAbstractTableModel):
         if not index.isValid():
             return None
         if role == Qt.ItemDataRole.DisplayRole:
-            value = self._data[index.row(), index.column()]
+            value = self._data.item(index.row(), index.column())
             return str(value) if value is not None else ""
         return None
 

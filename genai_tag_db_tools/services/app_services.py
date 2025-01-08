@@ -1,4 +1,4 @@
-# genai_tag_db_tools/services/app_service.py
+# genai_tag_db_tools/services/app_services.py
 
 import logging
 import polars as pl
@@ -50,7 +50,7 @@ class TagCoreService:
         """
         return self._searcher.get_tag_languages()
 
-    def get_format_id(self, format_name: str) -> Optional[int]:
+    def get_format_id(self, format_name: str) -> int:
         """
         フォーマット名からフォーマットIDを取得。
         """
@@ -63,6 +63,62 @@ class TagCoreService:
         """
         return self._searcher.convert_tag(tag, format_id)
 
+
+class TagSearchService:
+    """
+    TagSearcherを内部で利用し、GUI用のメソッド（検索やフォーマット一覧取得など）をまとめる。
+    """
+    def __init__(self, searcher: Optional[TagSearcher] = None):
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self._searcher = searcher or TagSearcher()
+
+    def get_tag_formats(self) -> list[str]:
+        """
+        DB からタグフォーマット一覧を取得。
+        """
+        return self._searcher.get_tag_formats()
+
+    def get_tag_languages(self) -> list[str]:
+        """
+        DB から言語一覧を取得。
+        """
+        return self._searcher.get_tag_languages()
+
+    def get_tag_types(self, format_name: Optional[str]) -> list[str]:
+        """
+        指定フォーマットに紐づくタグタイプ一覧を取得。
+
+        Args:
+            format_name (str): フォーマット名。None の場合は全検索。
+        """
+        if format_name is None:
+            return self._searcher.get_all_types()
+        return self._searcher.get_tag_types(format_name)
+
+    def search_tags(self,
+                    keyword: str,
+                    partial: bool = False,
+                    format_name: str | None = None,
+                    type_name: str | None = None,
+                    language: str | None = None,
+                    min_usage: int | None = None,
+                    max_usage: int | None = None,
+                    alias: bool | None = None) -> pl.DataFrame:
+        """
+        タグを検索し、結果を list[dict] 形式で返す想定。
+        partial=True の場合は部分一致、partial=False は完全一致。
+        format_name=None の場合はフォーマット指定なし(全検索)
+        """
+        return self._searcher.search_tags(
+            keyword=keyword,
+            partial=partial,
+            format_name=format_name,
+            type_name=type_name,
+            language=language,
+            min_usage=min_usage,
+            max_usage=max_usage,
+            alias=alias
+        )
 
 class TagCleanerService(GuiServiceBase):
     """
@@ -183,17 +239,17 @@ class TagImportService(GuiServiceBase):
 
     def get_tag_formats(self) -> list[str]:
         """
-        フォーマット一覧を取得し、GUIで 'All' 不要なら除去する例。
+        DB に登録されているフォーマット一覧を取得。
         """
-        return [f for f in self._core.get_tag_formats() if f != "All"]
+        return self._core.get_tag_formats()
 
     def get_tag_languages(self) -> list[str]:
         """
-        DBから言語一覧を取得し、'All' を外す例。
+        DB に登録されている言語一覧を取得。
         """
-        return [lang for lang in self._core.get_tag_languages() if lang != "All"]
+        return self._core.get_tag_languages()
 
-    def get_format_id(self, format_name: str) -> Optional[int]:
+    def get_format_id(self, format_name: str) -> int:
         return self._core.get_format_id(format_name)
 
 
@@ -220,4 +276,4 @@ if __name__ == "__main__":
     # ダミーDataFrame
     df = pl.DataFrame({"tag": ["1boy", "2girls"], "count": [10, 20]})
     config = ImportConfig(format_id=importer_service.get_format_id("danbooru"), language="en")
-    importer
+    importer_service.import_data(df, config)

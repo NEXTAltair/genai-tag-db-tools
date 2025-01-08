@@ -128,7 +128,7 @@ def test_bulk_insert_tags(tag_repository):
 def test_get_format_id(tag_repository):
     """
     get_format_id のテスト。
-    存在しないformat_nameの場合はValueErrorを返すことを確認。
+    存在しないformat_nameの場合は0を返すことを確認。
     """
     with tag_repository.session_factory() as session:
         session.add(TagFormat(format_id=10, format_name="danbooru"))
@@ -138,9 +138,9 @@ def test_get_format_id(tag_repository):
     fid = tag_repository.get_format_id("danbooru")
     assert fid == 10
 
-    # 異常系: 存在しないformat_nameの場合はValueErrorを返す
-    with pytest.raises(ValueError):
-        tag_repository.get_format_id("nonsense")
+    # 異常系: 存在しないformat_nameの場合は 0 を返す
+    fid_none = tag_repository.get_format_id("unknown")
+    assert fid_none == 0
 
 def test_get_tag_formats(tag_repository):
     """
@@ -149,7 +149,6 @@ def test_get_tag_formats(tag_repository):
     以下を確認:
     1. フォーマット名が正しく取得できる
     2. 重複が排除される（DISTINCTの動作確認）
-    3. "All"が最後に追加される
     """
     with tag_repository.session_factory() as session:
         # テストデータ作成（重複を含まない）
@@ -165,11 +164,10 @@ def test_get_tag_formats(tag_repository):
     format_list = tag_repository.get_tag_formats()
 
     # 検証
-    assert len(format_list) == 4  # 3つのフォーマット + "All"で4件
+    assert len(format_list) == 3  # 3つのフォーマット
     assert "danbooru" in format_list
     assert "e621" in format_list
     assert "gelbooru" in format_list
-    assert format_list[-1] == "All"  # 最後の要素が"All"であることを確認
 
 def test_update_tag_status(tag_repository):
     """
@@ -271,11 +269,11 @@ def test_find_preferred_tag(tag_repository):
         none_pref = tag_repository.find_preferred_tag(tag_id=999, format_id=60)
         assert none_pref is None
 
-def test_search_tag_ids_by_translation(tag_repository):
+def test_search_tag_ids_with_translation(tag_repository):
     """
-    search_tag_ids_by_translation のテスト。
-    部分一致/完全一致/ワイルドカードで TagTranslation を検索し、
-    該当する tag_id を取得できるか検証する。
+    search_tag_ids のテスト。
+    Tag.tag, Tag.source_tag, および TagTranslation.translation カラムを検索し、
+    部分一致/完全一致/ワイルドカードで該当する tag_id を取得できるか検証する。
     """
     with tag_repository.session_factory() as session:
         # ---------------------------
@@ -306,23 +304,33 @@ def test_search_tag_ids_by_translation(tag_repository):
         # ---------------------------
 
         # 完全一致 (partial=False)
-        result = tag_repository.search_tag_ids_by_translation("feline", partial=False)
+        result = tag_repository.search_tag_ids("feline", partial=False)
         assert len(result) == 1
-        assert result[0] == tid_cat  # t1.tag_id ではなく変数tid_catを比較
+        assert tid_cat in result  # t1.tag_id ではなく変数tid_catを比較
 
         # 部分一致 (partial=True) → "fel*" → "fel%"
-        result_partial = tag_repository.search_tag_ids_by_translation("fel*", partial=True)
+        result_partial = tag_repository.search_tag_ids("fel*", partial=True)
         assert len(result_partial) == 1
-        assert result_partial[0] == tid_cat
+        assert tid_cat in result_partial
 
         # ワイルドカード "*猫*" → "%猫%"
-        result_jp = tag_repository.search_tag_ids_by_translation("*猫*", partial=True)
+        result_jp = tag_repository.search_tag_ids("*猫*", partial=True)
         assert len(result_jp) == 1
-        assert result_jp[0] == tid_cat
+        assert tid_cat in result_jp
 
         # 存在しない翻訳
-        none_result = tag_repository.search_tag_ids_by_translation("unknown", partial=False)
+        none_result = tag_repository.search_tag_ids("unknown", partial=False)
         assert len(none_result) == 0
+
+        # タグ名での検索も可能
+        result_tag = tag_repository.search_tag_ids("cat", partial=False)
+        assert len(result_tag) == 1
+        assert tid_cat in result_tag
+
+        # source_tagでの検索も可能
+        result_source = tag_repository.search_tag_ids("cat_src", partial=False)
+        assert len(result_source) == 1
+        assert tid_cat in result_source
 
 
 def test_search_tag_ids_by_usage_count_range(tag_repository):
