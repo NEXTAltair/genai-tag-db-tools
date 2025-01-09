@@ -1,11 +1,7 @@
 import pytest
-import polars as pl
-from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, text
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
-
-from pathlib import Path
-from typing import Optional
 
 @pytest.fixture(scope="function")
 def engine():

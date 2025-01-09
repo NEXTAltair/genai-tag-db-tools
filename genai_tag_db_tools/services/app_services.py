@@ -8,6 +8,7 @@ from PySide6.QtCore import QObject, Signal
 
 from genai_tag_db_tools.services.import_data import TagDataImporter, ImportConfig
 from genai_tag_db_tools.services.tag_search import TagSearcher
+from genai_tag_db_tools.data.tag_repository import TagRepository
 
 
 class GuiServiceBase(QObject):
@@ -252,6 +253,99 @@ class TagImportService(GuiServiceBase):
     def get_format_id(self, format_name: str) -> int:
         return self._core.get_format_id(format_name)
 
+
+class TagRegisterService(GuiServiceBase):
+    """
+    GUIに進捗やエラーを通知するために、GuiServiceBaseを継承したタグ登録サービス。
+    """
+
+    def __init__(self, parent=None, repository: Optional[TagRepository] = None):
+        super().__init__(parent)
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self._repo = repository if repository else TagRepository()
+
+    def register_or_update_tag(self, tag_info: dict) -> int:
+        """
+        タグ登録/更新処理を行い、何らかのDBエラーが起きたらシグナルでGUIに通知する。
+        """
+        try:
+            normalized_tag = tag_info.get("normalized_tag")
+            source_tag     = tag_info.get("source_tag")
+            format_name    = tag_info.get("format_name", "")
+            type_name      = tag_info.get("type_name", "")
+            usage_count    = tag_info.get("use_count", 0)
+            language       = tag_info.get("language", "")
+            translation    = tag_info.get("translation", "")
+
+            if not normalized_tag or not source_tag:
+                raise ValueError("タグまたは元タグが空です。")
+
+            # 1) フォーマットID, タイプID の取得
+            fmt_id = self._repo.get_format_id(format_name)
+            type_id = None
+            if type_name:
+                type_id = self._repo.get_type_id(type_name)
+
+            # 2) タグを作成 or 既存ID取得
+            tag_id = self._repo.create_tag(source_tag, normalized_tag)
+
+            # 3) usage_count (使用回数) 登録
+            if usage_count > 0:
+                self._repo.update_usage_count(tag_id, fmt_id, usage_count)
+
+            # 4) 翻訳登録
+            if language and translation:
+                self._repo.add_or_update_translation(tag_id, language, translation)
+
+            # 5) TagStatus 更新 (alias=Falseで登録例)
+            self._repo.update_tag_status(
+                tag_id=tag_id,
+                format_id=fmt_id,
+                alias=False,
+                preferred_tag_id=tag_id,
+                type_id=type_id
+            )
+
+            return tag_id
+
+        except Exception as e:
+            self.logger.error(f"タグ登録中にエラー発生: {e}")
+            # <-- GUIにエラーを通知するシグナルを発行
+            self.error_occurred.emit(str(e))
+            # エラーを再度外に投げたい場合はここで raise してもよい
+            raise
+
+    def get_tag_details(self, tag_id: int) -> pl.DataFrame:
+        """
+        登録後のタグ詳細を取得してDataFrame化して返す。
+        (DBエラーが起きる可能性がある場合も同様にシグナルで通知)
+        """
+        try:
+            tag_obj = self._repo.get_tag_by_id(tag_id)
+            if not tag_obj:
+                return pl.DataFrame()
+
+            status_list = self._repo.list_tag_statuses(tag_id)
+            translations = self._repo.get_translations(tag_id)
+
+            rows = [{
+                "tag": tag_obj.tag,
+                "source_tag": tag_obj.source_tag,
+                "formats": [s.format_id for s in status_list],
+                "types":   [s.type_id for s in status_list],
+                "total_usage_count": sum(
+                    self._repo.get_usage_count(tag_id, s.format_id) or 0
+                    for s in status_list
+                ),
+                "translations": {t.language: t.translation for t in translations}
+            }]
+
+            return pl.DataFrame(rows)
+
+        except Exception as e:
+            self.logger.error(f"タグ詳細取得中にエラー発生: {e}")
+            self.error_occurred.emit(str(e))
+            raise
 
 if __name__ == "__main__":
     """

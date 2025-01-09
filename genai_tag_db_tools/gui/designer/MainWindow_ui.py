@@ -34,16 +34,21 @@ class Ui_MainWindow(object):
         self.verticalLayout.setObjectName(u"verticalLayout")
         self.tabWidget = QTabWidget(self.centralwidget)
         self.tabWidget.setObjectName(u"tabWidget")
-        self.tagSearch = TagSearchWidget()
+
+        # プレースホルダー ウィジェットを作成します -MainWindow.initialize() で置き換えられます
+        self.tagSearch = QWidget()
         self.tagSearch.setObjectName(u"tagSearch")
         self.tabWidget.addTab(self.tagSearch, "")
-        self.tagCleaner = TagCleanerWidget()
+
+        self.tagCleaner = QWidget()
         self.tagCleaner.setObjectName(u"tagCleaner")
         self.tabWidget.addTab(self.tagCleaner, "")
-        self.tagRegister = TagRegisterWidget()
+
+        self.tagRegister = QWidget()
         self.tagRegister.setObjectName(u"tagRegister")
         self.tabWidget.addTab(self.tagRegister, "")
-        self.tagStatistics = TagStatisticsWidget()
+
+        self.tagStatistics = QWidget()
         self.tagStatistics.setObjectName(u"tagStatistics")
         self.tabWidget.addTab(self.tagStatistics, "")
 

@@ -1,13 +1,6 @@
 from PySide6.QtWidgets import QWidget
 from ..designer.TagStatisticsWidget_ui import Ui_TagStatisticsWidget
 
-import pandas as pd
-import os
-import sys
-
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-sys.path.insert(0, project_root)
-
 
 class TagStatisticsWidget(QWidget, Ui_TagStatisticsWidget):
     def __init__(self, parent=None):
