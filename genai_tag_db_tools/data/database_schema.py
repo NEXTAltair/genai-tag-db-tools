@@ -1,3 +1,4 @@
+# genai_tag_db_tools.data.database_schema
 from __future__ import annotations  # 循環参照や古いバージョン対策に入れておくと安全
 
 from logging import getLogger
