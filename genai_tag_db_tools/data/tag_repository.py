@@ -1,4 +1,4 @@
-# genai_tag_db_tools.data.tag_repository.TagRepository
+# genai_tag_db_tools.data.tag_repository
 from logging import getLogger
 from typing import Optional
 
