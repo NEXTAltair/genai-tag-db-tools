@@ -1,11 +1,9 @@
 import pytest
-from unittest.mock import ANY
+from unittest.mock import ANY, MagicMock
 import polars as pl
-from unittest.mock import MagicMock
 from pathlib import Path
 
 from genai_tag_db_tools.services.import_data import TagDataImporter, ImportConfig
-from genai_tag_db_tools.data.tag_repository import TagRepository
 
 """
 本ファイルでは TagDataImporter の主要メソッドを一通りテストします。
@@ -21,8 +19,7 @@ from genai_tag_db_tools.data.tag_repository import TagRepository
 def importer():
     """
     TagDataImporter のインスタンスを返すフィクスチャ。
-    DBセッションに対しては基本的にモックを使うが、
-    必要なら実際のDBを使うパターンに差し替え可能。
+    TagRegister に対しては基本的にモックを使う。
     """
     importer = TagDataImporter()
     return importer
@@ -50,10 +47,8 @@ def test_import_data_flow(importer: TagDataImporter):
     """
     import_data の実行フローをテスト:
       - シグナル発火
-      - タグ正規化
-      - tag_id付与
-      - usage_counts の登録
-      - etc.
+      - TagRegisterの各メソッド呼び出し
+      - 正しい引数での呼び出し確認
     """
     # テスト用DataFrame
     df = pl.DataFrame(
@@ -65,14 +60,22 @@ def test_import_data_flow(importer: TagDataImporter):
     )
     config = ImportConfig(format_id=1, language=None)
 
-    # TagRepository をモック化し、呼び出しを検証
-    mock_repo = MagicMock(spec=TagRepository)
-    # _fetch_existing_tags_as_mapの戻り値を設定
-    mock_repo._fetch_existing_tags_as_map.return_value = {
-        "Tag A": 1,
-        "Tag B": 2
-    }
-    importer._tag_repo = mock_repo
+    # TagRegister をモック化
+    mock_register = MagicMock()
+    # normalize_tagsの戻り値を設定
+    mock_register.normalize_tags.return_value = pl.DataFrame({
+        "source_tag": ["Tag A", "Tag B"],
+        "tag": ["Tag A", "Tag B"],
+        "count": [5, 10]
+    })
+    # insert_tags_and_attach_idの戻り値を設定
+    mock_register.insert_tags_and_attach_id.return_value = pl.DataFrame({
+        "source_tag": ["Tag A", "Tag B"],
+        "tag": ["Tag A", "Tag B"],
+        "count": [5, 10],
+        "tag_id": [1, 2]
+    })
+    importer._register_svc = mock_register
 
     # シグナルをモックに置き換え
     start_signal = MagicMock()
@@ -87,24 +90,14 @@ def test_import_data_flow(importer: TagDataImporter):
     start_signal.assert_called_once_with("インポート開始")
     finish_signal.assert_called_once_with("インポート完了")
 
-    # mock_repo の呼び出し確認
-    # bulk_insert_tags が正しい引数で呼ばれることを確認
-    mock_repo.bulk_insert_tags.assert_called_once()
-    call_args = mock_repo.bulk_insert_tags.call_args[0][0]
-    assert isinstance(call_args, pl.DataFrame)
-    assert set(call_args.columns) == {"source_tag", "tag"}
-    # source_tagが空の場合はtagの値をコピー、tagが空の場合はsource_tagをクリーニング
-    assert call_args["source_tag"].to_list() == ["Tag_A", "Tag B"]  # 2行目は空なのでtagからコピー
-    assert call_args["tag"].to_list() == ["Tag A", "Tag B"]  # 1行目は空なのでsource_tagをクリーニング
+    # TagRegisterの各メソッド呼び出し確認
+    mock_register.normalize_tags.assert_called_once()
+    mock_register.insert_tags_and_attach_id.assert_called_once()
+    mock_register.update_usage_counts.assert_called_once()
 
-    # update_usage_count が正しい引数で呼ばれることを確認
-    assert mock_repo.update_usage_count.call_count == 2
-    mock_repo.update_usage_count.assert_any_call(
-        tag_id=ANY, format_id=1, count=5
-    )
-    mock_repo.update_usage_count.assert_any_call(
-        tag_id=ANY, format_id=1, count=10
-    )
+    # update_usage_countsが正しい引数で呼ばれることを確認
+    enriched_df = mock_register.insert_tags_and_attach_id.return_value
+    mock_register.update_usage_counts.assert_called_once_with(enriched_df, config.format_id)
 
 
 def test_import_data_cancel(importer: TagDataImporter):
@@ -115,14 +108,15 @@ def test_import_data_cancel(importer: TagDataImporter):
     df = pl.DataFrame({"source_tag": ["Tag_C"], "count": [100]})
     config = ImportConfig(format_id=1)
 
-    # Repositoryをモックに
-    mock_repo = MagicMock(spec=TagRepository)
-    importer._tag_repo = mock_repo
+    # TagRegisterをモックに
+    mock_register = MagicMock()
+    importer._register_svc = mock_register
 
     importer.import_data(df, config)
     # キャンセルされていればタグ登録等が呼ばれない想定
-    mock_repo.bulk_insert_tags.assert_not_called()
-    mock_repo.update_usage_count.assert_not_called()
+    mock_register.normalize_tags.assert_not_called()
+    mock_register.insert_tags_and_attach_id.assert_not_called()
+    mock_register.update_usage_counts.assert_not_called()
 
 
 def test_import_data_signals(importer: TagDataImporter):
@@ -142,6 +136,12 @@ def test_import_data_signals(importer: TagDataImporter):
     df = pl.DataFrame({"source_tag": ["Tag_X"], "tag": ["Tag X"]})
     config = ImportConfig(format_id=0)
 
+    # TagRegisterをモック化
+    mock_register = MagicMock()
+    mock_register.normalize_tags.return_value = df
+    mock_register.insert_tags_and_attach_id.return_value = df
+    importer._register_svc = mock_register
+
     importer.import_data(df, config)
 
     # start, finish は呼ばれる
@@ -158,28 +158,6 @@ def test_cancel(importer: TagDataImporter):
     assert importer._cancel_flag is False
     importer.cancel()
     assert importer._cancel_flag is True
-
-
-def test_normalize_tags(importer: TagDataImporter):
-    """
-    _normalize_tags の内部動作チェック:
-    空の source_tag / tag を相互補完し、TagCleaner.clean_formatが呼ばれる
-    """
-    # テスト用の DataFrame
-    df = pl.DataFrame(
-        {
-            "source_tag": ["Tag_One", ""],
-            "tag": ["", "Tag Two"],
-        }
-    )
-
-    # 実行
-    result_df = importer._normalize_tags(df)
-
-    # 「source_tag が空なら tag をコピー」「tag が空なら source_tag clean_formatしてコピー」
-    # -> result_df は最終的に両カラム同じ内容になる
-    assert result_df["source_tag"].to_list() == ["Tag_One", "Tag Two"]  # clean_formatで `_` → ' '
-    assert result_df["tag"].to_list() == ["Tag One", "Tag Two"]
 
 
 def test_configure_import_no_columns(importer: TagDataImporter):
@@ -221,3 +199,12 @@ def test_read_csv(importer: TagDataImporter, tmp_path: Path):
     # 仮の CSVファイル
     csv_file = tmp_path / "test.csv"
     csv_file.write_text("source_tag,count\ntag_a,10\ntag_b,20\n", encoding="utf-8")
+
+    # ヘッダありで読み込み
+    df = importer.read_csv(csv_file, has_header=True)
+    assert len(df) == 2
+    assert df.columns == ["source_tag", "count"]
+
+    # ヘッダなしで読み込み
+    df = importer.read_csv(csv_file, has_header=False)
+    assert len(df) == 3  # ヘッダ行も1行として読み込まれる
