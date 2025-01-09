@@ -24,6 +24,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         # Replace placeholder widgets with actual instances
         search_widget = TagSearchWidget(service=service)
+        search_widget.error_occurred.connect(self.on_service_error)
         self.tabWidget.removeTab(0)
         self.tabWidget.insertTab(0, search_widget, "タグ検索")
         self.tagSearch = search_widget
@@ -42,6 +43,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.tabWidget.removeTab(3)
         self.tabWidget.insertTab(3, stats_widget, "タグ統計")
         self.tagStatistics = stats_widget
+
+    def on_service_error(self, error_message: str):
+        """サービスエラーをステータスバーに表示"""
+        self.statusbar.showMessage(f"エラー: {error_message}", 5000)  # 5秒間表示
 
 
 if __name__ == "__main__":
