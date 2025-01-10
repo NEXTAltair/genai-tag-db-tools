@@ -85,7 +85,8 @@ class TagCleaner:
         text = re.sub(r"\u2014", "-", text)  # エムダッシュをハイフンに変換
         text = re.sub(r"\(", r"\(", text)  # '(' をエスケープ
         text = re.sub(r"\)", r"\)", text)  # ')' をエスケープ
-        return TagCleaner._clean_repetition(text)  # 重複した記号を削除
+        text = TagCleaner._clean_repetition(text)  # 重複した記号を削除
+        return text.strip()  # 前後の空白を削除
 
     @staticmethod
     def _clean_repetition(text: str) -> str:
@@ -93,7 +94,7 @@ class TagCleaner:
         text = re.sub(r"\\+", r"\\", text)  # 重複した'\'を削除
         text = re.sub(r",+", r",", text)  # 重複した','を削除
         text = re.sub(r"\s+", r" ", text)  # 重複したスペースを削除
-        return text
+        return text.strip()  # 前後の空白を削除
 
     @staticmethod
     def _clean_underscore(text: str) -> str:
