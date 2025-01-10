@@ -229,6 +229,7 @@ class TagSearcher:
         return rows
 
     def convert_tag(self, search_tag: str, format_id: int) -> str:
+        # HACK: cleanup_str.py に移動するべきかも
         """
         入力された `search_tag` を指定フォーマットの「推奨タグ」に変換して返す。
         - alias=True の場合などは preferred_tag を取得して置き換え。

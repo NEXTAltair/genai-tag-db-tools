@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QWidget, QMessageBox
 from PySide6.QtCore import Slot
 
 from genai_tag_db_tools.gui.designer.TagRegisterWidget_ui import Ui_TagRegisterWidget
+from genai_tag_db_tools.gui.designer.TagDataImportDialog_ui import Ui_TagDataImportDialog
 from genai_tag_db_tools.utils.cleanup_str import TagCleaner
 
 # 新しく使うサービスクラス
@@ -67,6 +68,15 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
         except Exception as e:
             QMessageBox.warning(self, "エラー", str(e))
             self.textEditOutput.append(f"エラー: {str(e)}")
+
+    @Slot()
+    def on_pushButtonImport_clicked(self):
+        """
+        インポートダイアログを開く
+        """
+        clipboard = QApplication.clipboard()
+        text = clipboard.text()
+        self.lineEditTag.setText(text)
 
     @Slot(str)
     def on_service_error(self, error_msg: str):

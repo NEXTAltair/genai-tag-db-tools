@@ -30,6 +30,7 @@ class ErrorMessages:
     MISSING_TAG_FORMAT = "指定されたタグフォーマットが見つかりません。: {format_name}"
 
 class LogMessages:
+    # TODO: 使う場所を実装する
     START_PROCESS = "プロセスを開始しました。"
     END_PROCESS = "プロセスが正常に終了しました。"
     ERROR_OCCURRED = "エラーが発生しました。"

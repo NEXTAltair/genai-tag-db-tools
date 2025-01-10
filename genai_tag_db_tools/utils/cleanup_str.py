@@ -207,18 +207,3 @@ class TagCleaner:
                 cleaned_tags_dict[key] = tag
 
         return cleaned_tags_dict
-
-    @staticmethod
-    def clean_caption(caption: str) -> str:
-        """キャプションをクリーニングする
-        Args:
-            caption (str): クリーニングするキャプション
-        """
-        for rf, rt in CAPTION_REPLACEMENTS:
-            replaced = True
-            while replaced:
-                bef = caption
-                caption = caption.replace(rf, rt)
-                replaced = bef != caption
-        caption = caption.strip(" ,")
-        return caption

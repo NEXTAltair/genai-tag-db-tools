@@ -2,9 +2,11 @@
 
 import logging
 import polars as pl
-from typing import Optional
+from typing import Optional, Any
+from sqlalchemy.orm import Session
 
 from PySide6.QtCore import QObject, Signal
+from genai_tag_db_tools.services.tag_statistics import TagStatistics
 
 from genai_tag_db_tools.services.import_data import TagDataImporter, ImportConfig
 from genai_tag_db_tools.services.tag_search import TagSearcher
@@ -347,6 +349,71 @@ class TagRegisterService(GuiServiceBase):
             self.error_occurred.emit(str(e))
             raise
 
+class TagStatisticsService(GuiServiceBase):
+    """
+    TagStatistics(ロジッククラス)を内部に持ち、
+    GUI から呼ばれる「統計取得」「計算」等の処理をまとめたサービスクラス。
+
+    - TagStatistics はデータベースにアクセスし Polars DataFrame や dict で統計を返す
+    - GUI層ではシグナルによるエラーハンドリングを利用可能
+    """
+    def __init__(
+        self,
+        parent: Optional[QObject] = None,
+        session: Optional[Session] = None,
+    ):
+        super().__init__(parent)
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self._stats = TagStatistics(session=session)  # ← Polarsベースの統計処理
+
+    def get_general_stats(self) -> dict[str, Any]:
+        """
+        全体的なサマリ(総タグ数/エイリアス数など)を dict で取得
+        """
+        try:
+            return self._stats.get_general_stats()
+        except Exception as e:
+            self.logger.error(f"統計取得中にエラーが発生: {e}")
+            self.error_occurred.emit(str(e))
+            raise
+
+    def get_usage_stats(self) -> pl.DataFrame:
+        """
+        タグ使用回数の DataFrame を取得 (Polars)
+        columns: [tag_id, format_name, usage_count]
+        """
+        try:
+            return self._stats.get_usage_stats()
+        except Exception as e:
+            self.logger.error(f"使用回数統計取得中にエラーが発生: {e}")
+            self.error_occurred.emit(str(e))
+            raise
+
+    def get_type_distribution(self) -> pl.DataFrame:
+        """
+        タイプ(タグカテゴリ)別のタグ数分布
+        columns: [format_name, type_name, tag_count]
+        """
+        try:
+            return self._stats.get_type_distribution()
+        except Exception as e:
+            self.logger.error(f"タイプ分布統計取得中にエラーが発生: {e}")
+            self.error_occurred.emit(str(e))
+            raise
+
+    def get_translation_stats(self) -> pl.DataFrame:
+        """
+        翻訳情報の統計
+        columns: [tag_id, total_translations, languages (List[str])]
+        """
+        try:
+            return self._stats.get_translation_stats()
+        except Exception as e:
+            self.logger.error(f"翻訳統計取得中にエラーが発生: {e}")
+            self.error_occurred.emit(str(e))
+            raise
+
+
 if __name__ == "__main__":
     """
     簡易動作テスト:
@@ -355,7 +422,7 @@ if __name__ == "__main__":
     """
     import sys
 
-    # 1) タグクリーナーのテスト
+    # 1) タグクリーナーのテスト (Polarsではなく単純な文字列変換)
     cleaner = TagCleanerService()
     all_formats = cleaner.get_tag_formats()
     print("DBから取得したフォーマット一覧 (+ All):", all_formats)
@@ -365,9 +432,10 @@ if __name__ == "__main__":
     result = cleaner.convert_prompt(sample_text, format_name)
     print(f"[convert_prompt] '{sample_text}' → '{result}' (format='{format_name}')")
 
-    # 2) インポートサービスのテスト
+    # 2) インポートサービスのテスト (Polars DataFrame を用意)
     importer_service = TagImportService()
-    # ダミーDataFrame
-    df = pl.DataFrame({"tag": ["1boy", "2girls"], "count": [10, 20]})
+    dummy_df = pl.DataFrame({"tag": ["1boy", "2girls"], "count": [10, 20]})
     config = ImportConfig(format_id=importer_service.get_format_id("danbooru"), language="en")
-    importer_service.import_data(df, config)
+
+    importer_service.import_data(dummy_df, config)
+    print("Import finished.")
