@@ -1,13 +1,13 @@
 # genai_tag_db_tools.data.tag_repository
 from logging import getLogger
-from typing import Optional
+from typing import Optional, Callable
 
 import polars as pl
 
+from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql import or_
 
-from genai_tag_db_tools.db.database_setup import SessionLocal
 from genai_tag_db_tools.data.database_schema import (
     Tag,
     TagStatus,
@@ -21,7 +21,6 @@ from genai_tag_db_tools.data.database_schema import (
 from genai_tag_db_tools.utils.messages import ErrorMessages
 
 class TagRepository:
-    logger = getLogger(__name__)
     """
     タグおよび関連テーブルへのアクセスを一元管理するリポジトリクラス
 
@@ -34,8 +33,14 @@ class TagRepository:
       - TAG_TRANSLATIONS: タグの翻訳情報
       - TAG_TYPE_FORMAT_MAPPING: タグタイプとフォーマットの紐付け
     """
-    def __init__(self):
-        self.session_factory = SessionLocal
+    def __init__(self, session_factory: Callable[[], Session] | None = None):
+        self.session_factory = None
+        # test時にsession_factoryで別のDBを指定するための処理
+        if session_factory is not None:
+            self.session_factory = session_factory
+        else:
+            from genai_tag_db_tools.db.database_setup import SessionLocal
+            self.session_factory = SessionLocal
 
     # --- TAG CRUD ---
     def create_tag(self, source_tag: str, tag: str) -> int:
@@ -377,15 +382,32 @@ class TagRepository:
                     raise ValueError(msg)
 
             try:
-                status_obj = TagStatus(
-                    tag_id=tag_id,
-                    format_id=format_id,
-                    type_id=type_id,
-                    alias=alias,
-                    preferred_tag_id=preferred_tag_id
+                # 既存のレコードを検索
+                status_obj = (
+                    session.query(TagStatus)
+                    .filter(
+                        TagStatus.tag_id == tag_id,
+                        TagStatus.format_id == format_id
+                    )
+                    .one_or_none()
                 )
-                session.add(status_obj)
-                session.flush()
+
+                if status_obj:
+                    # 既存レコードがあれば更新
+                    status_obj.type_id = type_id
+                    status_obj.alias = alias
+                    status_obj.preferred_tag_id = preferred_tag_id
+                else:
+                    # 新規作成
+                    status_obj = TagStatus(
+                        tag_id=tag_id,
+                        format_id=format_id,
+                        type_id=type_id,
+                        alias=alias,
+                        preferred_tag_id=preferred_tag_id
+                    )
+                    session.add(status_obj)
+
                 session.commit()
 
             except IntegrityError as e:
