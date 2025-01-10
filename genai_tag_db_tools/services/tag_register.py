@@ -94,7 +94,11 @@ class TagRegister:
             tag_id = row["tag_id"]
             trans = row["translation"]
             if tag_id is not None and trans:
-                self._repo.add_or_update_translation(tag_id, language, trans)
+                self._repo.add_or_update_translation(
+                    tag_id=tag_id,
+                    language=language,
+                    translation=trans
+                )
 
     def update_deprecated_tags(self, df: pl.DataFrame, format_id: int) -> None:
         """
