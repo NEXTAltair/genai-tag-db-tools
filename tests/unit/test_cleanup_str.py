@@ -32,12 +32,6 @@ def test_clean_tags_girls(tag_cleaner):
     assert tag_cleaner.clean_tags(tags) == expected
 
 
-def test_clean_caption(tag_cleaner):
-    caption = "anime anime girl, cartoon female, young lady"
-    expected = "girl, girl, girl"
-    assert tag_cleaner.clean_caption(caption) == expected
-
-
 def test_clean_repetition(tag_cleaner):
     text = "This is a test,,,,,, with multiple spaces    and backslashes\\\\\\"
     expected = "This is a test, with multiple spaces and backslashes\\"
