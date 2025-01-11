@@ -21,35 +21,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.tag_import_service = TagImportService()
 
         self.setupUi(self)  # まずUIをセットアップ
-        self.init_widgets()  # その後でウィジェットを初期化
+
+        # QtDesignerで作成されたウィジェットにサービスを注入
+        if isinstance(self.tagSearch, TagSearchWidget):
+            self.tagSearch._service = self.tag_search_service
+            self.tagSearch.error_occurred.connect(self.on_service_error)
+
         self.setWindowTitle("タグデータベースツール")
-
-    def initialize(self, tag_searcher):
-        """後方互換性のために残す"""
-        self.tag_searcher = tag_searcher
-
-    def init_widgets(self):
-        # Replace placeholder widgets with actual instances
-        search_widget = TagSearchWidget(service=self.tag_search_service)
-        search_widget.error_occurred.connect(self.on_service_error)
-        self.tabWidget.removeTab(0)
-        self.tabWidget.insertTab(0, search_widget, "タグ検索")
-        self.tagSearch = search_widget
-
-        cleaner_widget = TagCleanerWidget()
-        self.tabWidget.removeTab(1)
-        self.tabWidget.insertTab(1, cleaner_widget, "タグクリーナー")
-        self.tagCleaner = cleaner_widget
-
-        register_widget = TagRegisterWidget()
-        self.tabWidget.removeTab(2)
-        self.tabWidget.insertTab(2, register_widget, "登録")
-        self.tagRegister = register_widget
-
-        stats_widget = TagStatisticsWidget()
-        self.tabWidget.removeTab(3)
-        self.tabWidget.insertTab(3, stats_widget, "タグ統計")
-        self.tagStatistics = stats_widget
 
     @Slot()
     def on_actionImport_triggered(self):
@@ -94,11 +72,8 @@ if __name__ == "__main__":
     current_dir = Path(__file__).parent
     project_root = current_dir.parent
     sys.path.insert(0, str(project_root))
-    from genai_tag_db_tools.services.tag_search import TagSearcher
 
     app = QApplication(sys.argv)
-    tag_searcher = TagSearcher()
     window = MainWindow()
-    window.initialize(tag_searcher)
     window.show()
     sys.exit(app.exec())

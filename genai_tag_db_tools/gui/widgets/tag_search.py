@@ -1,6 +1,7 @@
 # genai_tag_db_tools/gui/widgets/tag_search.py
 
 import logging
+from typing import Optional
 
 import polars as pl
 import numpy as np
@@ -92,13 +93,14 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
 
     error_occurred = Signal(str)
 
-    def __init__(self, service: TagSearchService, parent=None):
+    def __init__(self, service: Optional[TagSearchService] = None, parent=None):
         super().__init__(parent)
         # QtDesignerで自動生成されたUIを適用
         self.setupUi(self)
 
         self.logger = logging.getLogger(self.__class__.__name__)
-        self._service = service
+        # serviceが指定されていない場合は新しく作成
+        self._service = service if service is not None else TagSearchService()
 
         # usageCountSlider という空の QWidget を
         # CustomLogScaleSlider に差し替える or レイアウトを追加する
