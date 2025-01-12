@@ -309,16 +309,18 @@ class TagSearcher:
         """
         return self.tag_repo.get_tag_formats()
 
-    def get_format_id(self, format_name: str) -> int:
+    def get_format_id(self, format_name: Optional[str]) -> int:
         """
         フォーマット名からフォーマットIDを取得する。
 
         Args:
-            format_name (str): フォーマット名
+            format_name (Optional[str]): フォーマット名
 
         Returns:
-            int: フォーマットID
+            int: フォーマットID。format_nameがNoneの場合はunknownを示すID 0 を返す。
         """
+        if format_name is None:
+            return 0
         return self.tag_repo.get_format_id(format_name)
 
 if __name__ == "__main__":
