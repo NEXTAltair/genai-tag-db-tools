@@ -18,35 +18,52 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
 from PySide6.QtWidgets import (QApplication, QComboBox, QLineEdit, QPushButton,
     QSizePolicy, QSpinBox, QTextEdit, QVBoxLayout,
     QWidget)
+from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
+    QMetaObject, QObject, QPoint, QRect,
+    QSize, QTime, QUrl, Qt)
+from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
+    QFont, QFontDatabase, QGradient, QIcon,
+    QImage, QKeySequence, QLinearGradient, QPainter,
+    QPalette, QPixmap, QRadialGradient, QTransform)
+from PySide6.QtWidgets import (QApplication, QComboBox, QLineEdit, QPushButton,
+    QSizePolicy, QSpinBox, QTextEdit, QVBoxLayout,
+    QWidget)
 
 class Ui_TagRegisterWidget(object):
     def setupUi(self, TagRegisterWidget):
         if not TagRegisterWidget.objectName():
             TagRegisterWidget.setObjectName(u"TagRegisterWidget")
+            TagRegisterWidget.setObjectName(u"TagRegisterWidget")
         TagRegisterWidget.resize(400, 500)
         self.verticalLayout = QVBoxLayout(TagRegisterWidget)
         self.verticalLayout.setObjectName(u"verticalLayout")
+        self.verticalLayout.setObjectName(u"verticalLayout")
         self.lineEditTag = QLineEdit(TagRegisterWidget)
+        self.lineEditTag.setObjectName(u"lineEditTag")
         self.lineEditTag.setObjectName(u"lineEditTag")
 
         self.verticalLayout.addWidget(self.lineEditTag)
 
         self.lineEditSourceTag = QLineEdit(TagRegisterWidget)
         self.lineEditSourceTag.setObjectName(u"lineEditSourceTag")
+        self.lineEditSourceTag.setObjectName(u"lineEditSourceTag")
 
         self.verticalLayout.addWidget(self.lineEditSourceTag)
 
         self.comboBoxFormat = QComboBox(TagRegisterWidget)
+        self.comboBoxFormat.setObjectName(u"comboBoxFormat")
         self.comboBoxFormat.setObjectName(u"comboBoxFormat")
 
         self.verticalLayout.addWidget(self.comboBoxFormat)
 
         self.comboBoxType = QComboBox(TagRegisterWidget)
         self.comboBoxType.setObjectName(u"comboBoxType")
+        self.comboBoxType.setObjectName(u"comboBoxType")
 
         self.verticalLayout.addWidget(self.comboBoxType)
 
         self.spinBoxUseCount = QSpinBox(TagRegisterWidget)
+        self.spinBoxUseCount.setObjectName(u"spinBoxUseCount")
         self.spinBoxUseCount.setObjectName(u"spinBoxUseCount")
         self.spinBoxUseCount.setMaximum(1000000)
 
@@ -54,16 +71,19 @@ class Ui_TagRegisterWidget(object):
 
         self.comboBoxLanguage = QComboBox(TagRegisterWidget)
         self.comboBoxLanguage.setObjectName(u"comboBoxLanguage")
+        self.comboBoxLanguage.setObjectName(u"comboBoxLanguage")
         self.comboBoxLanguage.setEditable(True)
 
         self.verticalLayout.addWidget(self.comboBoxLanguage)
 
         self.lineEditTranslation = QLineEdit(TagRegisterWidget)
         self.lineEditTranslation.setObjectName(u"lineEditTranslation")
+        self.lineEditTranslation.setObjectName(u"lineEditTranslation")
 
         self.verticalLayout.addWidget(self.lineEditTranslation)
 
         self.pushButtonRegister = QPushButton(TagRegisterWidget)
+        self.pushButtonRegister.setObjectName(u"pushButtonRegister")
         self.pushButtonRegister.setObjectName(u"pushButtonRegister")
 
         self.verticalLayout.addWidget(self.pushButtonRegister)
@@ -75,9 +95,11 @@ class Ui_TagRegisterWidget(object):
 
         self.textEditOutput = QTextEdit(TagRegisterWidget)
         self.textEditOutput.setObjectName(u"textEditOutput")
+        self.textEditOutput.setObjectName(u"textEditOutput")
         self.textEditOutput.setReadOnly(True)
 
         self.verticalLayout.addWidget(self.textEditOutput)
+
 
 
         self.retranslateUi(TagRegisterWidget)
@@ -97,4 +119,5 @@ class Ui_TagRegisterWidget(object):
         self.pushButtonRegister.setText(QCoreApplication.translate("TagRegisterWidget", u"\u767b\u9332", None))
         self.pushButtonImport.setText(QCoreApplication.translate("TagRegisterWidget", u"\u30a4\u30f3\u30dd\u30fc\u30c8\u30c0\u30a4\u30a2\u30ed\u30b0\u3092\u958b\u304f", None))
     # retranslateUi
+
 
