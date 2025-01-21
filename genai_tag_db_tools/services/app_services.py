@@ -67,25 +67,35 @@ class TagCoreService:
         return self._searcher.convert_tag(tag, format_id)
 
 
-class TagSearchService:
+class TagSearchService(GuiServiceBase):
     """
     TagSearcherを内部で利用し、GUI用のメソッド（検索やフォーマット一覧取得など）をまとめる。
     """
-    def __init__(self, searcher: Optional[TagSearcher] = None):
-        self.logger = logging.getLogger(self.__class__.__name__)
+    def __init__(self, parent: Optional[QObject] = None, searcher: Optional[TagSearcher] = None):
+        super().__init__(parent)
         self._searcher = searcher or TagSearcher()
 
     def get_tag_formats(self) -> list[str]:
         """
         DB からタグフォーマット一覧を取得。
         """
-        return self._searcher.get_tag_formats()
+        try:
+            return self._searcher.get_tag_formats()
+        except Exception as e:
+            self.logger.error(f"フォーマット一覧取得中にエラー: {e}")
+            self.error_occurred.emit(str(e))
+            raise
 
     def get_tag_languages(self) -> list[str]:
         """
         DB から言語一覧を取得。
         """
-        return self._searcher.get_tag_languages()
+        try:
+            return self._searcher.get_tag_languages()
+        except Exception as e:
+            self.logger.error(f"言語一覧取得中にエラー: {e}")
+            self.error_occurred.emit(str(e))
+            raise
 
     def get_tag_types(self, format_name: Optional[str]) -> list[str]:
         """
@@ -94,9 +104,14 @@ class TagSearchService:
         Args:
             format_name (str): フォーマット名。None の場合は全検索。
         """
-        if format_name is None:
-            return self._searcher.get_all_types()
-        return self._searcher.get_tag_types(format_name)
+        try:
+            if format_name is None:
+                return self._searcher.get_all_types()
+            return self._searcher.get_tag_types(format_name)
+        except Exception as e:
+            self.logger.error(f"タグタイプ一覧取得中にエラー: {e}")
+            self.error_occurred.emit(str(e))
+            raise
 
     def search_tags(self,
                     keyword: str,
@@ -112,16 +127,22 @@ class TagSearchService:
         partial=True の場合は部分一致、partial=False は完全一致。
         format_name=None の場合はフォーマット指定なし(全検索)
         """
-        return self._searcher.search_tags(
-            keyword=keyword,
-            partial=partial,
-            format_name=format_name,
-            type_name=type_name,
-            language=language,
-            min_usage=min_usage,
-            max_usage=max_usage,
-            alias=alias
-        )
+        try:
+            return self._searcher.search_tags(
+                keyword=keyword,
+                partial=partial,
+                format_name=format_name,
+                type_name=type_name,
+                language=language,
+                min_usage=min_usage,
+                max_usage=max_usage,
+                alias=alias
+            )
+        except Exception as e:
+            self.logger.error(f"タグ検索中にエラー: {e}")
+            self.error_occurred.emit(str(e))
+            raise
+
 
 class TagCleanerService(GuiServiceBase):
     """
@@ -348,6 +369,7 @@ class TagRegisterService(GuiServiceBase):
             self.logger.error(f"タグ詳細取得中にエラー発生: {e}")
             self.error_occurred.emit(str(e))
             raise
+
 
 class TagStatisticsService(GuiServiceBase):
     """
