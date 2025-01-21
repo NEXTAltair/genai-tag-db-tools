@@ -24,6 +24,11 @@ def engine() -> Generator[Any, None, None]:
     # データベーススキーマを作成
     Base.metadata.create_all(engine)
 
+    # テスト用のengineをTagDatabaseに注入できるようにモンキーパッチ
+    import genai_tag_db_tools.data.database_schema as schema
+    schema.engine = engine
+    schema.SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
     yield engine
 
     # テスト終了後のクリーンアップ

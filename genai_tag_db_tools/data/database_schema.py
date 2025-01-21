@@ -23,7 +23,12 @@ from sqlalchemy.orm import (
     declarative_base,
 )
 
-from genai_tag_db_tools.db.database_setup import engine, SessionLocal
+from genai_tag_db_tools.db.database_setup import engine as production_engine
+from genai_tag_db_tools.db.database_setup import SessionLocal as production_SessionLocal
+
+# テスト時にモンキーパッチで上書きされる可能性のある変数
+engine = production_engine
+SessionLocal = production_SessionLocal
 
 Base = declarative_base()
 
