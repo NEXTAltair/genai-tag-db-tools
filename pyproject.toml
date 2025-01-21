@@ -7,10 +7,9 @@ build-backend = "hatchling.build"  # ビルドバックエンドの指定
 # プロジェクトの基本情報
 [project]
 name = "genai-tag-db-tools"  # パッケージ名 ハイフン推奨なぜかは知らん
-version = "0.1.0"  # バージョン番号
+version = "0.2.0"  # バージョン番号
 description = "AI生成画像のタグ管理ツール"  # プロジェクトの説明
 requires-python = ">=3.12"  # 必要なPythonバージョン
-SQLAlchemy = ">=2.0.0"  # データベースライブラリ
 
 # 必要なパッケージの依存関係
 dependencies = [
@@ -18,6 +17,7 @@ dependencies = [
     "superqt>=0.6.7",          # PySide6の拡張機能
     "polars[all]>=1.9.0",           # 高性能データフレームライブラリ [all] は全機能をインストール必要ない部分は後で削る
     "alembic>=1.13.1",         # データベースマイグレーションツール
+    "SQLAlchemy>=2.0.0",       # データベースライブラリ
 ]
 
 # プロジェクトの分類情報

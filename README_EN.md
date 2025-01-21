@@ -83,13 +83,27 @@ from genai_tag_db_tools import some_module
 
 ```bash
 genai-tag-db-tools/
-├── genai_tag_db_tools/     # Main package
-│   ├── core/               # Core functionalities
-│   ├── gui/                # GUI related
-│   ├── data/               # Data files (e.g., SQLite DB)
+├── genai_tag_db_tools/      # Main package
+│   ├── data/                # Data management
+│   │   ├── migrations/      # Database migrations
+│   │   ├── tags_v3.db      # Tag database v3
+│   │   ├── tags_v4.db      # Tag database v4
+│   │   └── database_schema.py
+│   ├── db/                  # Database operations
+│   ├── gui/                 # GUI components
+│   │   ├── designer/        # UI definition files (.ui/.py)
+│   │   ├── widgets/         # Various widgets
+│   │   └── windows/         # Main window
+│   ├── services/            # Application services
+│   ├── utils/              # Utilities
 │   └── main.py             # Entry point
+├── docs/                   # Documentation
 ├── tests/                  # Test code
-├── pyproject.toml          # Project settings
+│   ├── gui/               # GUI tests
+│   ├── unit/             # Unit tests
+│   └── resource/         # Test resources
+├── tools/                 # Tool scripts
+├── pyproject.toml        # Project configuration
 └── README.md
 ```
 

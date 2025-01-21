@@ -81,15 +81,27 @@ from genai_tag_db_tools import some_module
 
 ```bash
 genai-tag-db-tools/
-├── genai_tag_db_tools/     # メインパッケージ
-│   ├── core/               # コア機能
-│   ├── gui/                # GUI関連
-│   ├── data/               # データファイル (SQLite DB 等)
+├── genai_tag_db_tools/      # メインパッケージ
+│   ├── data/                # データ管理
+│   │   ├── migrations/      # DBマイグレーション
+│   │   ├── tags_v3.db      # タグデータベース v3
+│   │   ├── tags_v4.db      # タグデータベース v4
+│   │   └── database_schema.py
+│   ├── db/                  # データベース操作
+│   ├── gui/                 # GUI関連
+│   │   ├── designer/        # UI定義ファイル(.ui/.py)
+│   │   ├── widgets/         # 各種ウィジェット
+│   │   └── windows/         # メインウィンドウ
+│   ├── services/            # アプリケーションサービス
+│   ├── utils/              # ユーティリティ
 │   └── main.py             # エントリーポイント
-├── tests/                  # テストコード
-├── tools/                  # ツールスクリプト
 ├── docs/                   # ドキュメント
-├── pyproject.toml          # プロジェクト設定
+├── tests/                  # テストコード
+│   ├── gui/               # GUIテスト
+│   ├── unit/             # ユニットテスト
+│   └── resource/         # テストリソース
+├── tools/                 # ツールスクリプト
+├── pyproject.toml        # プロジェクト設定
 └── README.md
 ```
 
