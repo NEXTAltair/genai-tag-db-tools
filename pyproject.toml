@@ -28,6 +28,7 @@ classifiers = [
 # 開発時のみ必要な追加パッケージ
 [project.optional-dependencies]
 dev = [
+    "ruff>=0.9.2" ,          # コード整形ツール
     "pytest>=8.3.3",          # テストフレームワーク
     "pytest-cov>=6.0.0",      # テストカバレッジツール
     "pytest-qt",        # Qtアプリケーションのテストツール
