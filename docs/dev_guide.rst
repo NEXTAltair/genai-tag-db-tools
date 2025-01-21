@@ -21,6 +21,14 @@ Developer Guide (開発者向けセットアップガイド)
     - タグの登録・更新・翻訳取得・使用頻度計測などの機能を実装
     - データベースアクセスを抽象化し、タグ形式の差異を吸収するロジックを提供
 
+    2.1 service
+        - app_service.py: guiで使用するサービス層のロジックを提供
+        - import_data.py: csvやHuggingFaceのタグデータをDBにインポートするロジックを提供
+        - polars_schema.py: Polarsのスキーマを定義し、データフレームをDBにインポートするロジックを提供 TODO: コレ必要か?
+        - tag_register.py: タグ登録機能を提供するロジック
+        - tag_search.py: タグ検索機能を提供するロジック
+        - tag_statistics.py: タグ使用頻度など統計機能を提供するロジック
+
 3. **インターフェース層 (Interface Layer)**
 
     - PySide6を用いたGUIを提供し、タグ情報を直感的に参照・更新
