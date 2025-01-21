@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 from PySide6.QtWidgets import QApplication
 from typing import Generator, Any
+
 from genai_tag_db_tools.data.database_schema import Base, TagDatabase
 
 @pytest.fixture(scope="function")
@@ -23,11 +24,6 @@ def engine() -> Generator[Any, None, None]:
 
     # データベーススキーマを作成
     Base.metadata.create_all(engine)
-
-    # テスト用のengineをTagDatabaseに注入できるようにモンキーパッチ
-    import genai_tag_db_tools.data.database_schema as schema
-    schema.engine = engine
-    schema.SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
     yield engine
 

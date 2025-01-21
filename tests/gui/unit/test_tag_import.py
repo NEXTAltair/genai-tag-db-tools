@@ -8,7 +8,10 @@ from PySide6.QtWidgets import QDialog, QMenu
 from genai_tag_db_tools.gui.widgets.tag_import import PolarsModel, TagDataImportDialog
 
 # リファクタ後のサービスクラス
-from genai_tag_db_tools.services.app_services import TagImportService
+from genai_tag_db_tools.services.app_services import TagImportService, TagCoreService
+from genai_tag_db_tools.services.import_data import TagDataImporter
+from genai_tag_db_tools.services.tag_search import TagSearcher
+from genai_tag_db_tools.data.tag_repository import TagRepository
 
 def test_polars_model_data():
     """
@@ -50,6 +53,19 @@ def test_polars_model_get_mapping():
     # col2 は '未選択' のため含まれない。
 
 
+def create_test_service(db_session):
+    """テスト用のサービスを作成するヘルパー関数"""
+    def session_factory():
+        return db_session
+    
+    repo = TagRepository(session_factory=session_factory)
+    searcher = TagSearcher()
+    searcher.tag_repo = repo
+    core = TagCoreService(searcher=searcher)
+    importer = TagDataImporter(session_factory=session_factory)
+    
+    return TagImportService(importer=importer, core=core)
+
 def test_tag_data_import_dialog_initial_state(db_session):
     """
     TagDataImportDialog の初期状態を確認。
@@ -57,7 +73,7 @@ def test_tag_data_import_dialog_initial_state(db_session):
     - sourceTagCheckBox などが未選択
     """
     df = pl.DataFrame({"col1": [1], "col2": [2]})
-    service = TagImportService()  # 依存性注入
+    service = create_test_service(db_session)
     dialog = TagDataImportDialog(df, service)
 
     # 初期状態で必須フィールドは未マッピング → importButton 無効
@@ -71,7 +87,7 @@ def test_on_sourceTagCheckBox_stateChanged_enables_import(qtbot, db_session):
     必須フィールドが設定されたら importButton が有効になるかをテスト。
     """
     df = pl.DataFrame({"col1": [1], "col2": [2]})
-    service = TagImportService()
+    service = create_test_service(db_session)
     dialog = TagDataImportDialog(df, service)
 
     # col1 を source_tag にマッピング
@@ -90,7 +106,7 @@ def test_import_button_click_triggers_import_data(qtbot, monkeypatch, db_session
     なお、_service._importer をモック化して呼び出し確認を行う。
     """
     df = pl.DataFrame({"col1": [1], "col2": [2]})
-    service = TagImportService()
+    service = create_test_service(db_session)
     dialog = TagDataImportDialog(df, service)
 
     # マッピング設定 + フォーマット選択
@@ -117,7 +133,7 @@ def test_cancel_button_click_closes_dialog(qtbot, db_session):
     キャンセルボタンを押したら QDialog が閉じる(Rejected)かを確認。
     """
     df = pl.DataFrame({"col1": [1], "col2": [2]})
-    service = TagImportService()
+    service = create_test_service(db_session)
     dialog = TagDataImportDialog(df, service)
 
     qtbot.mouseClick(dialog.cancelButton, Qt.MouseButton.LeftButton)
@@ -130,7 +146,7 @@ def test_update_progress(qtbot, db_session):
     update_progress でウィンドウタイトルが更新されるかをテスト。
     """
     df = pl.DataFrame({"col1": [1], "col2": [2]})
-    service = TagImportService()
+    service = create_test_service(db_session)
     dialog = TagDataImportDialog(df, service)
 
     qtbot.addWidget(dialog)
@@ -145,7 +161,7 @@ def test_import_finished(qtbot, db_session):
     import_finished でタイトルが更新され、ダイアログが受理(accept)されるか。
     """
     df = pl.DataFrame({"col1": [1], "col2": [2]})
-    service = TagImportService()
+    service = create_test_service(db_session)
     dialog = TagDataImportDialog(df, service)
 
     qtbot.addWidget(dialog)
@@ -161,7 +177,7 @@ def test_on_import_error(qtbot, monkeypatch, db_session):
     on_import_error がエラーポップアップを表示し、UIを操作可能にするか。
     """
     df = pl.DataFrame({"col1": [1], "col2": [2]})
-    service = TagImportService()
+    service = create_test_service(db_session)
     dialog = TagDataImportDialog(df, service)
 
     with patch("genai_tag_db_tools.gui.widgets.tag_import.QMessageBox.critical") as mock_crit:
@@ -178,7 +194,7 @@ def test_show_header_menu(qtbot, monkeypatch, db_session):
     QMenu.exec_ をモックにして確認。
     """
     df = pl.DataFrame({"col1": [1], "col2": [2]})
-    service = TagImportService()
+    service = create_test_service(db_session)
     dialog = TagDataImportDialog(df, service)
     header = dialog.dataPreviewTable.horizontalHeader()
 
