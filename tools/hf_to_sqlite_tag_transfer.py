@@ -13,7 +13,7 @@ class DanbooruJaTagBatch:
             Path(__file__).resolve().parent.parent
             / "genai_tag_db_tools"
             / "data"
-            / "tags_v3.db"
+            / "tags_v4.db"
         )
         self.conn = sqlite3.connect(db_path)
         self.df = df

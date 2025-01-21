@@ -93,7 +93,7 @@ genai_tag_db_tools = ["data/*.db"]
 
 # プロジェクトスクリプト
 [project.scripts]
-genai-tag-db-tools = "genai_tag_db_tools.main:main"
+gtdtools = "genai_tag_db_tools.main:main"
 #インストールして genai_tag_db_tools をターミナルで入力するとmainが実行されるよという話
 
 # Pyright（静的型チェッカー）の設定
@@ -103,6 +103,8 @@ exclude = [                   # 型チェック除外対象
     "**/__pycache__",
     "test"
 ]
+venvPath = "."               # 仮想環境のパス
+venv = "gtdt"               # 仮想環境の名前
 typeCheckingMode = "basic"  # 型チェックの厳格さ
 
 # PySide6関連の特別な設定
