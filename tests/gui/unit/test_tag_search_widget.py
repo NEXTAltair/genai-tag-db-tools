@@ -2,16 +2,12 @@ import pytest
 from unittest.mock import MagicMock
 import polars as pl
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QTableWidgetItem
+from PySide6.QtWidgets import QTableWidgetItem
 
 # TagSearchWidget をインポート
 from genai_tag_db_tools.gui.widgets.tag_search import TagSearchWidget
 # TagSearchService などサービス層をインポート
 from genai_tag_db_tools.services.app_services import TagSearchService
-
-app = QApplication.instance()
-if app is None:
-    app = QApplication([])
 
 @pytest.fixture
 def widget_fixture(qtbot):

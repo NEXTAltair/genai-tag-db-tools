@@ -1,7 +1,9 @@
 import pytest
+import sys
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
+from PySide6.QtWidgets import QApplication
 
 @pytest.fixture(scope="function")
 def engine():
@@ -36,3 +38,15 @@ def db_session(engine) -> Session:
         session.rollback()
         transaction.rollback()
         connection.close()
+
+@pytest.fixture(scope="session")
+def qapp():
+    """ヘッドレスモードでQApplicationを起動する"""
+    # ヘッドレスモードの設定
+    if sys.platform.startswith('linux'):
+        import os
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
+    app = QApplication(sys.argv)
+    yield app
+    app.quit()

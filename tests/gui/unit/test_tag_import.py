@@ -2,19 +2,13 @@ import polars as pl
 from unittest.mock import MagicMock, patch
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QDialog, QMenu
+from PySide6.QtWidgets import QDialog, QMenu
 
 # リファクタ後の GUI コードから PolarsModel, TagDataImportDialog をインポート
 from genai_tag_db_tools.gui.widgets.tag_import import PolarsModel, TagDataImportDialog
 
 # リファクタ後のサービスクラス
 from genai_tag_db_tools.services.app_services import TagImportService
-
-# pytest-qt が自動生成する QApplication フィクスチャ（無い場合は自前で確保）
-app = QApplication.instance()
-if app is None:
-    app = QApplication([])
-
 
 def test_polars_model_data():
     """
