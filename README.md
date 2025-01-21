@@ -2,163 +2,194 @@
 
 ## 概要
 
-genai-tag-db-toolsは、異なるプラットフォーム間でタグ、その翻訳、使用回数、関連性を統一したデータベースとして管理するためのツールセットです。このプロジェクトは、さまざまなソースからタグデータを収集し、整理し、効率的に検索・管理できるようにすることを目的としています。
+**genai-tag-db-tools** は、画像生成AIで使用するタグを統合的に管理するためのデータベースツールである。
+異なるプラットフォームやフォーマットで用いられるタグ情報を一元的に扱うことが可能となる。
+
+主な目的は以下の通りだ。
+
+- タグとその翻訳、使用頻度、関連性を統合管理
+- タグタイプやフォーマットとの関連付けによるフィルタリングや統計分析
+- GUIによるタグデータ参照・更新
+- CLI経由の起動およびモジュールとして他プロジェクトからの利用が可能
 
 ## 主な機能
 
-- タグの検索と管理
-- タグの翻訳管理（多言語サポート）
-- 異なるプラットフォーム間でのタグ種類の分類
-- エイリアスと推奨タグの管理
-- 異なるフォーマットでのタグ使用回数の追跡
-- タグ統計情報の表示
-- CSVファイルからのデータインポート
+- タグの管理：新規登録、更新、エイリアス設定、推奨タグ設定など
+- タグの参照：キーワード検索、翻訳参照、使用回数やタイプ・フォーマット別の統計表示
+- GUIの提供：CLIコマンドからGUIを起動し、直感的にタグデータベースを閲覧・更新
+- モジュール機能の提供：他プロジェクトからインポートし、データベース操作やタグ管理ロジックを活用可能
 
-## プロジェクト構造
+## インストール方法
 
-```bash
-genai-tag-db-tools/
-├── genai_tag_db_tools/          # メインパッケージ
-│   ├── core/                    # コア機能
-│   │   └── processor.py         # データ処理ロジック
-│   ├── gui/                     # GUIコンポーネント
-│   │   ├── designer/           # UI定義ファイル
-│   │   ├── widgets/            # カスタムウィジェット
-│   │   └── windows/            # メインウィンドウ実装
-│   └── main.py                 # エントリーポイント
-├── tools/                       # ユーティリティスクリプト
-├── data/                        # データファイル
-├── test/                        # テストコード
-├── pyproject.toml              # プロジェクト設定
-└── README.md
-```
+### 環境要件
 
-## データベース構造
+- Python 3.12以上
+- Windows 11対応(他OSは未検証)
 
-データベースはSQLiteで実装され、以下の主要なテーブルで構成されています：
+### インストール手順
 
-### コアテーブル
+1. 仮想環境の作成(任意)
 
-1. `TAGS`: タグの基本情報
+   ```bash
+   py -3.12 -m venv venv
+   venv\Scripts\Activate.ps1
+   ```
+2. `genai-tag-db-tools` のインストール
 
-   - `tag_id`: プライマリーキー
-   - `source_tag`: 元のタグ文字列
-   - `tag`: 正規化されたタグ
-2. `TAG_TRANSLATIONS`: 多言語対応
+   ```bash
+   pip install genai-tag-db-tools
+   ```
 
-   - `translation_id`: プライマリーキー
-   - `tag_id`: TAGSテーブルへの参照
-   - `language`: 言語コード
-   - `translation`: 翻訳テキスト
-3. `TAG_FORMATS`: タグのフォーマット定義
+   またはGitHubリポジトリから直接インストール
 
-   - `format_id`: プライマリーキー
-   - `format_name`: フォーマット名
-   - `description`: 説明
-4. `TAG_TYPE_NAME`: タグタイプの定義
+   ```bash
+   pip install git+https://github.com/NEXTAltair/genai-tag-db-tools.git
+   ```
 
-   - `type_name_id`: プライマリーキー
-   - `type_name`: タイプ名
-   - `description`: 説明
-
-### 関連テーブル
-
-5. `TAG_TYPE_FORMAT_MAPPING`: タイプとフォーマットの関連付け
-6. `TAG_USAGE_COUNTS`: 使用頻度の追跡
-7. `TAG_STATUS`: タグのステータス管理
-
-## インストール
-
-1. リポジトリのクローン:
+### アンインストール
 
 ```bash
-git clone https://github.com/yourusername/genai-tag-db-tools.git
-cd genai-tag-db-tools
-```
-
-2. 開発環境のセットアップ:
-
-```bash
-py -3.12 -m venv venv
-venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-```
-
-### インストール その 2
-
-試してないけど以下の方法でもインストールできるはず
-
-1. 仮想環境のセットアップ
-
-```
-cd ワークスペースパス
-py -3.12 -m venv venv
-venv\Scripts\Activate.ps1
-```
-
-2. インストール
-
-```bash
-pip install git+https://github.com/NEXTAltair/genai-tag-db-tools.git
-```
-
-## アンインストール
-
-```
 pip uninstall genai-tag-db-tools
 ```
 
 ## 使用方法
 
-### GUIアプリケーションの起動
+### GUIの起動
+
+インストール後、以下のコマンドでGUIを起動可能。
+
+```bash
+genai-tag-db-tools
+```
+
+またはPythonモジュールとして実行
 
 ```bash
 python -m genai_tag_db_tools
 ```
 
-### 主要な機能
+### 他プロジェクトでの利用
 
-1. **タグ検索**
+`genai_tag_db_tools` をインポートし、データベース操作やタグ管理機能を他プロジェクト内から利用できる。
 
-   - キーワード検索
-   - フォーマット別フィルタリング
-   - タイプ別フィルタリング
-   - 翻訳検索
-2. **タグクリーナー**
+```python
+from genai_tag_db_tools import some_module
 
-   - タグの正規化
-   - 非推奨タグの検出
-   - 推奨タグへの変換
-3. **タグ登録**
-
-   - 新規タグの追加
-   - 既存タグの更新
-   - タグ関係の管理
-4. **タグ統計**
-
-   - 使用頻度分析
-   - フォーマット別統計
-   - タイプ別分布
-
-## 開発者向け情報
-
-### テストの実行
-
-```bash
-pytest
 ```
 
-### コードスタイル
-
-このプロジェクトはPEP 8に従い､コードフォーマッタには `black`を使用。
+## プロジェクト構造
 
 ```bash
-black genai_tag_db_tools
+genai-tag-db-tools/
+├── genai_tag_db_tools/      # メインパッケージ
+│   ├── data/                # データ管理
+│   │   ├── migrations/      # DBマイグレーション
+│   │   ├── tags_v3.db      # タグデータベース v3
+│   │   ├── tags_v4.db      # タグデータベース v4
+│   │   └── database_schema.py
+│   ├── db/                  # データベース操作
+│   ├── gui/                 # GUI関連
+│   │   ├── designer/        # UI定義ファイル(.ui/.py)
+│   │   ├── widgets/         # 各種ウィジェット
+│   │   └── windows/         # メインウィンドウ
+│   ├── services/            # アプリケーションサービス
+│   ├── utils/              # ユーティリティ
+│   └── main.py             # エントリーポイント
+├── docs/                   # ドキュメント
+├── tests/                  # テストコード
+│   ├── gui/               # GUIテスト
+│   ├── unit/             # ユニットテスト
+│   └── resource/         # テストリソース
+├── tools/                 # ツールスクリプト
+├── pyproject.toml        # プロジェクト設定
+└── README.md
 ```
+
+## データベース概要
+
+主にSQLiteを用いてタグデータを管理する。
+以下はエンティティとリレーションを示したER図。
+
+### ER図
+
+```mermaid
+erDiagram
+    TAGS ||--o{ TAG_TRANSLATIONS : has
+    TAGS ||--o{ TAG_STATUS : has
+    TAGS ||--o{ TAG_USAGE_COUNTS : tracks
+    TAG_FORMATS ||--o{ TAG_STATUS : defines
+    TAG_FORMATS ||--o{ TAG_USAGE_COUNTS : tracks
+    TAG_TYPE_FORMAT_MAPPING ||--o{ TAG_STATUS : maps
+    TAG_TYPE_NAME ||--o{ TAG_TYPE_FORMAT_MAPPING : references
+
+    TAGS {
+        int tag_id PK "primary key"
+        string source_tag
+        datetime created_at
+        datetime updated_at
+        string tag
+    }
+
+    TAG_TRANSLATIONS {
+        int translation_id PK "primary key"
+        int tag_id FK "references TAGS(tag_id)"
+        string language
+        string translation
+        datetime created_at
+        datetime updated_at
+    }
+
+    TAG_FORMATS {
+        int format_id PK "primary key"
+        string format_name
+        string description
+    }
+
+    TAG_TYPE_NAME {
+        int type_name_id PK "primary key"
+        string type_name
+        string description
+    }
+
+    TAG_TYPE_FORMAT_MAPPING {
+        int format_id PK, FK "references TAG_FORMATS(format_id)"
+        int type_id PK "part of composite key"
+        int type_name_id FK "references TAG_TYPE_NAME(type_name_id)"
+        string description
+    }
+
+    TAG_USAGE_COUNTS {
+        int tag_id PK, FK "references TAGS(tag_id)"
+        int format_id PK, FK "references TAG_FORMATS(format_id)"
+        int count
+        datetime created_at
+        datetime updated_at
+    }
+
+    TAG_STATUS {
+        int tag_id PK, FK "references TAGS(tag_id)"
+        int format_id PK, FK "references TAG_FORMATS(format_id)"
+        int type_id FK "part of mapping"
+        boolean alias
+        int preferred_tag_id FK "references TAGS(tag_id)"
+        datetime created_at
+        datetime updated_at
+    }
+```
+
+### テーブル関係
+
+- **TAGS**: タグの基本情報
+- **TAG_TRANSLATIONS**: タグ翻訳情報 (TAGSに従属)
+- **TAG_FORMATS**: タグのフォーマット定義
+- **TAG_TYPE_NAME**: タグタイプ定義
+- **TAG_TYPE_FORMAT_MAPPING**: 各フォーマットとタイプを対応付け
+- **TAG_USAGE_COUNTS**: タグのフォーマット別使用回数
+- **TAG_STATUS**: タグの状態(エイリアス、推奨タグなど)を管理
 
 ## データソース
 
-このプロジェクトは以下の主要なデータソースを使用しています：
+以下のデータソースを参考・利用。
 
 1. [DominikDoom/a1111-sd-webui-tagcomplete](https://github.com/DominikDoom/a1111-sd-webui-tagcomplete): tags.dbの基となったCSVタグデータ
 2. [applemango氏による日本語翻訳](https://github.com/DominikDoom/a1111-sd-webui-tagcomplete/discussions/265): CSVタグデータの日本語翻訳
@@ -171,63 +202,4 @@ black genai_tag_db_tools
 
 ## ライセンス
 
-このプロジェクトはMITライセンスの下で公開されています。詳細は[LICENSE](LICENSE)ファイルを参照してください。
-
-## V3
-
-```mermaid
-erDiagram
-    TAGS ||--o{ TAG_TRANSLATIONS : has
-    TAGS ||--o{ TAG_USAGE_COUNTS : has
-    TAGS ||--o{ TAG_STATUS : has
-    TAGS ||--o{ TAG_STATUS : is_preferred_by
-    TAG_FORMATS ||--o{ TAG_USAGE_COUNTS : has
-    TAG_FORMATS ||--o{ TAG_TYPE_FORMAT_MAPPING : has
-    TAG_TYPE_NAME ||--o{ TAG_TYPE_FORMAT_MAPPING : defines
-    TAG_TYPE_FORMAT_MAPPING ||--o{ TAG_STATUS : defines
-
-    TAGS {
-        int tag_id PK
-        string source_tag
-        string tag
-    }
-
-    TAG_TRANSLATIONS {
-        int translation_id PK
-        int tag_id FK
-        string language
-        string translation
-    }
-
-    TAG_FORMATS {
-        int format_id PK
-        string format_name
-        string description
-    }
-
-    TAG_TYPE_NAME {
-        int type_name_id PK
-        string type_name
-        string description
-    }
-
-    TAG_USAGE_COUNTS {
-        int format_id PK, FK
-        int tag_id PK, FK
-        int count
-    }
-
-    TAG_STATUS {
-        int tag_id PK, FK
-        int format_id PK, FK
-        int type_id FK
-        boolean alias
-        int preferred_tag_id FK
-    }
-
-    TAG_TYPE_FORMAT_MAPPING {
-        int format_id PK, FK
-        int type_id PK, FK
-        int type_name_id FK
-    }
-```
+本プロジェクトはMITライセンス下で公開している。詳細は[LICENSE](LICENSE)を参照。

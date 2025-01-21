@@ -1,12 +1,21 @@
-import polars as pl
-import sqlite3
+from pathlib import Path
 import logging
-from genai_tag_db_tools.core.processor import CSVToDatabaseProcessor
+import sqlite3
+
+import polars as pl
+
+from genai_tag_db_tools.services.processor import CSVToDatabaseProcessor
 
 
 class DanbooruJaTagBatch:
     def __init__(self, df: pl.DataFrame):
-        self.conn = sqlite3.connect("tags_v3.db")
+        db_path = (
+            Path(__file__).resolve().parent.parent
+            / "genai_tag_db_tools"
+            / "data"
+            / "tags_v4.db"
+        )
+        self.conn = sqlite3.connect(db_path)
         self.df = df
         self.logger = logging.getLogger(__name__)
         self.existing_tags = self.get_existing_tags()

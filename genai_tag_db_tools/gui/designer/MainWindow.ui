@@ -18,7 +18,7 @@
     <item>
      <widget class="QTabWidget" name="tabWidget">
       <property name="currentIndex">
-       <number>2</number>
+       <number>3</number>
       </property>
       <widget class="TagSearchWidget" name="tagSearch">
        <attribute name="title">
@@ -45,6 +45,28 @@
    </layout>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
+  <widget class="QMenuBar" name="menuBar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>1000</width>
+     <height>33</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menu">
+    <property name="title">
+     <string>ファイル</string>
+    </property>
+    <addaction name="actionimport"/>
+   </widget>
+   <addaction name="menu"/>
+  </widget>
+  <action name="actionimport">
+   <property name="text">
+    <string>&amp;インポート</string>
+   </property>
+  </action>
  </widget>
  <customwidgets>
   <customwidget>

@@ -1,22 +1,40 @@
 __pycache__/
+.pyc
 venv/
+gtdt/
 genai-tag-db-tools.pyproject
 genai-tag-db-tools.pyproject.user
 initial-analysis.json
+docs/_build
+docs/source
+
+# database mygration files
+alembic.ini
+extracted_models.py
+tag_database_alembic/
+extract_schema.py
+xml/
 
 #database backup files
-tags_v3.db.*
+*.db.*
+tags_v*_*.db
+
 
 #workspace file
 .pytest_cache/
+.coverage
+
 .vscode/
 .git/
 genai-tag-db-tools.code-workspace
 .vscode/settings.json
 .pylintrc
+htmlcov/
 
 #データソース
 tags_csv/
 
 # GOlemi-llm-apprentice/generate-project-summary 用除外設定
 .summaryignore
+*_project_summary.txt
+*/*/# Code Citations.md

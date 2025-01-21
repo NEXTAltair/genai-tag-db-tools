@@ -68,6 +68,11 @@ class Ui_TagRegisterWidget(object):
 
         self.verticalLayout.addWidget(self.pushButtonRegister)
 
+        self.pushButtonImport = QPushButton(TagRegisterWidget)
+        self.pushButtonImport.setObjectName(u"pushButtonImport")
+
+        self.verticalLayout.addWidget(self.pushButtonImport)
+
         self.textEditOutput = QTextEdit(TagRegisterWidget)
         self.textEditOutput.setObjectName(u"textEditOutput")
         self.textEditOutput.setReadOnly(True)
@@ -90,5 +95,6 @@ class Ui_TagRegisterWidget(object):
         self.comboBoxLanguage.setPlaceholderText(QCoreApplication.translate("TagRegisterWidget", u"\u8a00\u8a9e", None))
         self.lineEditTranslation.setPlaceholderText(QCoreApplication.translate("TagRegisterWidget", u"\u7ffb\u8a33", None))
         self.pushButtonRegister.setText(QCoreApplication.translate("TagRegisterWidget", u"\u767b\u9332", None))
+        self.pushButtonImport.setText(QCoreApplication.translate("TagRegisterWidget", u"\u30a4\u30f3\u30dd\u30fc\u30c8\u30c0\u30a4\u30a2\u30ed\u30b0\u3092\u958b\u304f", None))
     # retranslateUi
 

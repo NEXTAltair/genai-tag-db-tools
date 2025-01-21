@@ -22,6 +22,13 @@
     </widget>
    </item>
    <item>
+    <widget class="QPushButton" name="statsGennerateButton">
+     <property name="text">
+      <string>タグ統計情報を作成 ※時間がかかる</string>
+     </property>
+    </widget>
+   </item>
+   <item>
     <widget class="QTabWidget" name="tabWidgetCharts">
      <widget class="QWidget" name="tabDistribution">
       <attribute name="title">

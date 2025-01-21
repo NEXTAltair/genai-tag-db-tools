@@ -1,22 +1,36 @@
+# genai_tag_db_tools/widgets/tag_cleaner.py
 from PySide6.QtWidgets import QWidget
-from PySide6.QtCore import Qt, Slot
-from ..designer.TagCleanerWidget_ui import Ui_TagCleanerWidget
-
+from PySide6.QtCore import Slot
+from genai_tag_db_tools.gui.designer.TagCleanerWidget_ui import Ui_TagCleanerWidget
+# まとめたサービスモジュールから必要なクラスをインポート
+from genai_tag_db_tools.services.app_services import TagCleanerService
 
 class TagCleanerWidget(QWidget, Ui_TagCleanerWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
+        self._cleaner_service = None
 
-    def initialize(self, tag_searcher):
-        self.tag_searcher = tag_searcher
-        self.comboBoxFormat.addItems(self.tag_searcher.get_tag_formats())
+    def initialize(self, cleaner_service: TagCleanerService):
+        """
+        サービスクラスを外部から受け取り、UIの初期化を行う。
+        """
+        self._cleaner_service = cleaner_service
+        formats = self._cleaner_service.get_tag_formats()
+        self.comboBoxFormat.clear()
+        self.comboBoxFormat.addItems(formats)
 
     @Slot()
     def on_pushButtonConvert_clicked(self):
+        if not self._cleaner_service:
+            self.plainTextEditResult.setPlainText("「エラー: サービスが設定されていません」")
+            return
+
         plain_text = self.plainTextEditPrompt.toPlainText()
-        converted_tags = self.tag_searcher.convert_prompt(
-            plain_text, self.comboBoxFormat.currentText()
+        selected_format = self.comboBoxFormat.currentText()
+
+        converted_tags = self._cleaner_service.convert_prompt(
+            plain_text, selected_format
         )
         self.plainTextEditResult.setPlainText(converted_tags)
 
@@ -24,11 +38,10 @@ class TagCleanerWidget(QWidget, Ui_TagCleanerWidget):
 if __name__ == "__main__":
     import sys
     from PySide6.QtWidgets import QApplication
-    from tag_search import initialize_tag_searcher
 
     app = QApplication(sys.argv)
-    tag_searcher = initialize_tag_searcher()
-    window = TagCleanerWidget()
-    window.initialize(tag_searcher)
-    window.show()
+    widget = TagCleanerWidget()
+    service = TagCleanerService()
+    widget.initialize(service)
+    widget.show()
     sys.exit(app.exec())

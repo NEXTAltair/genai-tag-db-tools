@@ -11,12 +11,14 @@
 from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
     QMetaObject, QObject, QPoint, QRect,
     QSize, QTime, QUrl, Qt)
-from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
-    QFont, QFontDatabase, QGradient, QIcon,
-    QImage, QKeySequence, QLinearGradient, QPainter,
-    QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QMainWindow, QSizePolicy, QStatusBar,
-    QTabWidget, QVBoxLayout, QWidget)
+from PySide6.QtGui import (QAction, QBrush, QColor, QConicalGradient,
+    QCursor, QFont, QFontDatabase, QGradient,
+    QIcon, QImage, QKeySequence, QLinearGradient,
+    QPainter, QPalette, QPixmap, QRadialGradient,
+    QTransform)
+from PySide6.QtWidgets import (QApplication, QMainWindow, QMenu, QMenuBar,
+    QSizePolicy, QStatusBar, QTabWidget, QVBoxLayout,
+    QWidget)
 
 from ..widgets.tag_cleaner import TagCleanerWidget
 from ..widgets.tag_register import TagRegisterWidget
@@ -28,6 +30,8 @@ class Ui_MainWindow(object):
         if not MainWindow.objectName():
             MainWindow.setObjectName(u"MainWindow")
         MainWindow.resize(1000, 600)
+        self.actionimport = QAction(MainWindow)
+        self.actionimport.setObjectName(u"actionimport")
         self.centralwidget = QWidget(MainWindow)
         self.centralwidget.setObjectName(u"centralwidget")
         self.verticalLayout = QVBoxLayout(self.centralwidget)
@@ -53,10 +57,19 @@ class Ui_MainWindow(object):
         self.statusbar = QStatusBar(MainWindow)
         self.statusbar.setObjectName(u"statusbar")
         MainWindow.setStatusBar(self.statusbar)
+        self.menuBar = QMenuBar(MainWindow)
+        self.menuBar.setObjectName(u"menuBar")
+        self.menuBar.setGeometry(QRect(0, 0, 1000, 33))
+        self.menu = QMenu(self.menuBar)
+        self.menu.setObjectName(u"menu")
+        MainWindow.setMenuBar(self.menuBar)
+
+        self.menuBar.addAction(self.menu.menuAction())
+        self.menu.addAction(self.actionimport)
 
         self.retranslateUi(MainWindow)
 
-        self.tabWidget.setCurrentIndex(2)
+        self.tabWidget.setCurrentIndex(3)
 
 
         QMetaObject.connectSlotsByName(MainWindow)
@@ -64,9 +77,11 @@ class Ui_MainWindow(object):
 
     def retranslateUi(self, MainWindow):
         MainWindow.setWindowTitle(QCoreApplication.translate("MainWindow", u"\u30bf\u30b0\u30c7\u30fc\u30bf\u30d9\u30fc\u30b9\u30c4\u30fc\u30eb", None))
+        self.actionimport.setText(QCoreApplication.translate("MainWindow", u"&\u30a4\u30f3\u30dd\u30fc\u30c8", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tagSearch), QCoreApplication.translate("MainWindow", u"\u30bf\u30b0\u691c\u7d22", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tagCleaner), QCoreApplication.translate("MainWindow", u"\u30bf\u30b0\u30af\u30ea\u30fc\u30ca\u30fc", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tagRegister), QCoreApplication.translate("MainWindow", u"\u767b\u9332", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tagStatistics), QCoreApplication.translate("MainWindow", u"\u30bf\u30b0\u7d71\u8a08", None))
+        self.menu.setTitle(QCoreApplication.translate("MainWindow", u"\u30d5\u30a1\u30a4\u30eb", None))
     # retranslateUi
 

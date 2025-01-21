@@ -7,16 +7,17 @@ build-backend = "hatchling.build"  # ビルドバックエンドの指定
 # プロジェクトの基本情報
 [project]
 name = "genai-tag-db-tools"  # パッケージ名 ハイフン推奨なぜかは知らん
-version = "0.1.0"  # バージョン番号
+version = "0.2.0"  # バージョン番号
 description = "AI生成画像のタグ管理ツール"  # プロジェクトの説明
 requires-python = ">=3.12"  # 必要なPythonバージョン
 
 # 必要なパッケージの依存関係
 dependencies = [
     "PySide6>=6.8.0.2",        # Qt GUIフレームワーク
-    "pandas>=2.2.2",           # データ分析ライブラリ
     "superqt>=0.6.7",          # PySide6の拡張機能
-    "polars>=1.9.0",           # 高性能データフレームライブラリ
+    "polars[all]>=1.9.0",           # 高性能データフレームライブラリ [all] は全機能をインストール必要ない部分は後で削る
+    "alembic>=1.13.1",         # データベースマイグレーションツール
+    "SQLAlchemy>=2.0.0",       # データベースライブラリ
 ]
 
 # プロジェクトの分類情報
@@ -24,26 +25,75 @@ classifiers = [
     "Operating System :: Microsoft :: Windows :: Windows 11"  # 対応OS
 ]
 
-# pytestの設定オプション
-[tool.pytest.ini_options]
-addopts = "-ra -q -v"         # テスト実行時のオプション（結果表示の詳細度など）
-testpaths = ["test"]          # テストファイルの場所
-pythonpath = ["genai_tag_db_tools"]          # テスト実行時のPythonパス
-
 # 開発時のみ必要な追加パッケージ
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3.3",          # テストフレームワーク
-    "pytest-cov>=5.0.0",      # テストカバレッジツール
+    "pytest-cov>=6.0.0",      # テストカバレッジツール
+    "pytest-qt",        # Qtアプリケーションのテストツール
+    "sphinx",           # ドキュメント生成ツール
+    "sphinx-rtd-theme", # Sphinxのテーマ
+    "sphinx-autobuild", # Sphinxの自動ビルドツール
+    "restructuredtext_lint", # RST文法チェックツール
+    "esbonio",          # ドキュメント生成ツール
+]
+
+[tool.ruff]
+exclude = [
+    "*/genai_tag_db_tools/config.py", # 改行位置を変更されるととても見づらい
+    "*/__pycache__",
+    "*/tests/*",
+    "*/shibokensupport/*",
+    "*/site-packages/*",
+    "*/pyscript",
+    "*/signature_bootstrap.py",
+    "*/__init__.py",
+]
+
+# pytestの設定オプション
+[tool.pytest.ini_options]
+pythonpath = ["genai_tag_db_tools"]          # テスト実行時のPythonパス
+addopts ="""
+    -ra -q -v
+    --cov=genai_tag_db_tools
+    --cov-report=term-missing tests/
+    """
+
+# テスト実行時のオプション（結果表示の詳細度など）
+testpaths = ["tests"]          # テストファイルの場所
+
+[tool.coverage.run]
+source = ["genai_tag_db_tools"]
+omit = [
+    "*/shibokensupport/*",
+    "*/site-packages/*",
+    "*/tests/*",
+    "*/pyscript",
+    "*/signature_bootstrap.py",
+    "*/__init__.py",
+    "*/__pycache__",
+    "*/genai_tag_db_tools/gui/designer/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if __name__ == \"__main__\":",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
 ]
 
 # ビルド設定
 [tool.hatch.build.targets.wheel]
 packages = ["genai_tag_db_tools"] # Pythonパッケージ名（アンダースコア）
 
+[tool.hatch.build.targets.wheel.package-data]
+genai_tag_db_tools = ["data/*.db"]
+
 # プロジェクトスクリプト
 [project.scripts]
-genai-tag-db-tools = "genai_tag_db_tools.main:main"
+gtdtools = "genai_tag_db_tools.main:main"
 #インストールして genai_tag_db_tools をターミナルで入力するとmainが実行されるよという話
 
 # Pyright（静的型チェッカー）の設定
@@ -54,7 +104,7 @@ exclude = [                   # 型チェック除外対象
     "test"
 ]
 venvPath = "."               # 仮想環境のパス
-venv = "venv"               # 仮想環境の名前
+venv = "gtdt"               # 仮想環境の名前
 typeCheckingMode = "basic"  # 型チェックの厳格さ
 
 # PySide6関連の特別な設定

@@ -77,6 +77,13 @@
     </widget>
    </item>
    <item>
+    <widget class="QPushButton" name="pushButtonImport">
+     <property name="text">
+      <string>インポートダイアログを開く</string>
+     </property>
+    </widget>
+   </item>
+   <item>
     <widget class="QTextEdit" name="textEditOutput">
      <property name="readOnly">
       <bool>true</bool>

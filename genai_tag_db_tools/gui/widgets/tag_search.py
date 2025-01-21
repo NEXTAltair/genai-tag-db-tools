@@ -1,25 +1,31 @@
+# genai_tag_db_tools/gui/widgets/tag_search.py
+
+import logging
+from typing import Optional
+
+import polars as pl
+import numpy as np
+
 from PySide6.QtWidgets import (
-    QWidget,
-    QTableWidgetItem,
-    QApplication,
-    QHBoxLayout,
-    QLabel,
-    QVBoxLayout,
+    QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel,QTableWidgetItem,QMessageBox,
 )
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Slot, Signal
+
 from superqt import QRangeSlider
 
-from ..designer.TagSearchWidget_ui import Ui_TagSearchWidget
-import pandas as pd
-import numpy as np
-import os
-import sys
-
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-sys.path.insert(0, project_root)
+from genai_tag_db_tools.gui.designer.TagSearchWidget_ui import Ui_TagSearchWidget
+# 例: TagSearchService (または TagSearcher などサービス層) を利用
+from genai_tag_db_tools.services.app_services import TagSearchService
 
 
 class CustomLogScaleSlider(QWidget):
+    """
+    使用回数を対数スケールで可視化する RangeSlider。
+    ゼロ～10万の範囲を0～100にマッピング。
+    (UI内にはQWidget(usageCountSlider)が配置されており、
+     そこにレイアウトを追加して使う)
+    """
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setup_ui()
@@ -29,7 +35,7 @@ class CustomLogScaleSlider(QWidget):
 
         self.slider = QRangeSlider(Qt.Orientation.Horizontal)
         self.slider.setRange(0, 100)
-        self.slider.setValue((0, 100))
+        self.slider.setValue((0, 100))  # 初期は全範囲
 
         self.min_label = QLabel("0")
         self.max_label = QLabel("100,000+")
@@ -42,6 +48,7 @@ class CustomLogScaleSlider(QWidget):
         layout.addWidget(self.slider)
         layout.addLayout(labels_layout)
 
+        # スライダーが変更されたらラベル更新
         self.slider.valueChanged.connect(self.update_labels)
 
     @Slot()
@@ -52,163 +59,197 @@ class CustomLogScaleSlider(QWidget):
         self.min_label.setText(f"{min_count:,}")
         self.max_label.setText(f"{max_count:,}")
 
-    def scale_to_count(self, value):
-        # 対数スケールを使用して値をマッピング
+    def scale_to_count(self, value: int) -> int:
+        """
+        0〜100 のスライダー値を 0〜100,000 の使用回数に対数変換でマッピングする。
+        """
         min_count = 0
         max_count = 100_000
         if value == 0:
             return min_count
         if value == 100:
             return max_count
-        log_min = np.log1p(min_count + 1)  # 0を避けるために1を加える
+
+        log_min = np.log1p(min_count + 1)  # 0を避けるため +1
         log_max = np.log1p(max_count)
-        log_value = log_min + (log_max - log_min) * (value / 100)
+        # value / 100 の割合で補間
+        log_value = log_min + (log_max - log_min) * (value / 100.0)
         return int(np.expm1(log_value))
 
-    def get_range(self):
+    def get_range(self) -> tuple[int, int]:
+        """
+        スライダーの現在の(最小, 最大)値を実際の使用回数の範囲として返す。
+        """
         min_val, max_val = self.slider.value()
         return (self.scale_to_count(min_val), self.scale_to_count(max_val))
 
 
 class TagSearchWidget(QWidget, Ui_TagSearchWidget):
-    def __init__(self):
-        super().__init__()
+    """
+    QtDesignerの Ui_TagSearchWidget を継承し、
+    setupUi(self) で定義されたウィジェットを利用可能にする。
+    さらに TagSearchService (DB操作ロジック) を連携し、イベントハンドラを実装する。
+    """
+
+    error_occurred = Signal(str)
+
+    def __init__(self, service: Optional[TagSearchService] = None, parent=None):
+        super().__init__(parent)
+        # QtDesignerで自動生成されたUIを適用
         self.setupUi(self)
 
-    def initialize(self, tag_searcher):
-        self.tag_searcher = tag_searcher
+        self.logger = logging.getLogger(self.__class__.__name__)
+        # serviceが指定されていない場合は新しく作成
+        self._service = service if service is not None else TagSearchService()
+
+        # usageCountSlider という空の QWidget を
+        # CustomLogScaleSlider に差し替える or レイアウトを追加する
+        self.customSlider = CustomLogScaleSlider()
+        layout = QVBoxLayout(self.usageCountSlider)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.customSlider)
+
+        # シグナル/スロットの接続
+        self.init_connections()
+
+        # UI 初期化 (フォーマット・言語など)
         self.initialize_ui()
 
+    def init_connections(self):
+        """
+        イベントの接続をまとめる
+        """
+        self.radioButtonExact.setChecked(False)
+        self.radioButtonPartial.setChecked(True)  # デフォルトを部分一致
+        self.comboBoxFormat.currentIndexChanged.connect(self.update_type_combo_box)
+
     def initialize_ui(self):
-        # コンボボックスの初期化
-        self.comboBoxFormat.addItems(self.tag_searcher.get_tag_formats())
-        self.comboBoxLanguage.addItems(self.tag_searcher.get_tag_languages())
+        """
+        TagSearchService からフォーマット/言語/タイプなどを取得し、
+        コンボボックスを初期化。
+        """
+        # format
+        self.comboBoxFormat.clear()
+        self.comboBoxFormat.addItem(self.tr("All"))
+        for fmt in self._service.get_tag_formats():
+            self.comboBoxFormat.addItem(fmt)
 
-        # 使用回数スライダーの初期化
-        self.setup_range_slider()
+        # language
+        self.comboBoxLanguage.clear()
+        self.comboBoxLanguage.addItem(self.tr("All"))
+        for lang in self._service.get_tag_languages():
+            self.comboBoxLanguage.addItem(lang)
 
-        # フォーマットに対応するタイプの初期化
-        self.update_type_combo_box()
-
-    def setup_range_slider(self):
-        # 新しいカスタムレンジスライダーを作成
-        self.usage_count_slider = CustomLogScaleSlider()
-        self.verticalLayout_2.insertWidget(
-            self.verticalLayout_2.indexOf(self.labelUsageCount) + 1,
-            self.usage_count_slider,
-        )
+        # type (最初は "All" のみ。format 選択時に update_type_combo_box() で再設定)
+        self.comboBoxType.clear()
+        self.comboBoxType.addItem(self.tr("All"))
 
     @Slot()
     def on_pushButtonSearch_clicked(self):
-        keyword = self.lineEditKeyword.text()
-        match_type = "exact" if self.radioButtonExact.isChecked() else "partial"
+        """
+        [検索] ボタン押下時の処理
+        """
+        keyword = self.lineEditKeyword.text().strip()
+        partial = self.radioButtonPartial.isChecked()
         format_name = self.comboBoxFormat.currentText()
+        if format_name.lower() == "all":
+            format_name = None
 
-        # search_tagsメソッドを呼び出し
-        results = self.tag_searcher.search_tags(keyword, match_type, format_name)
-
-        # クライアントサイドでのフィルタリング
-        filtered_results = self.client_side_filtering(results)
-
-        self.process_search_results(filtered_results)
-
-    def client_side_filtering(self, df: pd.DataFrame) -> pd.DataFrame:
-        # タグタイプでフィルタリング
-        tag_type = self.comboBoxType.currentText()
-        if tag_type and tag_type != "All" and "type_name" in df.columns:
-            df = df[
-                (df["type_name"] == tag_type)
-                | (df["type_name"].isna())
-                | (df["type_name"] == "")
-            ]
-            print(f"After type filtering (type: {tag_type}): {len(df)} rows")
-
-        # 言語でフィルタリング
         language = self.comboBoxLanguage.currentText()
-        if language != "All" and "language" in df.columns:
-            df = df[df["language"] == language]
+        if language.lower() == "all":
+            language = None
 
-        # 使用回数でフィルタリング
-        min_usage_count, max_usage_count = self.usage_count_slider.get_range()
-        if "usage_count" in df.columns:
-            if max_usage_count < 100000:
-                df = df[
-                    (df["usage_count"] >= min_usage_count)
-                    & (df["usage_count"] <= max_usage_count)
-                ]
-            else:
-                df = df[df["usage_count"] >= min_usage_count]
+        type_name = self.comboBoxType.currentText()
+        if type_name.lower() == "all":
+            type_name = None
 
-        return df
+        # usage_count range
+        min_usage, max_usage = self.customSlider.get_range()
 
-    def process_search_results(self, results: pd.DataFrame):
-        print(f"検索結果の行数: {len(results)}")
-        print(f"列名: {results.columns.tolist()}")
-
-        if "tag" in results.columns and "usage_count" in results.columns:
-            print(results[["tag", "usage_count"]])
-
-        if "type_name" in results.columns and "usage_count" in results.columns:
-            type_summary = (
-                results.groupby("type_name")["usage_count"]
-                .sum()
-                .sort_values(ascending=False)
+        try:
+            df = self._service.search_tags(
+                keyword=keyword,
+                partial=partial,
+                format_name=format_name,
+                type_name=type_name,
+                language=language,
+                min_usage=min_usage,
+                max_usage=max_usage,
+                alias=None,  # 必要に応じてGUIで設定
             )
-            print("タイプ別の使用回数合計:")
-            print(type_summary)
+            # df は polars の DataFrame
 
-        self.display_results(results)
+            if df.is_empty():
+                self.tableWidgetResults.clear()
+                self.tableWidgetResults.setRowCount(0)
+                self.tableWidgetResults.setColumnCount(0)
+                return
 
-    def display_results(self, results: pd.DataFrame):
-        columns = [
-            col for col in results.columns if col not in ["alias", "preferred_tag"]
-        ]
-        self.tableWidgetResults.setRowCount(len(results))
+            # テーブル表示
+            self.populate_table(df)
+
+        except Exception as e:
+            self.logger.error("Error in on_search_button_clicked: %s", e)
+            self.error_occurred.emit(str(e))
+            QMessageBox.critical(self, self.tr("Search Error"), str(e))
+
+    def populate_table(self, df: pl.DataFrame):
+        columns = df.columns
+        self.tableWidgetResults.setRowCount(len(df))
         self.tableWidgetResults.setColumnCount(len(columns))
         self.tableWidgetResults.setHorizontalHeaderLabels(columns)
 
-        for row in range(len(results)):
-            for col, column_name in enumerate(columns):
-                item = QTableWidgetItem(str(results.iloc[row][column_name]))
-                self.tableWidgetResults.setItem(row, col, item)
+        for row_idx in range(len(df)):
+            # row_tuple は (val0, val1, val2, ...)
+            row_tuple = df.row(row_idx)  # -> tuple of actual scalar values
+            # これで row_tuple[col_idx] すればスカラーが取れる
+
+            for col_idx, col_name in enumerate(columns):
+                cell_value = row_tuple[col_idx]  # ここはスカラー
+                item = QTableWidgetItem(str(cell_value))
+                self.tableWidgetResults.setItem(row_idx, col_idx, item)
 
         self.tableWidgetResults.resizeColumnsToContents()
 
-    @Slot(int)
-    def on_comboBoxFormat_currentIndexChanged(self, index):
-        self.update_type_combo_box()
-
     def update_type_combo_box(self):
-        format_name = self.comboBoxFormat.currentText()
-        tag_types = self.tag_searcher.get_tag_types(format_name)
+        """
+        フォーマット選択変更時にタグタイプの一覧を更新
+        """
+        fmt = self.comboBoxFormat.currentText()
+        if fmt.lower() == "all":
+            # 全タイプ (Service側に "None"指定)
+            tag_types = self._service.get_tag_types(None)
+        else:
+            tag_types = self._service.get_tag_types(fmt)
+
         self.comboBoxType.clear()
-        self.comboBoxType.addItems(tag_types)
+        self.comboBoxType.addItem(self.tr("All"))
+        for t in tag_types:
+            self.comboBoxType.addItem(t)
 
     @Slot()
     def on_pushButtonSaveSearch_clicked(self):
-        # 現在の検索条件を保存
-        print("保存ボタンがクリックされました。ここに保存ロジックを実装します。")
-
-    @Slot(int)
-    def on_comboBoxSavedSearches_currentIndexChanged(self, index):
-        # 保存された検索条件を読み込み
-        print(
-            f"保存された検索条件 {index} が選択されました。ここに読み込みロジックを実装します。"
-        )
+        """
+        検索条件を保存するボタン
+        """
+        # 今の検索条件を取得し、どこかに保存...
+        print("[on_pushButtonSaveSearch_clicked] 保存ロジックを実装する...")
+    # TODO:
+    # ここではgroupBoxSavedSearches, comboBoxSavedSearches などを使って
+    # 複数の検索条件をロードしたりする処理を追加実装できる。
 
 
 if __name__ == "__main__":
     import sys
-    from pathlib import Path
-
-    current_dir = Path(__file__).parent
-    project_root = current_dir.parent
-    sys.path.insert(0, str(project_root))
-    from tag_search import initialize_tag_searcher
+    from PySide6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)
-    tag_searcher = initialize_tag_searcher()
-    window = TagSearchWidget()
-    window.initialize(tag_searcher)
-    window.show()
+
+    # 例: TagSearchServiceを生成
+    from genai_tag_db_tools.services.app_services import TagSearchService
+    service = TagSearchService()
+
+    widget = TagSearchWidget(service=service)
+    widget.show()
+
     sys.exit(app.exec())
