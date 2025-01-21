@@ -2,10 +2,9 @@ name: genai-tag-db-tools CI
 
 on:
   push:
-    branches:
-      - '**'
+    branches: ['**']  # すべてのブランチに対してプッシュ時に実行
   pull_request:
-      - '**'
+    branches: ['**']  # すべてのブランチに対してプルリクエスト時に実行
 
 permissions:
   contents: write
