@@ -43,9 +43,6 @@ jobs:
         hatch env create
         hatch run pip install -e .[dev]
 
-    - name: Set up Qt offscreen mode
-      run: |
-        echo "QT_QPA_PLATFORM=offscreen" >> $GITHUB_ENV
 
     - name: Lint with ruff
       run: |
@@ -56,8 +53,9 @@ jobs:
         hatch run ruff format genai_tag_db_tools
 
     - name: Test with pytest
+      env:
+        QT_QPA_PLATFORM: offscreen
       run: |
-        export DISPLAY=:99
         hatch run pytest
 
     - name: Build documentation
