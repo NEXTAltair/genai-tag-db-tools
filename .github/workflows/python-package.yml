@@ -43,12 +43,9 @@ jobs:
         hatch env create
         hatch run pip install -e .[dev]
 
-    - name: Set up virtual display
+    - name: Set up Qt offscreen mode
       run: |
-        sudo apt-get update
-        sudo apt-get install -y xvfb x11-utils libegl1 libopengl0 libgl1-mesa-glx
-        Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
-        echo "DISPLAY=:99.0" >> $GITHUB_ENV
+        echo "QT_QPA_PLATFORM=offscreen" >> $GITHUB_ENV
 
     - name: Lint with ruff
       run: |
