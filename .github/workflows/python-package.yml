@@ -52,11 +52,11 @@ jobs:
 
     - name: Lint with ruff
       run: |
-        hatch run ruff check genai_tag_db_tools
+        hatch run ruff check --fix genai_tag_db_tools
 
     - name: Format with ruff
       run: |
-        hatch run ruff --fix genai_tag_db_tools
+        hatch run ruff format genai_tag_db_tools
 
     - name: Test with pytest
       run: |
