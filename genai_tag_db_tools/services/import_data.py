@@ -10,7 +10,6 @@ from PySide6.QtCore import QObject, Signal
 # DBアクセスやタグ登録ロジックは、新規 tag_register.py の TagRegister に委譲
 from genai_tag_db_tools.services.tag_register import TagRegister
 from genai_tag_db_tools.db.database_setup import engine, db_path
-from genai_tag_db_tools.utils.cleanup_str import TagCleaner
 from genai_tag_db_tools.services.polars_schema import AVAILABLE_COLUMNS
 
 

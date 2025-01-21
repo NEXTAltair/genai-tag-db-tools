@@ -442,7 +442,6 @@ if __name__ == "__main__":
       - TagCleanerService で複数タグを変換
       - TagImportService でデータインポート(ダミー)
     """
-    import sys
 
     # 1) タグクリーナーのテスト (Polarsではなく単純な文字列変換)
     cleaner = TagCleanerService()
