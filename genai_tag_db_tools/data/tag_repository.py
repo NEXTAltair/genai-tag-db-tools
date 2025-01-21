@@ -743,7 +743,12 @@ class TagRepository:
             list[int]: すべてのフォーマットIDのリスト。
         """
         with self.session_factory() as session:
-            return [format.format_id for format in session.query(TagFormat).all()]
+            tag_ids = (
+                session.query(TagFormat.format_id)
+                .distinct()
+                .all()
+            )
+            return [tag_id[0] for tag_id in tag_ids]
 
     def get_tag_formats(self) -> list[str]:
         """
@@ -753,9 +758,12 @@ class TagRepository:
             list[str]: フォーマット名のリスト。
         """
         with self.session_factory() as session:
-            rows = session.query(TagFormat.format_name).distinct().all()
-            format_list = [row[0] for row in rows]
-            return format_list
+            formats = (
+                session.query(TagFormat.format_name)
+                .distinct()
+                .all()
+            )
+            return [format[0] for format in formats]
 
     def get_tag_languages(self) -> list[str]:
         """
@@ -764,9 +772,13 @@ class TagRepository:
             list[str]: すべての言語のリスト。
         """
         with self.session_factory() as session:
-
-            languages = {translation.language for translation in session.query(TagTranslation).all()}
-            return list(languages)
+            # DISTINCTを使用して重複を排除
+            languages = (
+                session.query(TagTranslation.language)
+                .distinct()
+                .all()
+            )
+            return [lang[0] for lang in languages]
 
     def get_tag_types(self, format_id: int) -> list[str]:
         """
