@@ -50,7 +50,7 @@ def test_polars_model_get_mapping():
     # col2 は '未選択' のため含まれない。
 
 
-def test_tag_data_import_dialog_initial_state():
+def test_tag_data_import_dialog_initial_state(db_session):
     """
     TagDataImportDialog の初期状態を確認。
     - インポートボタンが無効化 (必須フィールド未設定)
@@ -65,7 +65,7 @@ def test_tag_data_import_dialog_initial_state():
     assert not dialog.sourceTagCheckBox.isChecked()
 
 
-def test_on_sourceTagCheckBox_stateChanged_enables_import(qtbot):
+def test_on_sourceTagCheckBox_stateChanged_enables_import(qtbot, db_session):
     """
     on_sourceTagCheckBox_stateChanged() を呼び出し、
     必須フィールドが設定されたら importButton が有効になるかをテスト。
@@ -84,7 +84,7 @@ def test_on_sourceTagCheckBox_stateChanged_enables_import(qtbot):
     assert dialog.importButton.isEnabled()
 
 
-def test_import_button_click_triggers_import_data(qtbot, monkeypatch):
+def test_import_button_click_triggers_import_data(qtbot, monkeypatch, db_session):
     """
     on_importButton_clicked() が import_data を呼び出すか確認。
     なお、_service._importer をモック化して呼び出し確認を行う。
@@ -112,7 +112,7 @@ def test_import_button_click_triggers_import_data(qtbot, monkeypatch):
     assert new_df.columns == ["source_tag", "col2"]
 
 
-def test_cancel_button_click_closes_dialog(qtbot):
+def test_cancel_button_click_closes_dialog(qtbot, db_session):
     """
     キャンセルボタンを押したら QDialog が閉じる(Rejected)かを確認。
     """
@@ -125,7 +125,7 @@ def test_cancel_button_click_closes_dialog(qtbot):
     assert dialog.result() == QDialog.DialogCode.Rejected
 
 
-def test_update_progress(qtbot):
+def test_update_progress(qtbot, db_session):
     """
     update_progress でウィンドウタイトルが更新されるかをテスト。
     """
@@ -140,7 +140,7 @@ def test_update_progress(qtbot):
     assert "インポート中... 50%, Halfway done" in dialog.windowTitle()
 
 
-def test_import_finished(qtbot):
+def test_import_finished(qtbot, db_session):
     """
     import_finished でタイトルが更新され、ダイアログが受理(accept)されるか。
     """
@@ -156,7 +156,7 @@ def test_import_finished(qtbot):
     assert dialog.result() == QDialog.DialogCode.Accepted
 
 
-def test_on_import_error(qtbot, monkeypatch):
+def test_on_import_error(qtbot, monkeypatch, db_session):
     """
     on_import_error がエラーポップアップを表示し、UIを操作可能にするか。
     """
@@ -172,7 +172,7 @@ def test_on_import_error(qtbot, monkeypatch):
         assert dialog.importButton.isEnabled()
 
 
-def test_show_header_menu(qtbot, monkeypatch):
+def test_show_header_menu(qtbot, monkeypatch, db_session):
     """
     テーブルヘッダを右クリックした時に、カラムマッピング用のメニューが表示されるか。
     QMenu.exec_ をモックにして確認。

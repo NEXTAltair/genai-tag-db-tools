@@ -131,11 +131,11 @@ def test_get_format_id(tag_repository):
     存在しないformat_nameの場合は0を返すことを確認。
     """
     with tag_repository.session_factory() as session:
-        session.add(TagFormat(format_id=10, format_name="danbooru"))
+        session.add(TagFormat(format_id=10, format_name="test_format"))
         session.commit()
 
     # 正常系: 存在するformat_nameの場合はIDを返す
-    fid = tag_repository.get_format_id("danbooru")
+    fid = tag_repository.get_format_id("test_format")
     assert fid == 10
 
     # 異常系: 存在しないformat_nameの場合は 0 を返す
@@ -153,9 +153,9 @@ def test_get_tag_formats(tag_repository):
     with tag_repository.session_factory() as session:
         # テストデータ作成（重複を含まない）
         formats = [
-            TagFormat(format_id=1, format_name="danbooru"),
-            TagFormat(format_id=2, format_name="e621"),
-            TagFormat(format_id=3, format_name="gelbooru"),  # 異なるformat_name
+            TagFormat(format_id=101, format_name="test_format1"),
+            TagFormat(format_id=102, format_name="test_format2"),
+            TagFormat(format_id=103, format_name="test_format3"),
         ]
         session.add_all(formats)
         session.commit()
@@ -164,10 +164,13 @@ def test_get_tag_formats(tag_repository):
     format_list = tag_repository.get_tag_formats()
 
     # 検証
-    assert len(format_list) == 3  # 3つのフォーマット
-    assert "danbooru" in format_list
-    assert "e621" in format_list
-    assert "gelbooru" in format_list
+    # マスターデータ（unknown, danbooru, e621, derpibooru）と
+    # テストで追加した3つ（test_format1, test_format2, test_format3）の合計7つ
+    assert len(format_list) == 7
+    # テストで追加したフォーマットが含まれていることを確認
+    assert "test_format1" in format_list
+    assert "test_format2" in format_list
+    assert "test_format3" in format_list
 
 def test_update_tag_status(tag_repository):
     """
@@ -439,15 +442,15 @@ def test_search_tag_ids_by_type_name(tag_repository):
         # 1) Tag, Format, TypeName
         tag_m = Tag(tag="M", source_tag="M_src")
         tag_n = Tag(tag="N", source_tag="N_src")
-        fmt_2 = TagFormat(format_id=2, format_name="fmt2")
+        fmt_2 = TagFormat(format_id=301, format_name="fmt2")
         ttype_char = TagTypeName(type_name_id=100, type_name="Character")
         ttype_obj = TagTypeName(type_name_id=101, type_name="Object")
         session.add_all([tag_m, tag_n, fmt_2, ttype_char, ttype_obj])
         session.commit()
 
         # 2) TagTypeFormatMapping
-        mapping_char = TagTypeFormatMapping(format_id=2, type_id=100, type_name_id=100)
-        mapping_obj = TagTypeFormatMapping(format_id=2, type_id=101, type_name_id=101)
+        mapping_char = TagTypeFormatMapping(format_id=301, type_id=100, type_name_id=100)
+        mapping_obj = TagTypeFormatMapping(format_id=301, type_id=101, type_name_id=101)
         session.add_all([mapping_char, mapping_obj])
         session.commit()
 
@@ -456,11 +459,11 @@ def test_search_tag_ids_by_type_name(tag_repository):
 
         # 3) TagStatus
         status_m = TagStatus(
-            tag_id=tid_m, format_id=2, type_id=100,
+            tag_id=tid_m, format_id=301, type_id=100,
             alias=False, preferred_tag_id=tid_m
         )
         status_n = TagStatus(
-            tag_id=tid_n, format_id=2, type_id=101,
+            tag_id=tid_n, format_id=301, type_id=101,
             alias=False, preferred_tag_id=tid_n
         )
         session.add_all([status_m, status_n])
@@ -468,12 +471,12 @@ def test_search_tag_ids_by_type_name(tag_repository):
 
     # --- テスト本体 ---
     # type_name="Character" → type_name_id=100 → tag_m
-    res_char = tag_repository.search_tag_ids_by_type_name("Character", format_id=2)
+    res_char = tag_repository.search_tag_ids_by_type_name("Character", format_id=301)
     assert len(res_char) == 1
     assert tid_m in res_char
 
     # type_name="Object" → type_name_id=101 → tag_n
-    res_obj = tag_repository.search_tag_ids_by_type_name("Object", format_id=2)
+    res_obj = tag_repository.search_tag_ids_by_type_name("Object", format_id=301)
     assert len(res_obj) == 1
     assert tid_n in res_obj
 
@@ -573,7 +576,7 @@ def test_update_tag_status_inconsistent_preferred_id(tag_repository):
     # 事前に Tag, Format 用意 (tag_id=1, format_id=2)
     with tag_repository.session_factory() as session:
         t = Tag(tag_id=1, tag="tag_for_check", source_tag="src_for_check")
-        f = TagFormat(format_id=2, format_name="check_format")
+        f = TagFormat(format_id=201, format_name="check_format")
         session.add_all([t, f])
         session.commit()
 
@@ -583,7 +586,7 @@ def test_update_tag_status_inconsistent_preferred_id(tag_repository):
     with pytest.raises((ValueError, IntegrityError)):
         tag_repository.update_tag_status(
             tag_id=1,
-            format_id=2,
+            format_id=201,
             type_id=100,
             alias=False,
             preferred_tag_id=999  # 本来なら1 を指定すべき
