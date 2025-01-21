@@ -107,7 +107,7 @@ def test_update_usage_counts_no_columns(tag_register, mock_repo):
     tag_id or count カラムが無ければ何もしない
     """
     df = pl.DataFrame({"foo": [1], "bar": [2]})
-    tag_register.update_usage_counts(df, format_id=1)
+    tag_register.update_usage_counts(df, 1)
     mock_repo.update_usage_count.assert_not_called()
 
 def test_update_usage_counts_normal(tag_register, mock_repo):
@@ -119,16 +119,16 @@ def test_update_usage_counts_normal(tag_register, mock_repo):
         "tag_id": [100, 101, None],
         "count": [10, 20, 30],
     })
-    tag_register.update_usage_counts(df, format_id=1)
+    tag_register.update_usage_counts(df, 1)
 
     # 呼ばれた回数 (Noneは無視)
     calls = mock_repo.update_usage_count.call_args_list
     assert len(calls) == 2
 
-    # 1回目: tag_id=100, format_id=1, count=10
-    assert calls[0].kwargs == {"tag_id": 100, "format_id": 1, "count": 10}
-    # 2回目: tag_id=101, format_id=1, count=20
-    assert calls[1].kwargs == {"tag_id": 101, "format_id": 1, "count": 20}
+    # 1回目: 100, 1, 10
+    assert calls[0].args == (100, 1, 10)
+    # 2回目: 101, 1, 20
+    assert calls[1].args == (101, 1, 20)
 
 def test_update_translations_no_columns(tag_register, mock_repo):
     """
@@ -150,8 +150,8 @@ def test_update_translations_normal(tag_register, mock_repo):
 
     calls = mock_repo.add_or_update_translation.call_args_list
     assert len(calls) == 2
-    assert calls[0].kwargs == {"tag_id": 200, "language": "en", "translation": "hello"}
-    assert calls[1].kwargs == {"tag_id": 202, "language": "en", "translation": "world"}
+    assert calls[0].args == (200, "en", "hello")
+    assert calls[1].args == (202, "en", "world")
 
 def test_update_deprecated_tags_no_columns(tag_register, mock_repo):
     """
