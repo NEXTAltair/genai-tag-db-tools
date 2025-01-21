@@ -85,6 +85,15 @@ class TagStatisticsWidget(QWidget, Ui_TagStatisticsWidget):
     # ----------------------------------------------------------------------
     #  メインフロー
     # ----------------------------------------------------------------------
+    @Slot()
+    def on_statsGenerateButton_clicked(self):
+        """
+        統計生成ボタンが押された時の処理
+        # TODO: 時間がかかるのでポップアップの確認ダイアログを表示するなどの処理を追加
+        # 追加するときは app_services.py に共通で使えるダイアログ表示メソッドを追加する
+        """
+        self.initialize()
+
     def initialize(self):
         """
         ウィジェットの初期化処理:

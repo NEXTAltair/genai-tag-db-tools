@@ -16,7 +16,8 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QApplication, QLabel, QListWidget, QListWidgetItem,
-    QSizePolicy, QTabWidget, QVBoxLayout, QWidget)
+    QPushButton, QSizePolicy, QTabWidget, QVBoxLayout,
+    QWidget)
 
 class Ui_TagStatisticsWidget(object):
     def setupUi(self, TagStatisticsWidget):
@@ -29,6 +30,11 @@ class Ui_TagStatisticsWidget(object):
         self.labelSummary.setObjectName(u"labelSummary")
 
         self.verticalLayout.addWidget(self.labelSummary)
+
+        self.statsGennerateButton = QPushButton(TagStatisticsWidget)
+        self.statsGennerateButton.setObjectName(u"statsGennerateButton")
+
+        self.verticalLayout.addWidget(self.statsGennerateButton)
 
         self.tabWidgetCharts = QTabWidget(TagStatisticsWidget)
         self.tabWidgetCharts.setObjectName(u"tabWidgetCharts")
@@ -61,6 +67,7 @@ class Ui_TagStatisticsWidget(object):
     def retranslateUi(self, TagStatisticsWidget):
         TagStatisticsWidget.setWindowTitle(QCoreApplication.translate("TagStatisticsWidget", u"\u30bf\u30b0\u7d71\u8a08", None))
         self.labelSummary.setText(QCoreApplication.translate("TagStatisticsWidget", u"\u30bf\u30b0\u6982\u8981", None))
+        self.statsGennerateButton.setText(QCoreApplication.translate("TagStatisticsWidget", u"\u30bf\u30b0\u7d71\u8a08\u60c5\u5831\u3092\u4f5c\u6210 \u203b\u6642\u9593\u304c\u304b\u304b\u308b", None))
         self.tabWidgetCharts.setTabText(self.tabWidgetCharts.indexOf(self.tabDistribution), QCoreApplication.translate("TagStatisticsWidget", u"\u5206\u5e03", None))
         self.tabWidgetCharts.setTabText(self.tabWidgetCharts.indexOf(self.tabUsage), QCoreApplication.translate("TagStatisticsWidget", u"\u4f7f\u7528\u983b\u5ea6", None))
         self.tabWidgetCharts.setTabText(self.tabWidgetCharts.indexOf(self.tabLanguage), QCoreApplication.translate("TagStatisticsWidget", u"\u8a00\u8a9e", None))
