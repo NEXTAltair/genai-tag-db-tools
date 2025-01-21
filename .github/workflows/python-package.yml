@@ -56,7 +56,7 @@ jobs:
 
     - name: Lint with ruff
       run: |
-        hatch run ruff .
+        hatch run ruff check genai_tag_db_tools
 
     - name: Test with pytest
       run: |
