@@ -1,4 +1,26 @@
-steps:
+name: genai-tag-db-tools CI
+
+on:
+  push:
+    branches: ['**']  # すべてのブランチに対してプッシュ時に実行
+  pull_request:
+    branches: ['**']  # すべてのブランチに対してプルリクエスト時に実行
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
     - uses: actions/checkout@v4
 
     - name: Set up Python ${{ matrix.python-version }}
@@ -24,7 +46,7 @@ steps:
     - name: Set up virtual display
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb x11-utils libegl1
+        sudo apt-get install -y xvfb x11-utils libegl1 libopengl0 libgl1-mesa-glx
         Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
         echo "DISPLAY=:99.0" >> $GITHUB_ENV
 
