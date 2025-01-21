@@ -41,7 +41,7 @@ dev = [
 
 [tool.ruff]
 exclude = [
-    "*/genai_tag_db_tools/gui/designer/*", # Qtdesignerで自動生成されたファイル
+    "*/gui/designer/*", # Qtdesignerで自動生成されたファイル
     "*/__pycache__",
     "*/tests/*",
     "*/shibokensupport/*",
