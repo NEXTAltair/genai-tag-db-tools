@@ -1,203 +1,345 @@
 .. _dev_guide:
 
-Developer Guide (開発者向けセットアップガイド)
-==============================================================
-開発環境の構築やコードスタイル、テスト実行など、開発に必要な手順の説明。
+Developer Guide (開発者向けガイド)
+===============================
 
-## システム構成
+このガイドでは、``genai-tag-db-tools`` の開発に必要な情報を提供します。
+
+アーキテクチャ概要
+---------------
+
+システムは以下の3層で構成されています：
 
 1. **データ層 (Data Layer)**
+   
+   SQLiteデータベースを用いたタグ情報の永続化層。
 
-    - SQLiteデータベースを用いてタグ情報を管理｡
-    - データベースには基本的なタグ情報(TAGSテーブル)、翻訳情報(TAG\_TRANSLATIONSテーブル)、使用頻度(TAG\_USAGE\_COUNTSテーブル)などを保持｡
-    - 初期データは開発時に外部CSVから一括インポートし、その後DBファイルをGitHubリポジトリにコミット。
-    - 現在はGUI操作によるタグの閲覧や参照が中心で、手動での追加・編集は限定的です(将来的に必要時に機能拡張予定)。
-    - 後ほど別のプログラムから当DBに存在しないタグが検索された場合は、ユーザーによるタグ登録を行いたい構想があるが現状は後回し。
-    - データベースへの更新操作は行われるたびに即時反映(オートコミット)する設計(設計変更の可能性あり)。
-    - シングルユーザー環境を想定。
+   - 主要テーブル構成:
+     * TAGS: 基本的なタグ情報
+     * TAG_TRANSLATIONS: 翻訳情報
+     * TAG_USAGE_COUNTS: 使用頻度情報
+   
+   .. code-block:: python
+
+       from sqlalchemy import create_engine, Column, Integer, String
+       from sqlalchemy.ext.declarative import declarative_base
+
+       Base = declarative_base()
+
+       class Tag(Base):
+           __tablename__ = 'tags'
+           
+           tag_id = Column(Integer, primary_key=True)
+           source_tag = Column(String)
+           tag = Column(String, unique=True, nullable=False)
 
 2. **ビジネスロジック層 (Business Logic Layer)**
 
-    - タグの登録・更新・翻訳取得・使用頻度計測などの機能を実装
-    - データベースアクセスを抽象化し、タグ形式の差異を吸収するロジックを提供
+   タグ操作の中核ロジックを提供。
 
-    2.1 service
-        - app_service.py: guiで使用するサービス層のロジックを提供
-        - import_data.py: csvやHuggingFaceのタグデータをDBにインポートするロジックを提供
-        - polars_schema.py: Polarsのスキーマを定義し、データフレームをDBにインポートするロジックを提供 TODO: コレ必要か?
-        - tag_register.py: タグ登録機能を提供するロジック
-        - tag_search.py: タグ検索機能を提供するロジック
-        - tag_statistics.py: タグ使用頻度など統計機能を提供するロジック
+   .. code-block:: python
+
+       class TagService:
+           def __init__(self, session):
+               self.session = session
+           
+           def register_tag(self, tag_data):
+               """タグを登録する
+
+               Args:
+                   tag_data (dict): タグ情報
+                       - source_tag: 元のタグ文字列
+                       - translations: 翻訳情報の辞書
+                       
+               Returns:
+                   Tag: 登録されたタグオブジェクト
+                   
+               Raises:
+                   DuplicateTagError: タグが既に存在する場合
+               """
+               try:
+                   tag = Tag(
+                       source_tag=tag_data['source_tag'],
+                       tag=self._normalize_tag(tag_data['source_tag'])
+                   )
+                   self.session.add(tag)
+                   self.session.commit()
+                   return tag
+               except IntegrityError:
+                   raise DuplicateTagError(f"Tag {tag_data['source_tag']} already exists")
 
 3. **インターフェース層 (Interface Layer)**
 
-    - PySide6を用いたGUIを提供し、タグ情報を直感的に参照・更新
-    - `pyproject.toml` の `scripts` セクションを利用してGUIを起動可能
-    - CLIによる直接操作は未対応で、GUI起動以外のCLI操作は現時点では未実装。
+   PySide6ベースのGUIとPythonパッケージインターフェースを提供。
 
-## 開発環境のセットアップ
+開発環境のセットアップ
+------------------
 
-1. リポジトリをクローン:
+1. 前提条件
+   - Python 3.12+
+   - Git
+   - Visual Studio Code (推奨)
 
-.. code-block:: bash
+2. リポジトリのクローンと環境構築:
 
-    git clone https://github.com/NEXTAltair/genai-tag-db-tools.git
-    cd genai-tag-db-tools
+   .. code-block:: bash
 
-2. 仮想環境を作成し、パッケージをdevモードでインストール:
+       git clone https://github.com/NEXTAltair/genai-tag-db-tools.git
+       cd genai-tag-db-tools
+       python -m venv venv
+       venv\Scripts\activate  # Windowsの場合
+       pip install -e ".[dev]"
 
-.. code-block:: bash
+3. VSCode拡張機能のインストール:
+   - Python
+   - Python Test Explorer
+   - reStructuredText
 
-    python3.12 -m venv venv
-    venv\Scripts\activate
-    cd genai_tag_db_tools
-    pip install -e .[dev]
+コーディング規約
+------------
 
-**注意**: Windows以外のOS(macOS/Linux)は未対応。
+1. PEP 8に準拠
+   - インデント: 4スペース
+   - 最大行長: 88文字 (blackの設定に合わせる)
+   - クラス名: UpperCamelCase
+   - 関数/変数名: snake_case
 
-## コードスタイルチェック
+2. Docstring (Googleスタイル)
 
-`black` と `ruff` を用いてコードのフォーマットおよびLintチェックを行います。
-これらのツールはPEP 8基準を自動的に適用。
+   .. code-block:: python
 
-.. code-block:: bash
+       def process_tag(tag: str, language: str = "en") -> Dict[str, Any]:
+           """タグを処理し、正規化と翻訳を行う
 
-    black genai_tag_db_tools
-    ruff genai_tag_db_tools
+           Args:
+               tag (str): 処理対象のタグ文字列
+               language (str, optional): 翻訳先言語. デフォルトは "en"
 
-## テスト実行
+           Returns:
+               Dict[str, Any]: 処理結果
+                   - normalized_tag (str): 正規化されたタグ
+                   - translation (str): 翻訳結果
+                   - confidence (float): 翻訳の信頼度
 
-`pytest` を用いてユニットテストを実行。
+           Raises:
+               ValueError: タグが空文字列の場合
+           """
 
-.. code-block:: bash
+テストの書き方
+-----------
 
-    pytest tests
+1. 基本的なテスト構造
 
-テスト実行時にカバレッジレポートを生成する場合は、以下のコマンドを使用。
+   .. code-block:: python
 
-.. code-block:: bash
+       import pytest
+       from genai_tag_db_tools.services.tag_service import TagService
 
-    pytest --cov=genai_tag_db_tools --cov-report=term-missing
+       @pytest.fixture
+       def tag_service():
+           """TagServiceのフィクスチャ"""
+           return TagService()
 
-## 開発時のドキュメンテーション更新
+       def test_normalize_tag():
+           """タグ正規化のテスト"""
+           service = tag_service()
+           
+           # 基本的なケース
+           assert service.normalize_tag("test tag") == "test_tag"
+           
+           # 特殊文字を含むケース
+           assert service.normalize_tag("test(tag)") == "test\\(tag\\)"
 
-ドキュメントを更新したら、以下の手順でHTML形式で再生成して確認する。
+2. モック使用例
 
-1. **RSTファイルの生成** (必要に応じて):
-    新しいモジュールやパッケージを追加した場合や大きな変更があった場合は、以下のコマンドを実行してRSTファイルを生成する。
+   .. code-block:: python
 
-.. code-block:: bash
+       from unittest.mock import Mock, patch
 
-    sphinx-apidoc -o source ../genai_tag_db_tools
+       def test_tag_translation():
+           """翻訳機能のテスト"""
+           with patch('genai_tag_db_tools.services.translator.translate') as mock_translate:
+               mock_translate.return_value = "テスト"
+               
+               service = TagService()
+               result = service.translate_tag("test", target_lang="ja")
+               
+               assert result == "テスト"
+               mock_translate.assert_called_once_with("test", "ja")
 
-- `source` はRSTファイルの出力先ディレクトリ
-- `../genai_tag_db_tools` はドキュメント化するPythonパッケージのパス
+3. パラメータ化テスト
 
-2. **ドキュメント生成**:
-    以下のコマンドを実行してHTML形式のドキュメントを生成する。
+   .. code-block:: python
 
-.. code-block:: bash
+       @pytest.mark.parametrize("input_tag,expected", [
+           ("test tag", "test_tag"),
+           ("Test Tag", "test_tag"),
+           ("test  tag", "test_tag"),
+       ])
+       def test_normalize_tag_variations(input_tag, expected):
+           service = TagService()
+           assert service.normalize_tag(input_tag) == expected
 
-    sphinx-build -b html . _build/html
+CI/CD設定
+-------
 
-3. **確認**:
-    生成された `_build/html` ディレクトリ内の `index.html` をブラウザで開いて内容を確認する。
+1. GitHub Actions設定 (.github/workflows/ci.yml)
 
-## 主な機能
+   .. code-block:: yaml
 
-- **タグ管理機能**:
+       name: CI
 
-    - タグ情報の閲覧(GUIによる検索・参照)
-    - 後々タグ登録や削除などを行えるようにする計画あり(現時点ではデータは初期インポート済み)
+       on: [push, pull_request]
 
-- **翻訳・対応関係管理**:
+       jobs:
+         test:
+           runs-on: windows-latest
+           
+           steps:
+           - uses: actions/checkout@v2
+           
+           - name: Set up Python
+             uses: actions/setup-python@v2
+             with:
+               python-version: '3.12'
+           
+           - name: Install dependencies
+             run: |
+               python -m pip install --upgrade pip
+               pip install -e ".[dev]"
+           
+           - name: Run tests
+             run: |
+               pytest tests --cov=genai_tag_db_tools
+           
+           - name: Upload coverage
+             uses: codecov/codecov-action@v2
 
-    - TAG\_TRANSLATIONSテーブルにより、一つのタグに対して複数言語の翻訳を管理
-    - Danbooruタグ・e621タグ・日本語タグなど、複数フォーマットや言語間を参照可能
-    - 画像生成AIで使用するカンマ区切りプロンプトを基に、内部DBのタグへマッピング
+2. リリース自動化 (.github/workflows/release.yml)
 
-- **統計・使用頻度情報**:
+   .. code-block:: yaml
 
-    - TAG\_USAGE\_COUNTSテーブルでタグ毎の使用回数を記録
-    - よく使われるタグを参照することで、GUI上で人気タグの確認が可能
+       name: Release
 
-## エラーハンドリングとロギング
+       on:
+         push:
+           tags:
+             - 'v*'
 
-- SQLite操作時、``try-except`` でエラーを捕捉し、重大なエラーは ``logs/error.log`` に記録｡
-- GUI上でエラーが発生した場合には、ポップアップでユーザーにエラーメッセージを通知｡
-- ログファイルは本ツールの実行ディレクトリ下( ``logs/`` フォルダなど)に保存。
+       jobs:
+         build:
+           runs-on: windows-latest
+           
+           steps:
+           - uses: actions/checkout@v2
+           
+           - name: Build and publish
+             env:
+               TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
+               TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+             run: |
+               python -m pip install build twine
+               python -m build
+               twine upload dist/*
 
-## 性能試験結果
+コントリビューションガイドライン
+--------------------------
 
-- **SQLiteでの検索・更新性能(想定例)**:
-    - 1万件程度のタグに対して、全文検索(LIKE検索)を行った場合、GUI表示まで約0.2秒程度
-    - インデックス付与後は検索速度が2倍以上高速化
-- **GUIの応答時間**:
-    - タグ一覧表示や翻訳切り替えはほぼ即時
-    - 大量データ(数十万タグ)対応時には遅延発生の可能性があるが、現段階でそのレベルのスケールは想定外
-- 性能改善策として、必要に応じてインデックスの最適化やメモリキャッシュ導入を検討可能。
+1. Issue作成
+   - バグ報告: 再現手順、期待される動作、実際の動作を記載
+   - 機能要望: 目的、具体的な実装案、期待される効果を記載
 
-## 他プロジェクトとの連携事例(モジュールとしての利用例)
+2. プルリクエスト
+   - 1つのPRにつき1つの機能/修正
+   - テストコードを含める
+   - コーディング規約に従う
+   - CIが通過することを確認
 
-他プロジェクトでは、本ツールの機能をPythonモジュールとしてインポートすることでタグデータ検索や翻訳機能を利用可能
-以下はサンプルコード例｡
+3. コミットメッセージ
+   - 形式: `<type>: <description>`
+   - type:
+     * feat: 新機能
+     * fix: バグ修正
+     * docs: ドキュメント
+     * style: フォーマット
+     * refactor: リファクタリング
+     * test: テスト
+     * chore: その他
 
-.. code-block:: python
+4. ブランチ戦略
+   - main: リリースブランチ
+   - develop: 開発ブランチ
+   - feature/*: 機能追加
+   - fix/*: バグ修正
+   - docs/*: ドキュメント更新
 
-    from genai_tag_db_tools.core import TagManager
+トラブルシューティング
+------------------
 
-    # TagManagerはデータベースへの接続とタグ操作機能を提供するクラス
-    manager = TagManager(db_path="genai_tags.db")
+1. 開発環境の問題
 
-    # タグ検索例 : 特定のタグ名でTAGSテーブルを検索
-    results = manager.find_tags_by_name("cat")
-    for tag in results:
-        print(tag.tag_id, tag.tag, tag.source_tag)
+   - **症状**: venvが作成できない
+     **解決**: Python 3.12が正しくインストールされているか確認
+   
+   - **症状**: PySide6のインポートエラー
+     **解決**: `pip install PySide6` を実行
 
-    # 翻訳取得例：特定のタグの日本語翻訳を取得
-    jp_translation = manager.get_translation(tag_id=123, language="ja")
-    if jp_translation:
-        print("Japanese Translation:", jp_translation.translation)
+2. テストの問題
 
-※APIインターフェースは内部実装を直接呼び出す形で、現在は正式な外部向けAPIとして定義してない。将来的に明確なAPIレイヤーを整備するかも。
+   - **症状**: テストが失敗する
+     **解決**: 
+     1. venv が有効か確認
+     2. 依存関係が最新か確認
+     3. テストデータベースが正しく設定されているか確認
 
-今後の整備の流れ
------------------
+3. データベースの問題
 
-本ツールをより読みやすく保守しやすい形にするため、以下のステップを想定しています。
+   - **症状**: マイグレーションエラー
+     **解決**:
+     1. alembicのバージョン履歴をリセット
+     2. マイグレーションを再実行
 
-完了したタスク
-~~~~~~~~~~~~~~
+パフォーマンスチューニング
+---------------------
 
-.. note::
-   以下のタスクは既に完了しています。
+1. データベース最適化
 
-1. ディレクトリ構成の見直し
+   .. code-block:: python
 
-   * :white_check_mark: ``data/`` と ``db/`` ディレクトリの責務を整理
-   * :white_check_mark: 不要ファイルと重複コードを整理
+       # インデックス作成
+       CREATE INDEX idx_tags_name ON tags(tag);
+       CREATE INDEX idx_translations_tag_id ON tag_translations(tag_id);
 
-2. コードの再構成
+2. キャッシュ戦略
 
-   * :white_check_mark: GUI層からビジネスロジック・DB操作を分離
-   * :white_check_mark: 共通処理を ``TagCleaner`` に集約
+   .. code-block:: python
 
-3. GUIとサービス層の分離
+       from functools import lru_cache
 
-   * :white_check_mark: ビジネスロジックをサービス層へ移行
-   * :white_check_mark: UIファイルをレイアウトとイベント結合に特化
+       class TagService:
+           @lru_cache(maxsize=1000)
+           def get_tag_by_id(self, tag_id: int) -> Tag:
+               return self.session.query(Tag).get(tag_id)
 
-残りのタスク
-~~~~~~~~~~~~
+3. バッチ処理
 
-4. 大きなメソッドや例外ハンドリングの細分化
-    * 長大な処理や多数のtry-exceptを小さなメソッドに分け、保守性向上
-    * テストしやすいようにそれぞれの処理を単独メソッド化
+   .. code-block:: python
 
-5. リファクタリング & テスト・ドキュメント更新
-    * 構成変更後、``pytest`` によるテストを継続的に実施
-    * ドキュメント（拡張子 .rst のファイル）や docstring を追加・更新してメンテナンス性向上
+       def bulk_insert_tags(self, tags: List[Dict]):
+           self.session.bulk_insert_mappings(Tag, tags)
+           self.session.commit()
 
-6. 継続的な改善と運用
-    * 大規模データや他プロジェクト連携などの要件が増加した場合、さらなるインデックス最適化やAPIレイヤー追加も検討
-    * プロジェクト運用の中で逐次リファクタリング＆ドキュメント拡充を行うことを推奨
+セキュリティ考慮事項
+----------------
+
+1. SQLインジェクション対策
+   - パラメータ化クエリの使用
+   - ユーザー入力の検証
+
+2. ファイルパス検証
+   - パス走査攻撃の防止
+   - 適切なパーミッション設定
+
+3. エラーメッセージ
+   - 本番環境では詳細なエラーを非表示
+   - ログへの適切な記録

@@ -1,226 +1,335 @@
 .. _package_specification:
 
-=======================================
 パッケージ仕様: genai_tag_db_tools
-=======================================
+==============================
 
 .. contents::
    :local:
    :depth: 2
 
 概要
-====
+----
 パッケージ ``genai_tag_db_tools`` は、タグデータベースを管理し、データのインポート、検索、クリーニング、翻訳、および統計を提供するためのツールセット。
 以下は、ディレクトリ構造および主なモジュールの仕様。
 
-ディレクトリ構造
-================
+依存関係
+-------
+
+必須パッケージ
+-----------
 
 .. code-block:: text
 
-    genai_tag_db_tools/
-        cleanup_str.py
-        config.py
-        core/
-            db_maintenance_tool.py
-            import_data.py
-            processor.py
-            tag_search.py
-            __init__.py
-        data/
-            alembic.ini
-            database_schema.py
-            extracted_models.py
-            tags_v4.db (binary file)
-            tag_database_alembic/
-                env.py
-                README
-                script.py.mako
-            versions/
-                tag_repository.py
-            xml/
-        gui/
-            designer/
-                MainWindow.ui
-                MainWindow_ui.py
-                ProgressWidget.ui
-                ProgressWidget_ui.py
-                TagCleanerWidget.ui
-                TagCleanerWidget_ui.py
-                TagDataImportDialog.ui
-                TagDataImportDialog_ui.py
-                TagRegisterWidget.ui
-                TagRegisterWidget_ui.py
-                TagSearchWidget.ui
-                TagSearchWidget_ui.py
-                TagStatisticsWidget.ui
-                TagStatisticsWidget_ui.py
-                __init__.py
-            widgets/
-                tag_cleaner.py
-                tag_import.py
-                tag_register.py
-                tag_search.py
-                tag_statistics.py
-                __init__.py
-            windows/
-                00.py
-                main_window.py
-                __init__.py
-        main.py
-        utils/
-            __init__.py
+    PySide6>=6.5.2         # GUIフレームワーク
+    SQLAlchemy>=2.0.0      # ORMとデータベース操作
+    alembic>=1.12.0        # データベースマイグレーション
+    polars>=0.19.12        # データ処理と分析
+    pyyaml>=6.0.1         # 設定ファイルの読み込み
+    loguru>=0.7.2         # ロギング
+    typing-extensions>=4.8.0  # 型ヒント拡張
 
-主要コンポーネント
-==================
+開発用パッケージ
+------------
 
-``cleanup_str.py``
--------------------
-タグのクリーニングと正規化を行うユーティリティ。
-`kohya-ss/sd-scripts <https://github.com/kohya-ss/sd-scripts>`_ より大部分を移植
+.. code-block:: text
 
-主なクラスと関数:
+    pytest>=7.4.2         # テストフレームワーク
+    pytest-cov>=4.1.0     # カバレッジレポート
+    black>=23.9.1         # コードフォーマッター
+    ruff>=0.0.291        # リンター
+    mypy>=1.5.1          # 静的型チェック
+    sphinx>=7.2.6        # ドキュメント生成
 
-- ``TagCleaner``
+モジュール構成
+-----------
 
-  - タグのクリーニングロジックをカプセル化。
+core
+----
 
-  例えば、より具体的なタグへの統合。
+基本機能を提供するコアモジュール群。
 
-  入力例:
+**tag_manager.py**
 
-  .. code-block:: text
+.. code-block:: python
 
-    long hair, blue eyes, hair
+    class TagManager:
+        """タグ管理の中核機能を提供するクラス
+        
+        このクラスは以下の機能を提供します:
+        - タグの登録・更新
+        - タグの検索
+        - 翻訳の管理
+        - 使用統計の追跡
+        """
+        
+        def register_tag(self, tag_data: TagData) -> Tag:
+            """新しいタグを登録
+            
+            Args:
+                tag_data (TagData): タグ情報を含むデータクラス
+                
+            Returns:
+                Tag: 登録されたタグオブジェクト
+                
+            Raises:
+                DuplicateTagError: タグが既に存在する場合
+                ValidationError: タグデータが不正な場合
+            """
+            
+        def search_tags(
+            self, 
+            query: str, 
+            language: Optional[str] = None
+        ) -> List[Tag]:
+            """タグを検索
+            
+            Args:
+                query (str): 検索クエリ
+                language (Optional[str]): 検索対象の言語
+                
+            Returns:
+                List[Tag]: 検索結果のタグリスト
+            """
 
-  出力例:
+**database.py**
 
-  .. code-block:: text
+データベース接続とセッション管理を提供。
 
-    long hair, blue eyes
+.. code-block:: python
 
-  - 複数の人物がいる場合､髪型や目の色などの要素の混ざりやすい情報を削除。
+    def get_session() -> Session:
+        """データベースセッションを取得
+        
+        Returns:
+            Session: SQLAlchemyセッションオブジェクト
+            
+        Raises:
+            DatabaseConnectionError: DB接続に失敗した場合
+        """
 
-  - タグを正規化。
-
-  .. code-block:: python
-
-    clean_tags(text: str) -> str
-
-``config.py``
--------------
-データベース接続や全体設定を定義。
-
-- ``db_path``: SQLiteデータベースファイルのパス。
-- ``AVAILABLE_COLUMNS``: タグデータにおけるカラム情報を定義。
-
-``core`` ディレクトリ
----------------------
-
-**``db_maintenance_tool.py``**
-
-データベースのメンテナンス機能を提供。
-
-- ``detect_duplicates_in_tag_status() -> list[dict]``:
-
-  - 重複するタグステータスレコードを検出。
-
-- ``optimize_indexes()``:
-
-  - データベースインデックスの再構築。
-
-**``import_data.py``**
-
-データインポートロジックを管理。
-
-- ``TagDataImporter``
-
-  - ``read_csv(csv_file_path: Path) -> pl.DataFrame``:
-
-    - CSVファイルからデータを読み込み。
-
-      データはカンマ区切りで、以下のカラムを含むことが推奨。
-
-      .. list-table:: 推奨カラム構成
-         :header-rows: 1
-
-         * - ``source_tag``
-           - 元のタグ。
-         * - ``translation``
-           - 翻訳文字列。
-         * - ``count``
-           - タグの使用頻度。
-
-  - ``configure_import(source_df: pl.DataFrame) -> tuple[pl.DataFrame, ImportConfig]``:
-
-    - データのインポート設定を定義。
-    - カラムのマッピングや言語設定を柔軟に調整可能。
-
-**``processor.py``**
-
-CSVファイルをデータベースに変換し、挿入するロジックを含む。
-  - CSVの行ごとにIDを生成し、適切な正規化とデータ挿入を行う。
-
-**``tag_search.py``**
-
---------------------
-
-**``database_schema.py``**
-
-SQLAlchemyを使用してデータベーススキーマを定義。
-
-詳細なスキーマ設計については :doc:`database_design` を参照。
-
-- ``Tag``
-  - タグ情報を管理。
-
-- ``TagTranslation``
-  - タグの翻訳を格納。
-
-**``tag_repository.py``**
-
-データベースとのインターフェースを提供。
-
-``gui`` ディレクトリ
----------------------
-
-GUI関連のコードを含むディレクトリ。
-
-**``designer`` サブディレクトリ**
-
-Qt Designerで作成されたUIファイル。人力修正は不要
-
-**``widgets`` サブディレクトリ**
-
-GUIウィジェットのロジックを実装。
-
-使用例
-======
-タグ検索
+services
 --------
 
-.. code-block:: python
+ビジネスロジックを実装するサービス層。
 
-    from genai_tag_db_tools.core.tag_search import TagSearcher
-
-    searcher = TagSearcher()
-    results = searcher.search_tags("1boy")
-    print(results)
-
-データインポート
-----------------
+**tag_service.py**
 
 .. code-block:: python
 
-    from genai_tag_db_tools.core.import_data import TagDataImporter
+    class TagService:
+        """タグ関連のビジネスロジックを提供
+        
+        以下の機能を実装:
+        - タグのバリデーション
+        - 重複チェック
+        - 正規化処理
+        """
 
-    importer = TagDataImporter()
-    importer.import_data("path/to/csv")
+**translation_service.py**
 
-カスタム設定
-============
+.. code-block:: python
 
-必要に応じて、プロジェクトに合わせて以下の設定を調整：
+    class TranslationService:
+        """翻訳関連の機能を提供
+        
+        - 翻訳の追加・更新
+        - 言語間の変換
+        - 翻訳品質の検証
+        """
 
-- ``config.py``: データベースパスやカラム設定。
-- ``conf.py``: Sphinx用のドキュメント設定。
+エラー定義
+--------
+
+**exceptions.py**
+
+.. code-block:: python
+
+    class TagError(Exception):
+        """タグ関連の基底例外クラス"""
+        
+    class DuplicateTagError(TagError):
+        """タグ重複時の例外"""
+        
+    class ValidationError(TagError):
+        """バリデーション失敗時の例外"""
+        
+    class DatabaseError(Exception):
+        """データベース操作の基底例外クラス"""
+        
+    class DatabaseConnectionError(DatabaseError):
+        """DB接続失敗時の例外"""
+
+エラーハンドリング
+--------------
+
+1. 例外の階層構造
+   - 基底例外クラスから派生
+   - 具体的なエラー状況を示す例外クラス
+   - エラーメッセージの多言語対応
+
+2. エラーログ
+   - エラーレベルに応じたログ出力
+   - スタックトレースの保存
+   - エラー発生時の状態情報の記録
+
+3. GUI表示
+   - ユーザーフレンドリーなエラーメッセージ
+   - エラー状況に応じた対処方法の提示
+   - デバッグモードでの詳細情報表示
+
+設定ファイル
+---------
+
+**config.yaml**
+
+.. code-block:: yaml
+
+    database:
+      path: data/tags_v4.db
+      pool_size: 5
+      max_overflow: 10
+      echo: false  # SQLログ出力の有無
+      
+    logging:
+      level: INFO
+      file: logs/app.log
+      format: "{time} {level} {message}"
+      rotation: "1 week"
+      
+    gui:
+      theme: light
+      language: ja
+      window:
+        width: 800
+        height: 600
+      
+    performance:
+      cache_size: 1000
+      batch_size: 100
+      
+    development:
+      debug: false
+      mock_translation: false
+
+設定項目の説明
+-----------
+
+1. database
+   - path: データベースファイルのパス
+   - pool_size: コネクションプールのサイズ
+   - max_overflow: 最大超過接続数
+   - echo: SQLログ出力の有無
+
+2. logging
+   - level: ログレベル (DEBUG/INFO/WARNING/ERROR)
+   - file: ログファイルのパス
+   - format: ログのフォーマット
+   - rotation: ログローテーション設定
+
+3. gui
+   - theme: GUIテーマ (light/dark)
+   - language: 表示言語
+   - window: ウィンドウサイズ設定
+
+4. performance
+   - cache_size: キャッシュサイズ
+   - batch_size: バッチ処理のサイズ
+
+5. development
+   - debug: デバッグモードの有無
+   - mock_translation: 翻訳機能のモック化
+
+型定義
+-----
+
+**types.py**
+
+.. code-block:: python
+
+    from dataclasses import dataclass
+    from datetime import datetime
+    from typing import Dict, List, Optional
+
+    @dataclass
+    class TagData:
+        """タグデータを表現するデータクラス"""
+        source_tag: str
+        translations: Dict[str, str]
+        count: Optional[int] = 0
+        created_at: datetime = field(default_factory=datetime.now)
+        
+    @dataclass
+    class TranslationData:
+        """翻訳データを表現するデータクラス"""
+        text: str
+        language: str
+        confidence: float
+        
+    @dataclass
+    class SearchResult:
+        """検索結果を表現するデータクラス"""
+        tags: List[TagData]
+        total_count: int
+        page: int
+        per_page: int
+
+使用例
+-----
+
+1. 基本的な使用方法
+
+.. code-block:: python
+
+    from genai_tag_db_tools import TagManager
+    
+    # マネージャーの初期化
+    manager = TagManager()
+    
+    # タグの検索
+    results = manager.search_tags("landscape")
+    
+    # タグの登録
+    tag_data = TagData(
+        source_tag="new_tag",
+        translations={"ja": "新しいタグ"}
+    )
+    manager.register_tag(tag_data)
+
+2. エラーハンドリング
+
+.. code-block:: python
+
+    from genai_tag_db_tools.exceptions import DuplicateTagError
+    
+    try:
+        manager.register_tag(tag_data)
+    except DuplicateTagError as e:
+        logger.error(f"タグ重複エラー: {e}")
+        # エラー処理
+    except ValidationError as e:
+        logger.error(f"バリデーションエラー: {e}")
+        # エラー処理
+
+3. バッチ処理
+
+.. code-block:: python
+
+    # 複数タグの一括登録
+    tags_data = [
+        TagData(source_tag="tag1", translations={"ja": "タグ1"}),
+        TagData(source_tag="tag2", translations={"ja": "タグ2"}),
+    ]
+    
+    manager.bulk_register_tags(tags_data)
+
+4. 設定のカスタマイズ
+
+.. code-block:: python
+
+    from genai_tag_db_tools.config import Config
+    
+    # 設定の読み込み
+    config = Config.load("custom_config.yaml")
+    
+    # カスタム設定でマネージャーを初期化
+    manager = TagManager(config=config)

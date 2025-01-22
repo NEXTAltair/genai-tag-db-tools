@@ -39,5 +39,9 @@ html_theme = "sphinx_rtd_theme"
 # html_title設定(必要に応じて)
 html_title = "genai-tag-db-tools ドキュメント"
 
+# GitHub Pages用の設定
+html_baseurl = "https://nextaltair.github.io/genai-tag-db-tools/"
+html_use_index = True
+
 # highlight設定等(必要に応じて)
 pygments_style = "sphinx"
