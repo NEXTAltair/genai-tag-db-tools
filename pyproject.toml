@@ -41,7 +41,7 @@ dev = [
 
 [tool.ruff]
 exclude = [
-    "*/genai_tag_db_tools/config.py", # 改行位置を変更されるととても見づらい
+    "*/gui/designer/*", # Qtdesignerで自動生成されたファイル
     "*/__pycache__",
     "*/tests/*",
     "*/shibokensupport/*",

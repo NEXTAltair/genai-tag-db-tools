@@ -137,8 +137,8 @@ def test_update_usage_counts(register: TagRegister):
 
     # 各タグについてupdate_usage_countが呼ばれることを確認
     assert register._repo.update_usage_count.call_count == 2
-    register._repo.update_usage_count.assert_any_call(tag_id=1, format_id=1, count=10)
-    register._repo.update_usage_count.assert_any_call(tag_id=2, format_id=1, count=20)
+    register._repo.update_usage_count.assert_any_call(1, 1, 10)
+    register._repo.update_usage_count.assert_any_call(2, 1, 20)
 
 
 def test_update_translations(register: TagRegister):

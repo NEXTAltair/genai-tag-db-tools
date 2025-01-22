@@ -4,9 +4,12 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 from PySide6.QtWidgets import QApplication
+from typing import Generator, Any
+
+from genai_tag_db_tools.data.database_schema import Base, TagDatabase
 
 @pytest.fixture(scope="function")
-def engine():
+def engine() -> Generator[Any, None, None]:
     """テスト用に SQLite インメモリ データベースを作成し、外部キー制約をONにする"""
     engine = create_engine(
         "sqlite:///:memory:",
@@ -19,18 +22,25 @@ def engine():
     with engine.connect() as conn:
         conn.execute(text("PRAGMA foreign_keys=ON"))
 
+    # データベーススキーマを作成
+    Base.metadata.create_all(engine)
+
     yield engine
 
     # テスト終了後のクリーンアップ
+    Base.metadata.drop_all(engine)
     engine.dispose()
 
 @pytest.fixture(scope="function")
-def db_session(engine) -> Session:
+def db_session(engine) -> Generator[Session, None, None]:
     """テスト用に新しいデータベース セッションを作成"""
     connection = engine.connect()
     transaction = connection.begin()
     Session = sessionmaker(bind=engine)
     session = Session()
+
+    # マスターデータを初期化
+    TagDatabase(external_session=session, init_master=True)
 
     try:
         yield session

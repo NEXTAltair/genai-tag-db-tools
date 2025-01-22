@@ -2,7 +2,6 @@
 
 import polars as pl
 from typing import Any, Optional
-from typing import Callable
 from sqlalchemy.orm import Session
 
 from genai_tag_db_tools.data.tag_repository import TagRepository
@@ -23,7 +22,8 @@ class TagStatistics:
     def __init__(self, session: Optional[Session] = None):
         # セッションからセッションファクトリを作成
         if session is not None:
-            session_factory = lambda: session
+            def session_factory():
+                return session
         else:
             session_factory = None
 

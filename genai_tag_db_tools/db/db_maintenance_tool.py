@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import Optional, List, Dict, Any, Set
 
 from genai_tag_db_tools.data.tag_repository import TagRepository
@@ -323,7 +322,7 @@ class DatabaseMaintenanceTool:
             return
 
         # 最新のステータスを残して他を削除
-        latest_status = format_statuses[0]  # 本来はタイムスタンプなどで判断
+        format_statuses[0]  # 本来はタイムスタンプなどで判断
         for status in format_statuses[1:]:
             self.tag_repository.delete_tag_status(status.tag_id, status.format_id)
 

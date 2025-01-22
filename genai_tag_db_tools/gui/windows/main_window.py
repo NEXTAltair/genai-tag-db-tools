@@ -1,7 +1,7 @@
 import sys
 import logging
 from PySide6.QtCore import Slot
-from PySide6.QtWidgets import QApplication, QMainWindow, QDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 from genai_tag_db_tools.gui.designer.MainWindow_ui import Ui_MainWindow
 from genai_tag_db_tools.gui.widgets.tag_search import TagSearchWidget
 from genai_tag_db_tools.gui.widgets.tag_cleaner import TagCleanerWidget

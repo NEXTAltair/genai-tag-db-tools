@@ -271,11 +271,18 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
         """
         self.on_sourceTagCheckBox_stateChanged()
 
-    def showHeaderMenu(self, pos):
+    def showHeaderMenu(self, pos_or_column):
         """
         テーブルヘッダを右クリックした際のマッピング設定メニュー。
+
+        Args:
+            pos_or_column: QPointの場合はクリック位置、intの場合は直接カラムインデックス
         """
-        column = self.dataPreviewTable.horizontalHeader().logicalIndexAt(pos)
+        if isinstance(pos_or_column, int):
+            column = pos_or_column
+        else:
+            column = self.dataPreviewTable.horizontalHeader().logicalIndexAt(pos_or_column)
+
         menu = QMenu(self)
 
         # マッピング選択のサブメニューを作成
@@ -288,7 +295,8 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
                 partial(self.set_column_mapping, column, mapped_name)
             )
 
-        menu.exec(self.dataPreviewTable.horizontalHeader().mapToGlobal(pos))
+        if not isinstance(pos_or_column, int):
+            menu.exec(self.dataPreviewTable.horizontalHeader().mapToGlobal(pos_or_column))
 
     def set_column_mapping(self, column, mapped_name):
         """指定されたカラムにマッピングを設定する"""

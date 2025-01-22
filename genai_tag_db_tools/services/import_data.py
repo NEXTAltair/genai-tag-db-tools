@@ -8,9 +8,12 @@ import polars as pl
 from PySide6.QtCore import QObject, Signal
 
 # DBアクセスやタグ登録ロジックは、新規 tag_register.py の TagRegister に委譲
+from typing import Callable
+
+from sqlalchemy.orm import Session
+
 from genai_tag_db_tools.services.tag_register import TagRegister
-from genai_tag_db_tools.db.database_setup import engine, db_path
-from genai_tag_db_tools.utils.cleanup_str import TagCleaner
+from genai_tag_db_tools.data.tag_repository import TagRepository
 from genai_tag_db_tools.services.polars_schema import AVAILABLE_COLUMNS
 
 
@@ -42,16 +45,17 @@ class TagDataImporter(QObject):
     process_finished = Signal(str)        # 処理完了メッセージ ("インポート完了"など)
     error_occurred = Signal(str)          # エラーメッセージ
 
-    def __init__(self, parent: Optional[QObject] = None):
+    def __init__(
+        self,
+        parent: Optional[QObject] = None,
+        session_factory: Optional[Callable[[], Session]] = None
+    ):
         super().__init__(parent)
         self.logger = logging.getLogger(self.__class__.__name__)
 
-        # DB関連設定 (必須なら外部から注入してもOK)
-        self._conn_path = db_path
-        self._engine = engine
-
         # タグ登録ロジックを委譲するサービス
-        self._register_svc = TagRegister()
+        repo = TagRepository(session_factory=session_factory) if session_factory else None
+        self._register_svc = TagRegister(repository=repo)
 
         # ユーザーによるキャンセルフラグ (必要に応じて使う)
         self._cancel_flag = False

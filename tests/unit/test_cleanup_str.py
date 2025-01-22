@@ -15,7 +15,7 @@ def test_clean_format(tag_cleaner):
 
 def test_clean_format_01(tag_cleaner):
     text = "This_is_a_test.\n (This) is only a test."
-    expected = "This is a test, \(This\) is only a test,"
+    expected = r"This is a test, \(This\) is only a test,"
     assert TagCleaner.clean_format(text) == expected
 
 

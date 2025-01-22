@@ -4,7 +4,6 @@ from PySide6.QtWidgets import QWidget, QMessageBox
 from PySide6.QtCore import Slot
 
 from genai_tag_db_tools.gui.designer.TagRegisterWidget_ui import Ui_TagRegisterWidget
-from genai_tag_db_tools.gui.designer.TagDataImportDialog_ui import Ui_TagDataImportDialog
 from genai_tag_db_tools.utils.cleanup_str import TagCleaner
 
 # 新しく使うサービスクラス

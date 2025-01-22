@@ -15,7 +15,6 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     CheckConstraint,
 )
-from sqlalchemy.engine import Engine
 from sqlalchemy.orm import (
     Session,
     relationship,
@@ -23,6 +22,13 @@ from sqlalchemy.orm import (
     mapped_column,
     declarative_base,
 )
+
+from genai_tag_db_tools.db.database_setup import engine as production_engine
+from genai_tag_db_tools.db.database_setup import SessionLocal as production_SessionLocal
+
+# テスト時にモンキーパッチで上書きされる可能性のある変数
+engine = production_engine
+SessionLocal = production_SessionLocal
 
 Base = declarative_base()
 
@@ -248,8 +254,6 @@ class TagTypeFormatMapping(Base):
 # --------------------------------------------------------------------------
 # TagDatabase クラス
 # --------------------------------------------------------------------------
-# ここで共通の engine, SessionLocal を import
-from genai_tag_db_tools.db.database_setup import engine, SessionLocal
 
 class TagDatabase:
     """タグデータベース管理クラス"""

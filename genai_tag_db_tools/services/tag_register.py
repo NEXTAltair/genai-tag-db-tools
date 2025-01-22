@@ -78,9 +78,9 @@ class TagRegister:
             usage_count = row["count"]
             if tag_id is not None and usage_count is not None:
                 self._repo.update_usage_count(
-                    tag_id=tag_id,
-                    format_id=format_id,
-                    count=usage_count
+                    tag_id,
+                    format_id,
+                    usage_count
                 )
 
     def update_translations(self, df: pl.DataFrame, language: str) -> None:
@@ -95,9 +95,9 @@ class TagRegister:
             trans = row["translation"]
             if tag_id is not None and trans:
                 self._repo.add_or_update_translation(
-                    tag_id=tag_id,
-                    language=language,
-                    translation=trans
+                    tag_id,
+                    language,
+                    trans
                 )
 
     def update_deprecated_tags(self, df: pl.DataFrame, format_id: int) -> None:
