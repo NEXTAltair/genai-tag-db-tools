@@ -1,0 +1,364 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="ja" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>パッケージ仕様: genai_tag_db_tools &mdash; genai-tag-db-tools ドキュメント</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=98e9f989"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+      <script src="_static/translations.js?v=4755f45a"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="索引" href="genindex.html" />
+    <link rel="search" title="検索" href="search.html" />
+    <link rel="prev" title="Developer Guide (開発者向けセットアップガイド)" href="dev_guide.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            genai-tag-db-tools
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="getting_started.html">Getting Started (インストール方法)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="usage_guide.html">Usage Guide (機能ガイド)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="database_design.html">database design データベース設計</a></li>
+<li class="toctree-l1"><a class="reference internal" href="dev_guide.html">Developer Guide (開発者向けセットアップガイド)</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">パッケージ仕様: genai_tag_db_tools</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#id2">概要</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#id3">ディレクトリ構造</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#id4">主要コンポーネント</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#cleanup-str-py"><code class="docutils literal notranslate"><span class="pre">cleanup_str.py</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#config-py"><code class="docutils literal notranslate"><span class="pre">config.py</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#core"><code class="docutils literal notranslate"><span class="pre">core</span></code> ディレクトリ</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#gui"><code class="docutils literal notranslate"><span class="pre">gui</span></code> ディレクトリ</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#id5">使用例</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#id6">タグ検索</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#id7">データインポート</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#id8">カスタム設定</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">genai-tag-db-tools</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">パッケージ仕様: genai_tag_db_tools</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/package_specification.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="genai-tag-db-tools">
+<span id="package-specification"></span><h1>パッケージ仕様: genai_tag_db_tools<a class="headerlink" href="#genai-tag-db-tools" title="Link to this heading"></a></h1>
+<nav class="contents local" id="id1">
+<ul class="simple">
+<li><p><a class="reference internal" href="#id2" id="id10">概要</a></p></li>
+<li><p><a class="reference internal" href="#id3" id="id11">ディレクトリ構造</a></p></li>
+<li><p><a class="reference internal" href="#id4" id="id12">主要コンポーネント</a></p>
+<ul>
+<li><p><a class="reference internal" href="#cleanup-str-py" id="id13"><code class="docutils literal notranslate"><span class="pre">cleanup_str.py</span></code></a></p></li>
+<li><p><a class="reference internal" href="#config-py" id="id14"><code class="docutils literal notranslate"><span class="pre">config.py</span></code></a></p></li>
+<li><p><a class="reference internal" href="#core" id="id15"><code class="docutils literal notranslate"><span class="pre">core</span></code> ディレクトリ</a></p></li>
+<li><p><a class="reference internal" href="#gui" id="id16"><code class="docutils literal notranslate"><span class="pre">gui</span></code> ディレクトリ</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#id5" id="id17">使用例</a></p>
+<ul>
+<li><p><a class="reference internal" href="#id6" id="id18">タグ検索</a></p></li>
+<li><p><a class="reference internal" href="#id7" id="id19">データインポート</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#id8" id="id20">カスタム設定</a></p></li>
+</ul>
+</nav>
+<section id="id2">
+<h2><a class="toc-backref" href="#id10" role="doc-backlink">概要</a><a class="headerlink" href="#id2" title="Link to this heading"></a></h2>
+<p>パッケージ <code class="docutils literal notranslate"><span class="pre">genai_tag_db_tools</span></code> は、タグデータベースを管理し、データのインポート、検索、クリーニング、翻訳、および統計を提供するためのツールセット。
+以下は、ディレクトリ構造および主なモジュールの仕様。</p>
+</section>
+<section id="id3">
+<h2><a class="toc-backref" href="#id11" role="doc-backlink">ディレクトリ構造</a><a class="headerlink" href="#id3" title="Link to this heading"></a></h2>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>genai_tag_db_tools/
+    cleanup_str.py
+    config.py
+    core/
+        db_maintenance_tool.py
+        import_data.py
+        processor.py
+        tag_search.py
+        __init__.py
+    data/
+        alembic.ini
+        database_schema.py
+        extracted_models.py
+        tags_v4.db (binary file)
+        tag_database_alembic/
+            env.py
+            README
+            script.py.mako
+        versions/
+            tag_repository.py
+        xml/
+    gui/
+        designer/
+            MainWindow.ui
+            MainWindow_ui.py
+            ProgressWidget.ui
+            ProgressWidget_ui.py
+            TagCleanerWidget.ui
+            TagCleanerWidget_ui.py
+            TagDataImportDialog.ui
+            TagDataImportDialog_ui.py
+            TagRegisterWidget.ui
+            TagRegisterWidget_ui.py
+            TagSearchWidget.ui
+            TagSearchWidget_ui.py
+            TagStatisticsWidget.ui
+            TagStatisticsWidget_ui.py
+            __init__.py
+        widgets/
+            tag_cleaner.py
+            tag_import.py
+            tag_register.py
+            tag_search.py
+            tag_statistics.py
+            __init__.py
+        windows/
+            00.py
+            main_window.py
+            __init__.py
+    main.py
+    utils/
+        __init__.py
+</pre></div>
+</div>
+</section>
+<section id="id4">
+<h2><a class="toc-backref" href="#id12" role="doc-backlink">主要コンポーネント</a><a class="headerlink" href="#id4" title="Link to this heading"></a></h2>
+<section id="cleanup-str-py">
+<h3><a class="toc-backref" href="#id13" role="doc-backlink"><code class="docutils literal notranslate"><span class="pre">cleanup_str.py</span></code></a><a class="headerlink" href="#cleanup-str-py" title="Link to this heading"></a></h3>
+<p>タグのクリーニングと正規化を行うユーティリティ。
+<a class="reference external" href="https://github.com/kohya-ss/sd-scripts">kohya-ss/sd-scripts</a> より大部分を移植</p>
+<p>主なクラスと関数:</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">TagCleaner</span></code></p>
+<ul class="simple">
+<li><p>タグのクリーニングロジックをカプセル化。</p></li>
+</ul>
+<p>例えば、より具体的なタグへの統合。</p>
+<p>入力例:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>long hair, blue eyes, hair
+</pre></div>
+</div>
+<p>出力例:</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>long hair, blue eyes
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>複数の人物がいる場合､髪型や目の色などの要素の混ざりやすい情報を削除。</p></li>
+<li><p>タグを正規化。</p></li>
+</ul>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">clean_tags</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span>
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+<section id="config-py">
+<h3><a class="toc-backref" href="#id14" role="doc-backlink"><code class="docutils literal notranslate"><span class="pre">config.py</span></code></a><a class="headerlink" href="#config-py" title="Link to this heading"></a></h3>
+<p>データベース接続や全体設定を定義。</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">db_path</span></code>: SQLiteデータベースファイルのパス。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">AVAILABLE_COLUMNS</span></code>: タグデータにおけるカラム情報を定義。</p></li>
+</ul>
+</section>
+<section id="core">
+<h3><a class="toc-backref" href="#id15" role="doc-backlink"><code class="docutils literal notranslate"><span class="pre">core</span></code> ディレクトリ</a><a class="headerlink" href="#core" title="Link to this heading"></a></h3>
+<p><strong>``db_maintenance_tool.py``</strong></p>
+<p>データベースのメンテナンス機能を提供。</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">detect_duplicates_in_tag_status()</span> <span class="pre">-&gt;</span> <span class="pre">list[dict]</span></code>:</p>
+<ul>
+<li><p>重複するタグステータスレコードを検出。</p></li>
+</ul>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">optimize_indexes()</span></code>:</p>
+<ul>
+<li><p>データベースインデックスの再構築。</p></li>
+</ul>
+</li>
+</ul>
+<p><strong>``import_data.py``</strong></p>
+<p>データインポートロジックを管理。</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">TagDataImporter</span></code></p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">read_csv(csv_file_path:</span> <span class="pre">Path)</span> <span class="pre">-&gt;</span> <span class="pre">pl.DataFrame</span></code>:</p>
+<ul>
+<li><p>CSVファイルからデータを読み込み。</p>
+<p>データはカンマ区切りで、以下のカラムを含むことが推奨。</p>
+<table class="docutils align-default" id="id9">
+<caption><span class="caption-text">推奨カラム構成</span><a class="headerlink" href="#id9" title="Link to this table"></a></caption>
+<thead>
+<tr class="row-odd"><th class="head"><p><code class="docutils literal notranslate"><span class="pre">source_tag</span></code></p></th>
+<th class="head"><p>元のタグ。</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">translation</span></code></p></td>
+<td><p>翻訳文字列。</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">count</span></code></p></td>
+<td><p>タグの使用頻度。</p></td>
+</tr>
+</tbody>
+</table>
+</li>
+</ul>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">configure_import(source_df:</span> <span class="pre">pl.DataFrame)</span> <span class="pre">-&gt;</span> <span class="pre">tuple[pl.DataFrame,</span> <span class="pre">ImportConfig]</span></code>:</p>
+<ul class="simple">
+<li><p>データのインポート設定を定義。</p></li>
+<li><p>カラムのマッピングや言語設定を柔軟に調整可能。</p></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p><strong>``processor.py``</strong></p>
+<dl class="simple">
+<dt>CSVファイルをデータベースに変換し、挿入するロジックを含む。</dt><dd><ul class="simple">
+<li><p>CSVの行ごとにIDを生成し、適切な正規化とデータ挿入を行う。</p></li>
+</ul>
+</dd>
+</dl>
+<p><strong>``tag_search.py``</strong></p>
+<hr class="docutils" />
+<p><strong>``database_schema.py``</strong></p>
+<p>SQLAlchemyを使用してデータベーススキーマを定義。</p>
+<p>詳細なスキーマ設計については <a class="reference internal" href="database_design.html"><span class="doc">database design データベース設計</span></a> を参照。</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">Tag</span></code>
+- タグ情報を管理。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">TagTranslation</span></code>
+- タグの翻訳を格納。</p></li>
+</ul>
+<p><strong>``tag_repository.py``</strong></p>
+<p>データベースとのインターフェースを提供。</p>
+</section>
+<section id="gui">
+<h3><a class="toc-backref" href="#id16" role="doc-backlink"><code class="docutils literal notranslate"><span class="pre">gui</span></code> ディレクトリ</a><a class="headerlink" href="#gui" title="Link to this heading"></a></h3>
+<p>GUI関連のコードを含むディレクトリ。</p>
+<p><strong>``designer`` サブディレクトリ</strong></p>
+<p>Qt Designerで作成されたUIファイル。人力修正は不要</p>
+<p><strong>``widgets`` サブディレクトリ</strong></p>
+<p>GUIウィジェットのロジックを実装。</p>
+</section>
+</section>
+<section id="id5">
+<h2><a class="toc-backref" href="#id17" role="doc-backlink">使用例</a><a class="headerlink" href="#id5" title="Link to this heading"></a></h2>
+<section id="id6">
+<h3><a class="toc-backref" href="#id18" role="doc-backlink">タグ検索</a><a class="headerlink" href="#id6" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">genai_tag_db_tools.core.tag_search</span><span class="w"> </span><span class="kn">import</span> <span class="n">TagSearcher</span>
+
+<span class="n">searcher</span> <span class="o">=</span> <span class="n">TagSearcher</span><span class="p">()</span>
+<span class="n">results</span> <span class="o">=</span> <span class="n">searcher</span><span class="o">.</span><span class="n">search_tags</span><span class="p">(</span><span class="s2">&quot;1boy&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">results</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="id7">
+<h3><a class="toc-backref" href="#id19" role="doc-backlink">データインポート</a><a class="headerlink" href="#id7" title="Link to this heading"></a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">genai_tag_db_tools.core.import_data</span><span class="w"> </span><span class="kn">import</span> <span class="n">TagDataImporter</span>
+
+<span class="n">importer</span> <span class="o">=</span> <span class="n">TagDataImporter</span><span class="p">()</span>
+<span class="n">importer</span><span class="o">.</span><span class="n">import_data</span><span class="p">(</span><span class="s2">&quot;path/to/csv&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="id8">
+<h2><a class="toc-backref" href="#id20" role="doc-backlink">カスタム設定</a><a class="headerlink" href="#id8" title="Link to this heading"></a></h2>
+<p>必要に応じて、プロジェクトに合わせて以下の設定を調整：</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">config.py</span></code>: データベースパスやカラム設定。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">conf.py</span></code>: Sphinx用のドキュメント設定。</p></li>
+</ul>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="dev_guide.html" class="btn btn-neutral float-left" title="Developer Guide (開発者向けセットアップガイド)" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright .</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

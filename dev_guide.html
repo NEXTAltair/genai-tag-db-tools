@@ -1,0 +1,397 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="ja" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Developer Guide (開発者向けセットアップガイド) &mdash; genai-tag-db-tools ドキュメント</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=98e9f989"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+      <script src="_static/translations.js?v=4755f45a"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="索引" href="genindex.html" />
+    <link rel="search" title="検索" href="search.html" />
+    <link rel="next" title="パッケージ仕様: genai_tag_db_tools" href="package_specification.html" />
+    <link rel="prev" title="database design データベース設計" href="database_design.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            genai-tag-db-tools
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="getting_started.html">Getting Started (インストール方法)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="usage_guide.html">Usage Guide (機能ガイド)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="database_design.html">database design データベース設計</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Developer Guide (開発者向けセットアップガイド)</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#id1">今後の整備の流れ</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#id2">完了したタスク</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#id3">残りのタスク</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="package_specification.html">パッケージ仕様: genai_tag_db_tools</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">genai-tag-db-tools</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Developer Guide (開発者向けセットアップガイド)</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/dev_guide.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="developer-guide">
+<span id="dev-guide"></span><h1>Developer Guide (開発者向けセットアップガイド)<a class="headerlink" href="#developer-guide" title="Link to this heading"></a></h1>
+<p>開発環境の構築やコードスタイル、テスト実行など、開発に必要な手順の説明。</p>
+<p>## システム構成</p>
+<ol class="arabic">
+<li><p><strong>データ層 (Data Layer)</strong></p>
+<blockquote>
+<div><ul class="simple">
+<li><p>SQLiteデータベースを用いてタグ情報を管理｡</p></li>
+<li><p>データベースには基本的なタグ情報(TAGSテーブル)、翻訳情報(TAG_TRANSLATIONSテーブル)、使用頻度(TAG_USAGE_COUNTSテーブル)などを保持｡</p></li>
+<li><p>初期データは開発時に外部CSVから一括インポートし、その後DBファイルをGitHubリポジトリにコミット。</p></li>
+<li><p>現在はGUI操作によるタグの閲覧や参照が中心で、手動での追加・編集は限定的です(将来的に必要時に機能拡張予定)。</p></li>
+<li><p>後ほど別のプログラムから当DBに存在しないタグが検索された場合は、ユーザーによるタグ登録を行いたい構想があるが現状は後回し。</p></li>
+<li><p>データベースへの更新操作は行われるたびに即時反映(オートコミット)する設計(設計変更の可能性あり)。</p></li>
+<li><p>シングルユーザー環境を想定。</p></li>
+</ul>
+</div></blockquote>
+</li>
+<li><p><strong>ビジネスロジック層 (Business Logic Layer)</strong></p>
+<blockquote>
+<div><ul class="simple">
+<li><p>タグの登録・更新・翻訳取得・使用頻度計測などの機能を実装</p></li>
+<li><p>データベースアクセスを抽象化し、タグ形式の差異を吸収するロジックを提供</p></li>
+</ul>
+<dl class="simple">
+<dt>2.1 service</dt><dd><ul class="simple">
+<li><p>app_service.py: guiで使用するサービス層のロジックを提供</p></li>
+<li><p>import_data.py: csvやHuggingFaceのタグデータをDBにインポートするロジックを提供</p></li>
+<li><p>polars_schema.py: Polarsのスキーマを定義し、データフレームをDBにインポートするロジックを提供 TODO: コレ必要か?</p></li>
+<li><p>tag_register.py: タグ登録機能を提供するロジック</p></li>
+<li><p>tag_search.py: タグ検索機能を提供するロジック</p></li>
+<li><p>tag_statistics.py: タグ使用頻度など統計機能を提供するロジック</p></li>
+</ul>
+</dd>
+</dl>
+</div></blockquote>
+</li>
+<li><p><strong>インターフェース層 (Interface Layer)</strong></p>
+<blockquote>
+<div><ul class="simple">
+<li><p>PySide6を用いたGUIを提供し、タグ情報を直感的に参照・更新</p></li>
+<li><p><cite>pyproject.toml</cite> の <cite>scripts</cite> セクションを利用してGUIを起動可能</p></li>
+<li><p>CLIによる直接操作は未対応で、GUI起動以外のCLI操作は現時点では未実装。</p></li>
+</ul>
+</div></blockquote>
+</li>
+</ol>
+<p>## 開発環境のセットアップ</p>
+<ol class="arabic simple">
+<li><p>リポジトリをクローン:</p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/NEXTAltair/genai-tag-db-tools.git
+<span class="nb">cd</span><span class="w"> </span>genai-tag-db-tools
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p>仮想環境を作成し、パッケージをdevモードでインストール:</p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python3.12<span class="w"> </span>-m<span class="w"> </span>venv<span class="w"> </span>venv
+venv<span class="se">\S</span>cripts<span class="se">\a</span>ctivate
+<span class="nb">cd</span><span class="w"> </span>genai_tag_db_tools
+pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.<span class="o">[</span>dev<span class="o">]</span>
+</pre></div>
+</div>
+<p><strong>注意</strong>: Windows以外のOS(macOS/Linux)は未対応。</p>
+<p>## コードスタイルチェック</p>
+<p><cite>black</cite> と <cite>ruff</cite> を用いてコードのフォーマットおよびLintチェックを行います。
+これらのツールはPEP 8基準を自動的に適用。</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>black<span class="w"> </span>genai_tag_db_tools
+ruff<span class="w"> </span>genai_tag_db_tools
+</pre></div>
+</div>
+<p>## テスト実行</p>
+<p><cite>pytest</cite> を用いてユニットテストを実行。</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pytest<span class="w"> </span>tests
+</pre></div>
+</div>
+<p>テスト実行時にカバレッジレポートを生成する場合は、以下のコマンドを使用。</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pytest<span class="w"> </span>--cov<span class="o">=</span>genai_tag_db_tools<span class="w"> </span>--cov-report<span class="o">=</span>term-missing
+</pre></div>
+</div>
+<p>## 開発時のドキュメンテーション更新</p>
+<p>ドキュメントを更新したら、以下の手順でHTML形式で再生成して確認する。</p>
+<ol class="arabic simple">
+<li><dl class="simple">
+<dt><strong>RSTファイルの生成</strong> (必要に応じて):</dt><dd><p>新しいモジュールやパッケージを追加した場合や大きな変更があった場合は、以下のコマンドを実行してRSTファイルを生成する。</p>
+</dd>
+</dl>
+</li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sphinx-apidoc<span class="w"> </span>-o<span class="w"> </span><span class="nb">source</span><span class="w"> </span>../genai_tag_db_tools
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><cite>source</cite> はRSTファイルの出力先ディレクトリ</p></li>
+<li><p><cite>../genai_tag_db_tools</cite> はドキュメント化するPythonパッケージのパス</p></li>
+</ul>
+<ol class="arabic simple" start="2">
+<li><dl class="simple">
+<dt><strong>ドキュメント生成</strong>:</dt><dd><p>以下のコマンドを実行してHTML形式のドキュメントを生成する。</p>
+</dd>
+</dl>
+</li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sphinx-build<span class="w"> </span>-b<span class="w"> </span>html<span class="w"> </span>.<span class="w"> </span>_build/html
+</pre></div>
+</div>
+<ol class="arabic simple" start="3">
+<li><dl class="simple">
+<dt><strong>確認</strong>:</dt><dd><p>生成された <cite>_build/html</cite> ディレクトリ内の <cite>index.html</cite> をブラウザで開いて内容を確認する。</p>
+</dd>
+</dl>
+</li>
+</ol>
+<p>## 主な機能</p>
+<ul>
+<li><p><strong>タグ管理機能</strong>:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>タグ情報の閲覧(GUIによる検索・参照)</p></li>
+<li><p>後々タグ登録や削除などを行えるようにする計画あり(現時点ではデータは初期インポート済み)</p></li>
+</ul>
+</div></blockquote>
+</li>
+<li><p><strong>翻訳・対応関係管理</strong>:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>TAG_TRANSLATIONSテーブルにより、一つのタグに対して複数言語の翻訳を管理</p></li>
+<li><p>Danbooruタグ・e621タグ・日本語タグなど、複数フォーマットや言語間を参照可能</p></li>
+<li><p>画像生成AIで使用するカンマ区切りプロンプトを基に、内部DBのタグへマッピング</p></li>
+</ul>
+</div></blockquote>
+</li>
+<li><p><strong>統計・使用頻度情報</strong>:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>TAG_USAGE_COUNTSテーブルでタグ毎の使用回数を記録</p></li>
+<li><p>よく使われるタグを参照することで、GUI上で人気タグの確認が可能</p></li>
+</ul>
+</div></blockquote>
+</li>
+</ul>
+<p>## エラーハンドリングとロギング</p>
+<ul class="simple">
+<li><p>SQLite操作時、<code class="docutils literal notranslate"><span class="pre">try-except</span></code> でエラーを捕捉し、重大なエラーは <code class="docutils literal notranslate"><span class="pre">logs/error.log</span></code> に記録｡</p></li>
+<li><p>GUI上でエラーが発生した場合には、ポップアップでユーザーにエラーメッセージを通知｡</p></li>
+<li><p>ログファイルは本ツールの実行ディレクトリ下( <code class="docutils literal notranslate"><span class="pre">logs/</span></code> フォルダなど)に保存。</p></li>
+</ul>
+<p>## 性能試験結果</p>
+<ul class="simple">
+<li><dl class="simple">
+<dt><strong>SQLiteでの検索・更新性能(想定例)</strong>:</dt><dd><ul>
+<li><p>1万件程度のタグに対して、全文検索(LIKE検索)を行った場合、GUI表示まで約0.2秒程度</p></li>
+<li><p>インデックス付与後は検索速度が2倍以上高速化</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><strong>GUIの応答時間</strong>:</dt><dd><ul>
+<li><p>タグ一覧表示や翻訳切り替えはほぼ即時</p></li>
+<li><p>大量データ(数十万タグ)対応時には遅延発生の可能性があるが、現段階でそのレベルのスケールは想定外</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><p>性能改善策として、必要に応じてインデックスの最適化やメモリキャッシュ導入を検討可能。</p></li>
+</ul>
+<p>## 他プロジェクトとの連携事例(モジュールとしての利用例)</p>
+<p>他プロジェクトでは、本ツールの機能をPythonモジュールとしてインポートすることでタグデータ検索や翻訳機能を利用可能
+以下はサンプルコード例｡</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">genai_tag_db_tools.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">TagManager</span>
+
+<span class="c1"># TagManagerはデータベースへの接続とタグ操作機能を提供するクラス</span>
+<span class="n">manager</span> <span class="o">=</span> <span class="n">TagManager</span><span class="p">(</span><span class="n">db_path</span><span class="o">=</span><span class="s2">&quot;genai_tags.db&quot;</span><span class="p">)</span>
+
+<span class="c1"># タグ検索例 : 特定のタグ名でTAGSテーブルを検索</span>
+<span class="n">results</span> <span class="o">=</span> <span class="n">manager</span><span class="o">.</span><span class="n">find_tags_by_name</span><span class="p">(</span><span class="s2">&quot;cat&quot;</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">results</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">tag</span><span class="o">.</span><span class="n">tag_id</span><span class="p">,</span> <span class="n">tag</span><span class="o">.</span><span class="n">tag</span><span class="p">,</span> <span class="n">tag</span><span class="o">.</span><span class="n">source_tag</span><span class="p">)</span>
+
+<span class="c1"># 翻訳取得例：特定のタグの日本語翻訳を取得</span>
+<span class="n">jp_translation</span> <span class="o">=</span> <span class="n">manager</span><span class="o">.</span><span class="n">get_translation</span><span class="p">(</span><span class="n">tag_id</span><span class="o">=</span><span class="mi">123</span><span class="p">,</span> <span class="n">language</span><span class="o">=</span><span class="s2">&quot;ja&quot;</span><span class="p">)</span>
+<span class="k">if</span> <span class="n">jp_translation</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Japanese Translation:&quot;</span><span class="p">,</span> <span class="n">jp_translation</span><span class="o">.</span><span class="n">translation</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>※APIインターフェースは内部実装を直接呼び出す形で、現在は正式な外部向けAPIとして定義してない。将来的に明確なAPIレイヤーを整備するかも。</p>
+<section id="id1">
+<h2>今後の整備の流れ<a class="headerlink" href="#id1" title="Link to this heading"></a></h2>
+<p>本ツールをより読みやすく保守しやすい形にするため、以下のステップを想定しています。</p>
+<section id="id2">
+<h3>完了したタスク<a class="headerlink" href="#id2" title="Link to this heading"></a></h3>
+<div class="admonition note">
+<p class="admonition-title">注釈</p>
+<p>以下のタスクは既に完了しています。</p>
+</div>
+<ol class="arabic simple">
+<li><p>ディレクトリ構成の見直し</p>
+<ul class="simple">
+<li><dl class="field-list simple">
+<dt class="field-odd">white_check_mark<span class="colon">:</span></dt>
+<dd class="field-odd"><p><code class="docutils literal notranslate"><span class="pre">data/</span></code> と <code class="docutils literal notranslate"><span class="pre">db/</span></code> ディレクトリの責務を整理</p>
+</dd>
+</dl>
+</li>
+<li><dl class="field-list simple">
+<dt class="field-odd">white_check_mark<span class="colon">:</span></dt>
+<dd class="field-odd"><p>不要ファイルと重複コードを整理</p>
+</dd>
+</dl>
+</li>
+</ul>
+</li>
+<li><p>コードの再構成</p>
+<ul class="simple">
+<li><dl class="field-list simple">
+<dt class="field-odd">white_check_mark<span class="colon">:</span></dt>
+<dd class="field-odd"><p>GUI層からビジネスロジック・DB操作を分離</p>
+</dd>
+</dl>
+</li>
+<li><dl class="field-list simple">
+<dt class="field-odd">white_check_mark<span class="colon">:</span></dt>
+<dd class="field-odd"><p>共通処理を <code class="docutils literal notranslate"><span class="pre">TagCleaner</span></code> に集約</p>
+</dd>
+</dl>
+</li>
+</ul>
+</li>
+<li><p>GUIとサービス層の分離</p>
+<ul class="simple">
+<li><dl class="field-list simple">
+<dt class="field-odd">white_check_mark<span class="colon">:</span></dt>
+<dd class="field-odd"><p>ビジネスロジックをサービス層へ移行</p>
+</dd>
+</dl>
+</li>
+<li><dl class="field-list simple">
+<dt class="field-odd">white_check_mark<span class="colon">:</span></dt>
+<dd class="field-odd"><p>UIファイルをレイアウトとイベント結合に特化</p>
+</dd>
+</dl>
+</li>
+</ul>
+</li>
+</ol>
+</section>
+<section id="id3">
+<h3>残りのタスク<a class="headerlink" href="#id3" title="Link to this heading"></a></h3>
+<ol class="arabic simple" start="4">
+<li><dl class="simple">
+<dt>大きなメソッドや例外ハンドリングの細分化</dt><dd><ul class="simple">
+<li><p>長大な処理や多数のtry-exceptを小さなメソッドに分け、保守性向上</p></li>
+<li><p>テストしやすいようにそれぞれの処理を単独メソッド化</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>リファクタリング &amp; テスト・ドキュメント更新</dt><dd><ul class="simple">
+<li><p>構成変更後、<code class="docutils literal notranslate"><span class="pre">pytest</span></code> によるテストを継続的に実施</p></li>
+<li><p>ドキュメント（拡張子 .rst のファイル）や docstring を追加・更新してメンテナンス性向上</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>継続的な改善と運用</dt><dd><ul class="simple">
+<li><p>大規模データや他プロジェクト連携などの要件が増加した場合、さらなるインデックス最適化やAPIレイヤー追加も検討</p></li>
+<li><p>プロジェクト運用の中で逐次リファクタリング＆ドキュメント拡充を行うことを推奨</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+</ol>
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="database_design.html" class="btn btn-neutral float-left" title="database design データベース設計" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="package_specification.html" class="btn btn-neutral float-right" title="パッケージ仕様: genai_tag_db_tools" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright .</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

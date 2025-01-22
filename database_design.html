@@ -1,0 +1,266 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="ja" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>database design データベース設計 &mdash; genai-tag-db-tools ドキュメント</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=98e9f989"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+      <script src="_static/translations.js?v=4755f45a"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="索引" href="genindex.html" />
+    <link rel="search" title="検索" href="search.html" />
+    <link rel="next" title="Developer Guide (開発者向けセットアップガイド)" href="dev_guide.html" />
+    <link rel="prev" title="Usage Guide (機能ガイド)" href="usage_guide.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            genai-tag-db-tools
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="getting_started.html">Getting Started (インストール方法)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="usage_guide.html">Usage Guide (機能ガイド)</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">database design データベース設計</a></li>
+<li class="toctree-l1"><a class="reference internal" href="dev_guide.html">Developer Guide (開発者向けセットアップガイド)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="package_specification.html">パッケージ仕様: genai_tag_db_tools</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">genai-tag-db-tools</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">database design データベース設計</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/database_design.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="database-design">
+<span id="id1"></span><h1>database design データベース設計<a class="headerlink" href="#database-design" title="Link to this heading"></a></h1>
+<p>このページでは、<cite>genai-tag-db-tools</cite> のデータベース構造と設計。</p>
+<ul class="simple">
+<li><p>データベースの全体構造</p></li>
+<li><p>テーブル定義とその説明</p></li>
+<li><p>Alembic を用いたスキーマ変更の管理方法</p></li>
+</ul>
+<p>## データベースの概要</p>
+<p>本プロジェクトでは、SQLite をデータベースエンジンとして使用し、タグ情報の統合管理を行う。データベースには以下の情報が格納。</p>
+<ul class="simple">
+<li><p>基本的なタグ情報（<cite>TAGS</cite> テーブル）</p></li>
+<li><p>タグの翻訳情報（<cite>TAG_TRANSLATIONS</cite> テーブル）</p></li>
+<li><p>使用頻度や統計情報（<cite>TAG_USAGE_COUNTS</cite> テーブル）</p></li>
+<li><p>タグ形式や関連情報（<cite>TAG_FORMATS</cite> テーブルなど）</p></li>
+</ul>
+<p>## テーブル構成と定義</p>
+<p>以下に各テーブルの構成とその役割。</p>
+<p>### TAGS テーブル</p>
+<p>基本的なタグ情報を保持するテーブル。</p>
+<ul class="simple">
+<li><p><strong>tag_id</strong> (INTEGER, PK): 全てのタグに対する一意のID（連番int）。</p></li>
+<li><p><strong>source_tag</strong> (TEXT): アンダースコア区切り､()のエスケープ処理がされていない画像サイトで使用される形態のタグ形式。
+- 例: <cite>artoria_pendragon_(fate)</cite></p></li>
+<li><p><strong>tag</strong> (TEXT, UNIQUE, NOT NULL): プロンプトで使用する形式に正則化したタグ。
+- 例: <cite>artoria pendragon (fate)</cite></p></li>
+<li><p><strong>created_at</strong> (DATETIME): 登録日時のタイムスタンプ。
+- 取り込んだデータに含まれる場合は最古の日時、それ以外はデータベース登録日時。</p></li>
+<li><p><strong>updated_at</strong> (DATETIME): 更新日時のタイムスタンプ。
+- 取り込んだデータに含まれる場合は最新の日時、それ以外はデータベース登録日時。</p></li>
+</ul>
+<p>### TAG_TRANSLATIONS テーブル</p>
+<p>一つのタグに対する多言語翻訳情報を保持するテーブル。 基本的に英語なので､英語は登録されない｡</p>
+<ul class="simple">
+<li><p><strong>translation_id</strong> (INTEGER, PK): 翻訳情報の一意のID（連番int）。</p></li>
+<li><p><strong>tag_id</strong> (INTEGER, FK): 対応するタグのID。</p></li>
+<li><p><strong>language</strong> (TEXT): 翻訳言語（BCP 47形式）。
+- 例: <cite>ja-JP</cite>, <cite>zh-Hans</cite>, <cite>zh-Hant</cite></p></li>
+<li><p><strong>translation</strong> (TEXT): 言語に対応する翻訳文字列。
+- 例:monochrome <cite>モノクロ</cite>, <cite>单色画</cite>, <cite>單色畫</cite>, <cite>单色图片</cite></p></li>
+<li><p><strong>created_at</strong> (DATETIME): 登録日時。</p></li>
+<li><p><strong>updated_at</strong> (DATETIME): 更新日時。</p></li>
+</ul>
+<p>### TAG_FORMATS テーブル</p>
+<p>使われているサイトを定義｡ フォーマットという言い方でいいのかは疑問が残る｡</p>
+<ul class="simple">
+<li><p><strong>format_id</strong> (INTEGER, PK): タグ形式の一意のID（連番int）。</p></li>
+<li><p><strong>format_name</strong> (TEXT): タグ形式の名称。
+- 例: <cite>Danbooru</cite>, <cite>e621</cite></p></li>
+<li><p><strong>description</strong> (TEXT): タグ形式の説明。
+- 必要時に利用可能な補足情報。</p></li>
+</ul>
+<p>### TAG_TYPE_NAME テーブル</p>
+<p>タグタイプ情報を管理するテーブル。</p>
+<ul class="simple">
+<li><p><strong>type_name_id</strong> (INTEGER, PK): タグタイプの一意のID（連番int）。</p></li>
+<li><p><strong>type_name</strong> (TEXT): タグタイプ名。
+- 例: <cite>Character</cite>, <cite>Artist</cite></p></li>
+<li><p><strong>description</strong> (TEXT): タグタイプの説明。</p></li>
+</ul>
+<p>### TAG_TYPE_FORMAT_MAPPING テーブル</p>
+<p>タグタイプとフォーマットの対応関係を管理する中間テーブル。</p>
+<ul class="simple">
+<li><p><strong>format_id</strong> (INTEGER, PK, FK): 対応するフォーマットのID。</p></li>
+<li><p><strong>type_id</strong> (INTEGER, PK): タグタイプの一意のID。</p></li>
+<li><p><strong>type_name_id</strong> (INTEGER, FK): タグタイプ名のID。</p></li>
+<li><p><strong>description</strong> (TEXT): フォーマットとタイプ間の関係性説明。</p></li>
+</ul>
+<p>### TAG_USAGE_COUNTS テーブル</p>
+<p>タグの使用回数情報を管理するテーブル。</p>
+<ul class="simple">
+<li><p><strong>tag_id</strong> (INTEGER, PK, FK): 対応するタグのID。</p></li>
+<li><p><strong>format_id</strong> (INTEGER, PK, FK): 対応するフォーマットのID。</p></li>
+<li><p><strong>count</strong> (INTEGER): タグの使用回数。</p></li>
+<li><p><strong>created_at</strong> (DATETIME): 登録日時。</p></li>
+<li><p><strong>updated_at</strong> (DATETIME): 更新日時。</p></li>
+</ul>
+<p>### TAG_STATUS テーブル</p>
+<p>タグのエイリアスや推奨タグ情報を管理するテーブル。</p>
+<ul class="simple">
+<li><p><strong>tag_id</strong> (INTEGER, PK, FK): 対応するタグのID。</p></li>
+<li><dl class="simple">
+<dt><strong>alias</strong> (BOOLEAN): 同義語・類義語であるか。</dt><dd><ul>
+<li><p>True の場合、非推奨タグ。</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><strong>preferred_tag_id</strong> (INTEGER, FK): 推奨タグのID。</dt><dd><ul>
+<li><p>エイリアスでない場合は自身のIDを持つ。</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><p><strong>created_at</strong> (DATETIME): 登録日時。</p></li>
+<li><p><strong>updated_at</strong> (DATETIME): 更新日時。</p></li>
+</ul>
+<p>## フォーマットとタイプの関係</p>
+<p><cite>TAG_FORMATS</cite> と <cite>TAG_TYPE_NAME</cite> は多対多の関係にあり、その関係を <cite>TAG_TYPE_FORMAT_MAPPING</cite> によって管理。</p>
+<ul class="simple">
+<li><dl class="simple">
+<dt><strong>多対多関係の理由</strong>:</dt><dd><ul>
+<li><p>フォーマットやタイプの追加時に変更箇所を最小化。</p></li>
+<li><p>例: <cite>Danbooru</cite> (format_id = 1) における <cite>Artist</cite> (type_id = 1) と <cite>type_name_id = 2</cite> の対応。</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><strong>例:</strong></dt><dd><p><cite>TAG_TYPE_FORMAT_MAPPING</cite> に以下のようなエントリが追加される場合：
+- <cite>format_id=1</cite> (Danbooru) と <cite>type_id=1</cite> を照合して、<cite>type_name_id=2</cite> (Artist) の情報を得る</p>
+</dd>
+</dl>
+</li>
+</ul>
+<p>## Alembic を用いたスキーマ管理</p>
+<p>スキーマ変更には Alembic を使用します。以下は基本的な操作例。</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Alembic 初期化</span>
+alembic<span class="w"> </span>init<span class="w"> </span>alembic
+
+<span class="c1"># 新しいマイグレーションスクリプトの作成</span>
+alembic<span class="w"> </span>revision<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;Add new table&quot;</span>
+
+<span class="c1"># スキーマ変更の適用</span>
+alembic<span class="w"> </span>upgrade<span class="w"> </span>head
+</pre></div>
+</div>
+<p>### Alembic の具体例</p>
+<p>以下は、<cite>TAGS</cite> テーブルに新しいカラム <cite>is_active</cite> を追加する例。</p>
+<ol class="arabic simple">
+<li><p>マイグレーションスクリプトを作成:</p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>alembic<span class="w"> </span>revision<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;Add is_active column to TAGS table&quot;</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p>自動生成されたスクリプトに以下のコードを追加:</p></li>
+</ol>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">upgrade</span><span class="p">():</span>
+    <span class="n">op</span><span class="o">.</span><span class="n">add_column</span><span class="p">(</span><span class="s1">&#39;TAGS&#39;</span><span class="p">,</span> <span class="n">sa</span><span class="o">.</span><span class="n">Column</span><span class="p">(</span><span class="s1">&#39;is_active&#39;</span><span class="p">,</span> <span class="n">sa</span><span class="o">.</span><span class="n">Boolean</span><span class="p">(),</span> <span class="n">nullable</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">downgrade</span><span class="p">():</span>
+    <span class="n">op</span><span class="o">.</span><span class="n">drop_column</span><span class="p">(</span><span class="s1">&#39;TAGS&#39;</span><span class="p">,</span> <span class="s1">&#39;is_active&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="3">
+<li><p>スキーマ変更を適用:</p></li>
+</ol>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>alembic<span class="w"> </span>upgrade<span class="w"> </span>head
+</pre></div>
+</div>
+<p>Alembic を使うことで、スキーマ変更を安全かつ計画的に管理できる｡</p>
+<p>詳細な例やスクリプトの使用方法は <cite>dev_guide.rst</cite> を参照。</p>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="usage_guide.html" class="btn btn-neutral float-left" title="Usage Guide (機能ガイド)" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="dev_guide.html" class="btn btn-neutral float-right" title="Developer Guide (開発者向けセットアップガイド)" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright .</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
