@@ -1,7 +1,7 @@
 .. _package_specification:
 
 パッケージ仕様: genai_tag_db_tools
-===============================
+================================
 
 .. contents::
    :local:
