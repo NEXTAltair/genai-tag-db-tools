@@ -31,7 +31,7 @@ master_doc = "index"
 language = "ja"
 
 # 静的ファイルパス
-html_static_path = ["_static"]
+html_static_path = []
 
 # テーマ設定
 html_theme = "sphinx_rtd_theme"

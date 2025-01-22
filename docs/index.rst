@@ -26,7 +26,6 @@ genai-tag-db-tools ドキュメント
     database_design
     dev_guide
     package_specification
-    source/modules
 
 索引
 ----
