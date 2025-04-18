@@ -1,15 +1,12 @@
 __pycache__/
 .pyc
 venv/
-gtdt/
-genai-tag-db-tools.pyproject
-genai-tag-db-tools.pyproject.user
+.venv/
 initial-analysis.json
 docs/_build
 docs/source
 
 # database mygration files
-alembic.ini
 extracted_models.py
 tag_database_alembic/
 extract_schema.py
@@ -38,3 +35,6 @@ tags_csv/
 .summaryignore
 *_project_summary.txt
 */*/# Code Citations.md
+uv.lock
+genai_tag_db_tools/__init__.py
+
