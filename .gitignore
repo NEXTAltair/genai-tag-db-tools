@@ -1,40 +1,158 @@
+# Python
 __pycache__/
-.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
 venv/
 .venv/
-initial-analysis.json
-docs/_build
-docs/source
+env/
+ENV/
+env.bak/
+venv.bak/
 
-# database mygration files
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Documentation
+docs/_build/
+docs/source/
+*.html
+*.rst
+initial-analysis.json
+
+# Database migration files
 extracted_models.py
 tag_database_alembic/
 extract_schema.py
 xml/
+src/genai_tag_db_tools/data/migrations/
 
-#database backup files
+# Database files (exclude production databases, keep essential ones)
+*.db
 *.db.*
 tags_v*_*.db
+!src/genai_tag_db_tools/data/tags_v4.db  # Keep main distribution database
+!src/genai_tag_db_tools/data/schema_template.db  # Keep schema template
+!tests/resources/*.db  # Keep test databases
 
 
-#workspace file
+# IDE and workspace files
+.vscode/
+!.vscode/extensions.json
+.idea/
+.project
+.pydevproject
+.settings/
+*.sublime-workspace
+genai-tag-db-tools.code-workspace
+.pylintrc
+
+# Testing
 .pytest_cache/
 .coverage
-
-.vscode/
-.git/
-genai-tag-db-tools.code-workspace
-.vscode/settings.json
-.pylintrc
+.coverage.*
 htmlcov/
+.tox/
+.nox/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
 
-#データソース
+# Linting and formatting
+.ruff_cache/
+.mypy_cache/
+
+# Data sources (large files)
 tags_csv/
+hf_repo/
+data_sources/
+raw_data/
 
-# GOlemi-llm-apprentice/generate-project-summary 用除外設定
+# Hugging Face cache
+.cache/
+transformers_cache/
+
+# Model files
+models/
+!models/README.md
+*.onnx
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# Development and summary tools
 .summaryignore
 *_project_summary.txt
 */*/# Code Citations.md
+
+# Package management
 uv.lock
-genai_tag_db_tools/__init__.py
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+
+# Configuration files with sensitive data
+config/*.toml
+!config/*.toml.example
+!config/*.toml.default
+
+# API keys and secrets
+*.key
+*.token
+api_keys.json
+secrets.json
+
+# Local development
+.local/
+local_dev/
+dev_config/
+
+# Cursor/AI IDE related
+.cursor/mcp.json
+.cursor/composer/
+.cursor/chat/
+
+# Memory and context (for local history)
+.dev_context/
+
+# System files
+*.pid
+*.lock
 

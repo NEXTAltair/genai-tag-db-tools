@@ -1,0 +1,403 @@
+# genai-tag-db-tools Debugging Guidelines
+
+This file provides structured debugging guidelines for troubleshooting genai-tag-db-tools issues.
+
+## Debugging Workflow
+
+### 1. Problem Identification
+Start with clear problem identification:
+
+- **Database Issues**: Connection problems, query failures, constraint violations
+- **GUI Issues**: Widget behavior, signal/slot problems, layout issues
+- **Service Logic**: Business logic errors, validation failures
+- **Performance Issues**: Slow queries, memory usage, UI responsiveness
+- **Integration Issues**: External project compatibility, module import problems
+
+### 2. Information Gathering
+Collect comprehensive debugging information:
+
+- **Database State**: Check table contents, foreign key relationships, indexes
+- **Log Analysis**: Review application logs and database query logs
+- **Environment Check**: Verify database file permissions and paths
+- **Configuration Review**: Check database connections and service configurations
+- **Performance Metrics**: Monitor query execution times and memory usage
+
+### 3. Systematic Investigation
+Use systematic approach to isolate the problem:
+
+- **Database Layer**: Test database operations independently
+- **Service Layer**: Isolate business logic from GUI and database
+- **GUI Layer**: Test widget behavior and signal/slot connections
+- **Integration Points**: Verify external project compatibility
+- **Data Flow**: Trace data flow through the application layers
+
+### 4. Root Cause Analysis
+Identify the underlying cause:
+
+- **Database Design**: Schema issues, missing constraints, poor indexes
+- **Query Performance**: Inefficient queries, missing indexes, large datasets
+- **Business Logic**: Validation errors, incorrect algorithms
+- **GUI Problems**: Event handling, data binding, threading issues
+- **Integration Issues**: API compatibility, version conflicts
+
+### 5. Solution Implementation
+Implement and validate fixes:
+
+- **Database Fixes**: Schema updates, query optimization, index creation
+- **Service Fixes**: Business logic corrections, error handling improvements
+- **GUI Fixes**: Widget behavior corrections, signal/slot fixes
+- **Performance Fixes**: Query optimization, caching, memory management
+- **Integration Fixes**: API compatibility, version alignment
+
+## genai-tag-db-tools-Specific Debugging
+
+### Common Issue Categories
+
+#### Database Issues
+**Symptoms**: Connection errors, query failures, data corruption
+**Investigation**:
+```python
+# Test database connection
+from genai_tag_db_tools.data.database_schema import get_session
+
+try:
+    session = get_session("path/to/tags.db")
+    # Test basic query
+    from genai_tag_db_tools.data.database_schema import TagsTable
+    tag_count = session.query(TagsTable).count()
+    print(f"Database accessible, {tag_count} tags found")
+except Exception as e:
+    print(f"Database error: {e}")
+```
+
+#### GUI Issues
+**Symptoms**: Widget not responding, signals not firing, layout problems
+**Investigation**:
+```python
+# Test widget initialization
+from PySide6.QtWidgets import QApplication
+from genai_tag_db_tools.gui.widgets.tag_search import TagSearchWidget
+
+app = QApplication([])
+try:
+    widget = TagSearchWidget()
+    widget.show()
+    print("Widget created successfully")
+except Exception as e:
+    print(f"Widget creation failed: {e}")
+```
+
+#### Service Logic Issues
+**Symptoms**: Validation failures, incorrect results, business logic errors
+**Investigation**:
+```python
+# Test service operations
+from genai_tag_db_tools.services.tag_search import TagSearchService
+
+try:
+    service = TagSearchService("path/to/tags.db")
+    results = service.search_tags("test")
+    print(f"Search service working, found {len(results)} results")
+except Exception as e:
+    print(f"Service error: {e}")
+```
+
+#### Performance Issues
+**Symptoms**: Slow queries, high memory usage, UI freezing
+**Investigation**:
+```python
+import time
+import psutil
+from genai_tag_db_tools.data.tag_repository import TagRepository
+
+# Monitor performance
+start_time = time.time()
+initial_memory = psutil.Process().memory_info().rss / 1024 / 1024
+
+# Perform operation
+repo = TagRepository(session)
+results = repo.search_tags("common_tag")
+
+end_time = time.time()
+final_memory = psutil.Process().memory_info().rss / 1024 / 1024
+
+print(f"Operation took {end_time - start_time:.2f} seconds")
+print(f"Memory usage: {final_memory - initial_memory:.1f} MB")
+```
+
+### Debugging Tools and Techniques
+
+#### Database Debugging
+```python
+# Enable SQLAlchemy query logging
+import logging
+logging.basicConfig()
+logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+
+# Check database schema
+from sqlalchemy import inspect
+from genai_tag_db_tools.data.database_schema import engine
+
+inspector = inspect(engine)
+tables = inspector.get_table_names()
+print(f"Available tables: {tables}")
+
+for table in tables:
+    columns = inspector.get_columns(table)
+    print(f"\n{table} columns:")
+    for column in columns:
+        print(f"  {column['name']}: {column['type']}")
+```
+
+#### Query Performance Analysis
+```python
+# Analyze query performance
+from sqlalchemy import text
+from genai_tag_db_tools.data.database_schema import get_session
+
+session = get_session("path/to/tags.db")
+
+# Enable query plan analysis
+result = session.execute(text("EXPLAIN QUERY PLAN SELECT * FROM tags WHERE tag LIKE '%keyword%'"))
+for row in result:
+    print(row)
+
+# Check index usage
+result = session.execute(text("PRAGMA index_list(tags)"))
+indexes = result.fetchall()
+print(f"Indexes on tags table: {indexes}")
+```
+
+#### Memory Profiling
+```python
+import tracemalloc
+from genai_tag_db_tools.services.tag_statistics import TagStatisticsService
+
+# Monitor memory allocation
+tracemalloc.start()
+
+# Perform memory-intensive operation
+service = TagStatisticsService("path/to/tags.db")
+stats = service.get_usage_statistics()
+
+current, peak = tracemalloc.get_traced_memory()
+print(f"Current memory usage: {current / 1024 / 1024:.1f} MB")
+print(f"Peak memory usage: {peak / 1024 / 1024:.1f} MB")
+tracemalloc.stop()
+```
+
+#### GUI Event Debugging
+```python
+from PySide6.QtCore import QObject, QEvent
+from PySide6.QtWidgets import QApplication
+
+class EventFilter(QObject):
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.MouseButtonPress:
+            print(f"Mouse press on {obj}")
+        elif event.type() == QEvent.KeyPress:
+            print(f"Key press: {event.key()}")
+        return super().eventFilter(obj, event)
+
+# Install event filter for debugging
+app = QApplication.instance()
+if app:
+    event_filter = EventFilter()
+    app.installEventFilter(event_filter)
+```
+
+### Common Error Patterns
+
+#### Database Connection Issues
+```python
+# Debug database path and permissions
+import os
+from pathlib import Path
+
+db_path = Path("path/to/tags.db")
+
+if not db_path.exists():
+    print(f"Database file not found: {db_path}")
+elif not os.access(db_path, os.R_OK):
+    print(f"Database file not readable: {db_path}")
+elif not os.access(db_path, os.W_OK):
+    print(f"Database file not writable: {db_path}")
+else:
+    print(f"Database file accessible: {db_path}")
+    print(f"File size: {db_path.stat().st_size} bytes")
+```
+
+#### Foreign Key Constraint Violations
+```python
+# Debug foreign key issues
+from sqlalchemy import text
+from genai_tag_db_tools.data.database_schema import get_session
+
+session = get_session("path/to/tags.db")
+
+# Check foreign key constraints
+result = session.execute(text("PRAGMA foreign_key_check"))
+violations = result.fetchall()
+
+if violations:
+    print("Foreign key violations found:")
+    for violation in violations:
+        print(f"  Table: {violation[0]}, Row: {violation[1]}, Parent: {violation[2]}")
+else:
+    print("No foreign key violations found")
+```
+
+#### Tag Import Issues
+```python
+# Debug tag import problems
+import polars as pl
+from genai_tag_db_tools.services.import_data import ImportDataService
+
+try:
+    # Check CSV file format
+    df = pl.read_csv("import_file.csv")
+    print(f"CSV loaded: {df.shape[0]} rows, {df.shape[1]} columns")
+    print(f"Columns: {df.columns}")
+    
+    # Check for required columns
+    required_columns = ['tag', 'source_tag']
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        print(f"Missing required columns: {missing_columns}")
+    
+    # Check for empty values
+    empty_tags = df.filter(pl.col('tag').is_null() | (pl.col('tag') == ""))
+    if len(empty_tags) > 0:
+        print(f"Found {len(empty_tags)} rows with empty tags")
+        
+except Exception as e:
+    print(f"CSV import error: {e}")
+```
+
+## Debugging Checklist
+
+### Database Investigation
+- [ ] Can connect to database file?
+- [ ] Are all required tables present?
+- [ ] Are foreign key relationships intact?
+- [ ] Are indexes present for performance?
+- [ ] Is data integrity maintained?
+
+### Service Layer Investigation
+- [ ] Are service dependencies properly injected?
+- [ ] Do business logic validations work correctly?
+- [ ] Are database transactions properly managed?
+- [ ] Is error handling comprehensive?
+- [ ] Are performance requirements met?
+
+### GUI Investigation
+- [ ] Do widgets initialize correctly?
+- [ ] Are signal/slot connections working?
+- [ ] Do user interactions trigger expected behavior?
+- [ ] Are error messages displayed properly?
+- [ ] Is the UI responsive during operations?
+
+### Integration Investigation
+- [ ] Can external projects import the module?
+- [ ] Are public APIs backward compatible?
+- [ ] Do CLI commands work correctly?
+- [ ] Is LoRAIro integration functioning?
+- [ ] Are version dependencies satisfied?
+
+### Performance Investigation
+- [ ] Are database queries optimized?
+- [ ] Is memory usage reasonable?
+- [ ] Are bulk operations efficient?
+- [ ] Does the GUI remain responsive?
+- [ ] Are large datasets handled properly?
+
+## Debugging Tools
+
+### Built-in Python Debugging
+```python
+import pdb; pdb.set_trace()  # Set breakpoint
+import ipdb; ipdb.set_trace()  # Enhanced debugger (if available)
+```
+
+### Database Debugging Tools
+```python
+# SQLite command line for manual inspection
+# sqlite3 tags.db
+# .schema
+# .tables
+# SELECT * FROM tags LIMIT 10;
+
+# Python database inspection
+from genai_tag_db_tools.data.database_schema import inspect_database
+inspect_database("path/to/tags.db")
+```
+
+### Performance Monitoring
+```python
+# Custom performance decorator
+import functools
+import time
+
+def monitor_performance(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        print(f"{func.__name__} took {end_time - start_time:.2f} seconds")
+        return result
+    return wrapper
+
+# Usage
+@monitor_performance
+def slow_database_operation():
+    # Database operation here
+    pass
+```
+
+### GUI Debugging
+```python
+# Qt debugging helpers
+from PySide6.QtCore import qDebug, QLoggingCategory
+
+# Enable Qt logging
+QLoggingCategory.setFilterRules("qt.core.debug=true")
+
+# Custom debug output
+def debug_widget_state(widget):
+    print(f"Widget: {widget.__class__.__name__}")
+    print(f"Visible: {widget.isVisible()}")
+    print(f"Enabled: {widget.isEnabled()}")
+    print(f"Size: {widget.size()}")
+    print(f"Position: {widget.pos()}")
+```
+
+## Prevention Strategies
+
+### Code Quality
+- Write comprehensive unit tests
+- Use proper error handling patterns
+- Implement input validation
+- Follow database best practices
+- Regular code reviews
+
+### Database Design
+- Design schema with proper constraints
+- Create appropriate indexes
+- Use foreign keys for referential integrity
+- Plan for data migration needs
+- Regular database maintenance
+
+### Performance Monitoring
+- Profile critical operations regularly
+- Monitor memory usage patterns
+- Test with large datasets
+- Optimize queries proactively
+- Set performance benchmarks
+
+### Integration Testing
+- Test with external projects regularly
+- Validate API compatibility
+- Test CLI functionality
+- Verify LoRAIro integration
+- Maintain integration examples

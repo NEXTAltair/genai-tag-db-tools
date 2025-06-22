@@ -1,0 +1,214 @@
+# genai-tag-db-tools Planning Guidelines
+
+This file provides structured planning guidelines for genai-tag-db-tools development tasks.
+
+## Planning Workflow
+
+### 1. Requirements Clarification
+Before starting any development task, thoroughly clarify requirements:
+
+- **Understand Tag Operations**: What specific tag management functionality is needed?
+- **Define Database Impact**: How will changes affect the database schema and relationships?
+- **Identify Performance Requirements**: What are the scalability and response time expectations?
+- **Consider Integration**: How will this affect external projects using the library?
+- **Assess Data Quality**: What validation and integrity checks are needed?
+
+### 2. Database Design Analysis
+Perform thorough analysis of database implications:
+
+- **Schema Impact**: Will table structure changes be required?
+- **Relationship Effects**: How will foreign key relationships be affected?
+- **Migration Planning**: What Alembic migrations will be needed?
+- **Performance Implications**: How will changes affect query performance?
+- **Data Integrity**: What constraints and validations are required?
+
+### 3. Solution Design
+Design comprehensive solutions before implementation:
+
+- **Multiple Approaches**: Consider different database design patterns
+- **ORM Strategy**: Plan SQLAlchemy model relationships and queries
+- **Service Layer Design**: How will business logic be organized?
+- **GUI Integration**: How will changes appear in the user interface?
+- **External API Impact**: How will library users be affected?
+
+### 4. Implementation Planning
+Create detailed implementation plans:
+
+- **Migration Strategy**: Plan database schema changes carefully
+- **Service Development**: Break down business logic into manageable components
+- **Testing Approach**: Plan unit, integration, and GUI tests
+- **Performance Testing**: How to validate performance with large datasets
+- **Documentation Updates**: What documentation needs to be updated?
+
+### 5. Stakeholder Validation
+Validate plans before implementation:
+
+- **Database Review**: Ensure schema changes are sound and future-proof
+- **Performance Validation**: Confirm performance requirements are realistic
+- **Integration Impact**: Verify external project compatibility
+- **User Experience**: Ensure GUI changes improve usability
+- **Maintenance Considerations**: Assess long-term maintenance implications
+
+## genai-tag-db-tools-Specific Planning Considerations
+
+### Database Planning
+Always consider impact on:
+- **Tag Schema**: Changes to TAGS, TAG_TRANSLATIONS, or related tables
+- **Relationships**: Foreign key constraints and referential integrity
+- **Performance**: Index requirements and query optimization
+- **Migrations**: Alembic migration scripts and data preservation
+- **Compatibility**: Backward compatibility with existing data
+
+### Service Layer Planning
+Plan for service layer changes:
+- **Business Logic**: Tag validation, search algorithms, import procedures
+- **Transaction Management**: Database transaction boundaries and rollback scenarios
+- **Error Handling**: Tag operation failures and data validation errors
+- **Performance**: Bulk operations and large dataset handling
+- **Caching**: Frequently accessed tag data caching strategies
+
+### GUI Planning
+Plan user interface changes:
+- **Widget Design**: Custom widget requirements and behavior
+- **User Workflow**: How users will interact with new functionality
+- **Data Display**: Efficient display of large tag datasets
+- **Search Integration**: Search result presentation and filtering
+- **Progress Feedback**: Long-running operation progress indication
+
+### Integration Planning
+Plan external integration impact:
+- **API Compatibility**: Maintain backward compatibility for library users
+- **LoRAIro Integration**: How changes affect the main application
+- **Module Interface**: Public API design for external projects
+- **Performance Impact**: Effect on applications using the library
+- **Documentation**: External API documentation updates
+
+### Data Source Planning
+Plan data source integration:
+- **Import Procedures**: New data source import workflows
+- **Format Compatibility**: Tag format conversion and validation
+- **Conflict Resolution**: Handling duplicate tags from different sources
+- **Quality Assurance**: Data quality validation and cleanup
+- **Update Mechanisms**: Incremental data updates and synchronization
+
+## Planning Templates
+
+### Database Change Template
+1. **Schema Changes**: What tables and columns are affected?
+2. **Migration Script**: What Alembic migration is required?
+3. **Data Preservation**: How to maintain existing data integrity?
+4. **Performance Impact**: What indexes or optimizations are needed?
+5. **Rollback Strategy**: How to safely revert changes if needed?
+6. **Testing Plan**: How to validate migration success?
+
+### Feature Addition Template
+1. **Tag Operation**: What new tag management capability is being added?
+2. **Database Requirements**: What schema changes are needed?
+3. **Service Layer**: What business logic components are required?
+4. **GUI Components**: What user interface elements are needed?
+5. **Integration Impact**: How will external projects be affected?
+6. **Testing Strategy**: How will the feature be validated?
+7. **Documentation**: What documentation updates are required?
+
+### Performance Optimization Template
+1. **Current Performance**: What are the existing performance characteristics?
+2. **Bottleneck Analysis**: Where are the performance issues?
+3. **Optimization Strategy**: What specific optimizations will be implemented?
+4. **Measurement Plan**: How will improvements be measured?
+5. **Risk Assessment**: What are the potential negative impacts?
+6. **Testing Approach**: How to validate performance improvements?
+
+### Data Import Template
+1. **Source Analysis**: What data source is being integrated?
+2. **Format Mapping**: How does the source format map to our schema?
+3. **Conflict Resolution**: How to handle duplicate or conflicting data?
+4. **Validation Rules**: What data quality checks are needed?
+5. **Import Workflow**: What is the step-by-step import process?
+6. **Error Handling**: How to handle import failures and recovery?
+
+## Database Planning Considerations
+
+### Schema Design Principles
+- **Normalization**: Maintain appropriate normalization levels
+- **Referential Integrity**: Ensure proper foreign key relationships
+- **Performance**: Design for efficient querying and indexing
+- **Flexibility**: Allow for future schema evolution
+- **Data Quality**: Implement appropriate constraints and validations
+
+### Migration Planning
+- **Backward Compatibility**: Ensure existing data remains accessible
+- **Data Preservation**: Never lose existing tag data during migrations
+- **Testing**: Thoroughly test migrations with sample data
+- **Rollback**: Always provide rollback procedures
+- **Documentation**: Document migration purpose and impact
+
+### Query Optimization
+- **Index Strategy**: Plan indexes for common query patterns
+- **Join Optimization**: Minimize expensive join operations
+- **Result Limiting**: Implement efficient pagination
+- **Caching**: Plan for frequently accessed data caching
+- **Monitoring**: Plan performance monitoring and alerting
+
+## GUI Planning Considerations
+
+### User Experience Design
+- **Workflow Analysis**: How users currently accomplish tasks
+- **Efficiency Improvements**: How to make common tasks faster
+- **Error Prevention**: How to prevent user errors
+- **Feedback Systems**: How to provide immediate user feedback
+- **Accessibility**: Ensure interface is accessible to all users
+
+### Performance Planning
+- **Data Loading**: Efficient loading of large tag datasets
+- **Search Responsiveness**: Real-time search result updates
+- **Memory Management**: Handling large result sets without memory issues
+- **Threading**: Background operations to maintain UI responsiveness
+- **Progress Indication**: Clear feedback for long-running operations
+
+### Widget Design
+- **Reusability**: Design widgets for potential reuse
+- **Customization**: Allow for user customization where appropriate
+- **Integration**: Ensure widgets integrate well with existing interface
+- **Testing**: Plan for GUI testing and validation
+- **Documentation**: Document widget usage and customization
+
+## Integration Planning Considerations
+
+### External Project Impact
+- **API Stability**: Maintain stable interfaces for external projects
+- **Version Compatibility**: Plan for version upgrade paths
+- **Performance Impact**: Ensure changes don't degrade external project performance
+- **Documentation**: Update external API documentation
+- **Migration Guide**: Provide upgrade guidance for breaking changes
+
+### LoRAIro Integration
+- **Tag Lookup**: How changes affect image annotation workflows
+- **Database Sharing**: Impact on shared database access patterns
+- **Performance**: Effect on LoRAIro's tag search performance
+- **Feature Synergy**: How new features enhance LoRAIro capabilities
+- **Testing**: Integration testing with LoRAIro workflows
+
+### Library Design
+- **Public API**: What functionality should be exposed to external projects
+- **Error Handling**: How errors should be communicated to library users
+- **Configuration**: What configuration options should be available
+- **Documentation**: API documentation requirements
+- **Examples**: Usage examples for common integration patterns
+
+## Common Planning Pitfalls
+
+### Avoid These Mistakes
+- **Insufficient Database Analysis**: Not considering all schema implications
+- **Poor Migration Planning**: Inadequate data preservation strategies
+- **Performance Oversight**: Not planning for large dataset scenarios
+- **Integration Neglect**: Ignoring impact on external projects
+- **Testing Gaps**: Inadequate validation of database operations
+- **Documentation Debt**: Not updating documentation during development
+
+### Best Practices
+- **Start with Data**: Always begin planning with database considerations
+- **Plan for Scale**: Consider performance with large tag datasets
+- **Think Integration**: Always consider external project impact
+- **Test Early**: Plan testing strategy before implementation
+- **Document Everything**: Keep documentation current with changes
+- **Plan for Failure**: Always have rollback and recovery procedures

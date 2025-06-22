@@ -1,0 +1,205 @@
+# genai-tag-db-tools Development Rules
+
+This file provides guidance for developing the genai-tag-db-tools tag database management application using Claude Code.
+
+## Core Principles
+
+1. **Database Integrity**: Maintain data consistency and integrity across all tag operations
+2. **Performance**: Optimize for large-scale tag database operations with efficient queries
+3. **User Experience**: Provide intuitive GUI for tag management and search operations
+4. **Modularity**: Design for reuse by external projects like LoRAIro
+5. **Type Safety**: Comprehensive type hints and validation for all database operations
+
+## Development Workflow
+
+### 1. Requirements & Clarification
+- Understand tag database schema and relationships
+- Define success criteria for tag operations
+- Consider performance implications for large datasets
+- Review existing tag data sources and formats
+
+### 2. Planning & Design
+- Review database schema design and migrations
+- Follow established patterns in `src/genai_tag_db_tools/`
+- Consider impact on tag relationships and foreign keys
+- Plan for proper error handling and transaction management
+
+### 3. Implementation
+- Follow incremental development with database transactions
+- Use SQLAlchemy ORM patterns consistently
+- Implement proper data validation and sanitization
+- Follow naming conventions and code style
+
+### 4. Testing & Validation
+- Test database operations with sample data
+- Verify tag relationships and foreign key constraints
+- Run comprehensive test suite: `pytest`
+- Ensure proper test coverage: `pytest --cov=src --cov-report=xml`
+
+### 5. Documentation Update
+- Update database schema documentation
+- Document any migration procedures
+- Update API documentation for external usage
+
+## Code Style Guidelines
+
+- Line length: 108 characters (configured in pyproject.toml)
+- Use modern Python type hints (list/dict not typing.List/Dict)
+- Use SQLAlchemy ORM patterns consistently
+- Type hints required for all database operations
+- Use Polars for data processing and analysis
+- Follow PySide6 patterns for GUI components
+
+## Architecture Patterns
+
+### Database Layer Pattern
+```python
+from sqlalchemy.orm import Session
+from genai_tag_db_tools.data.database_schema import TagsTable
+
+class TagRepository:
+    def __init__(self, session: Session):
+        self.session = session
+    
+    def create_tag(self, tag_data: dict) -> TagsTable:
+        tag = TagsTable(**tag_data)
+        self.session.add(tag)
+        self.session.commit()
+        return tag
+```
+
+### Service Layer Pattern
+```python
+from genai_tag_db_tools.data.tag_repository import TagRepository
+
+class TagManagementService:
+    def __init__(self, tag_repository: TagRepository):
+        self.tag_repository = tag_repository
+    
+    def register_new_tag(self, tag_name: str, translations: dict) -> bool:
+        # Business logic here
+        pass
+```
+
+### GUI Widget Pattern
+```python
+from PySide6.QtWidgets import QWidget
+from genai_tag_db_tools.gui.designer.TagSearchWidget_ui import Ui_TagSearchWidget
+
+class TagSearchWidget(QWidget):
+    def __init__(self, tag_service: TagManagementService, parent=None):
+        super().__init__(parent)
+        self.ui = Ui_TagSearchWidget()
+        self.ui.setupUi(self)
+        self.tag_service = tag_service
+```
+
+## Important File Locations
+
+- **Database Schema**: `src/genai_tag_db_tools/data/database_schema.py`
+- **Tag Repository**: `src/genai_tag_db_tools/data/tag_repository.py`
+- **Main Entry Point**: `src/genai_tag_db_tools/main.py`
+- **GUI Components**: `src/genai_tag_db_tools/gui/`
+- **Services**: `src/genai_tag_db_tools/services/`
+- **Database Files**: `src/genai_tag_db_tools/data/tags_v*.db`
+
+## Database Management
+
+### Migration Guidelines
+- Use Alembic for schema changes
+- Test migrations with sample data before production
+- Document breaking changes in migration messages
+- Provide rollback procedures for complex migrations
+
+### Tag Data Integrity
+- Maintain referential integrity across tag relationships
+- Validate tag formats and naming conventions
+- Handle duplicate tags and aliases properly
+- Ensure proper Unicode handling for international tags
+
+### Performance Considerations
+- Index frequently queried columns (tag names, IDs)
+- Use efficient JOIN operations for tag relationships
+- Implement pagination for large result sets
+- Consider caching for frequently accessed tag data
+
+## Testing Guidelines
+
+- **Unit Tests**: Test individual components with mocked dependencies
+- **Integration Tests**: Test database operations with test database
+- **GUI Tests**: Test user interface components with pytest-qt
+- **Performance Tests**: Validate performance with large tag datasets
+
+## External Integration
+
+### Module Usage Pattern
+```python
+# For external projects like LoRAIro
+from genai_tag_db_tools.services.tag_search import TagSearchService
+from genai_tag_db_tools.data.tag_repository import TagRepository
+
+# Initialize and use tag services
+tag_service = TagSearchService(database_path="path/to/tags.db")
+results = tag_service.search_tags("landscape")
+```
+
+### CLI Interface
+- Command: `tag-db` launches GUI application
+- Module execution: `python -m genai_tag_db_tools`
+- Support for programmatic usage by other applications
+
+## Error Handling
+
+### Database Errors
+- Handle connection failures gracefully
+- Provide meaningful error messages for constraint violations
+- Implement proper transaction rollback on errors
+- Log database errors with sufficient context
+
+### GUI Error Handling
+- Display user-friendly error messages
+- Prevent data loss during error conditions
+- Provide recovery options where possible
+- Maintain application stability during errors
+
+## Data Source Management
+
+### Tag Data Integration
+- Support multiple tag data sources (Danbooru, E621, etc.)
+- Handle different tag formats and naming conventions
+- Maintain data provenance and source attribution
+- Implement conflict resolution for duplicate tags
+
+### Translation Management
+- Support multiple language translations for tags
+- Maintain translation quality and consistency
+- Handle missing translations gracefully
+- Provide translation update mechanisms
+
+## Performance Optimization
+
+### Database Optimization
+- Use appropriate indexes for search operations
+- Optimize complex queries with EXPLAIN QUERY PLAN
+- Implement connection pooling for concurrent access
+- Monitor and optimize memory usage for large datasets
+
+### GUI Performance
+- Implement efficient search and filtering
+- Use virtual scrolling for large tag lists
+- Optimize rendering for large result sets
+- Provide responsive progress indicators
+
+## Security Considerations
+
+### Data Validation
+- Sanitize all user input for database operations
+- Validate tag format and content
+- Prevent SQL injection through parameterized queries
+- Handle file system access securely
+
+### Database Security
+- Use read-only connections where appropriate
+- Implement proper backup and recovery procedures
+- Protect database files from unauthorized access
+- Validate database integrity regularly

@@ -1,0 +1,302 @@
+# genai-tag-db-tools Memory Bank
+
+This file serves as the central memory bank for the genai-tag-db-tools project, maintaining context across development sessions.
+
+## Project Overview
+
+genai-tag-db-tools is a comprehensive tag database management application designed for AI-generated image workflows. It provides unified tag management across different platforms and formats, with a focus on database integrity, performance, and user experience.
+
+## Core Architecture
+
+### Application Layer
+- **Entry Point**: `src/genai_tag_db_tools/main.py` - GUI application launcher
+- **CLI Interface**: `tag-db` command for easy access
+- **Module Interface**: Importable for external projects like LoRAIro
+
+### Service Layer
+- **TagManagementService**: Core tag operations and business logic
+- **TagSearchService**: Advanced search and filtering capabilities
+- **TagStatisticsService**: Usage analytics and reporting
+- **ImportDataService**: Data import from various sources
+
+### Data Layer
+- **Database Schema**: `src/genai_tag_db_tools/data/database_schema.py` - SQLAlchemy models
+- **Tag Repository**: `src/genai_tag_db_tools/data/tag_repository.py` - Data access layer
+- **Migration Management**: Alembic-based schema evolution
+
+### GUI Architecture
+- **Framework**: PySide6 with Qt Designer integration
+- **Designer Files**: `src/genai_tag_db_tools/gui/designer/` - UI definitions
+- **Widgets**: `src/genai_tag_db_tools/gui/widgets/` - Custom components
+- **Windows**: `src/genai_tag_db_tools/gui/windows/` - Main application windows
+
+## Technology Stack
+
+### Core Technologies
+- **Python 3.12+**: Modern Python with advanced type features
+- **PySide6**: Qt-based GUI framework
+- **SQLAlchemy 2.0+**: Modern ORM with async support
+- **Alembic**: Database migration management
+- **Polars**: High-performance data processing
+
+### Database Technology
+- **SQLite**: Embedded database for portability
+- **Complex Schema**: Multi-table relationships for tag management
+- **Migration Support**: Version-controlled schema evolution
+- **Performance Optimization**: Indexed queries and efficient joins
+
+### Development Tools
+- **Ruff**: Fast linting and formatting
+- **mypy**: Static type checking
+- **pytest**: Testing framework with GUI support
+- **pytest-cov**: Code coverage analysis
+
+## Database Architecture
+
+### Core Tables
+
+**TAGS Table**
+- Primary tag information storage
+- Source tag tracking and normalization
+- Created/updated timestamp management
+- Unique tag identification
+
+**TAG_TRANSLATIONS Table**
+- Multi-language support for tags
+- Language-specific tag representations
+- Translation quality and source tracking
+- Hierarchical translation relationships
+
+**TAG_FORMATS Table**
+- Different tag format definitions (Danbooru, E621, etc.)
+- Format-specific constraints and rules
+- Cross-format compatibility mapping
+
+**TAG_USAGE_COUNTS Table**
+- Usage frequency tracking per format
+- Statistical analysis data
+- Trend monitoring and popularity metrics
+
+**TAG_STATUS Table**
+- Tag state management (active, deprecated, alias)
+- Preferred tag relationships
+- Administrative metadata
+
+### Relationships
+- **One-to-Many**: Tags to Translations
+- **Many-to-Many**: Tags to Formats (via Status)
+- **Self-Referential**: Tags to Preferred Tags (aliases)
+- **Complex Joins**: Multi-table queries for comprehensive search
+
+## Data Sources Integration
+
+### Supported Sources
+- **Danbooru**: Comprehensive anime/manga tag database
+- **E621**: Furry art community tags
+- **Rule34**: General artwork tags
+- **WebUI Tag Autocomplete**: Stable Diffusion compatible tags
+- **Custom Sources**: User-defined tag collections
+
+### Import Capabilities
+- **CSV Import**: Batch tag data import
+- **Database Migration**: Version-to-version data transfer
+- **Format Conversion**: Cross-platform tag format translation
+- **Duplicate Handling**: Intelligent merge and conflict resolution
+
+## Key Features
+
+### Tag Management
+- **Registration**: New tag creation with validation
+- **Updates**: Tag modification and maintenance
+- **Aliases**: Alternative tag name management
+- **Preferences**: Recommended tag relationships
+- **Bulk Operations**: Efficient mass tag operations
+
+### Search and Discovery
+- **Keyword Search**: Fast text-based tag finding
+- **Translation Lookup**: Multi-language tag resolution
+- **Category Filtering**: Type and format-based filtering
+- **Statistical Views**: Usage frequency and trend analysis
+- **Advanced Queries**: Complex search combinations
+
+### GUI Features
+- **Intuitive Interface**: User-friendly tag management
+- **Real-time Search**: Immediate search result updates
+- **Bulk Import**: Large dataset import capabilities
+- **Statistics Dashboard**: Visual usage analytics
+- **Export Functions**: Data export in various formats
+
+### External Integration
+- **Module Import**: Library usage in other projects
+- **CLI Access**: Command-line interface for automation
+- **API Compatibility**: Standard interfaces for integration
+- **Plugin Architecture**: Extensible functionality
+
+## Project Structure
+
+```
+genai-tag-db-tools/
+├── src/genai_tag_db_tools/      # Source code
+│   ├── data/                    # Database layer
+│   │   ├── database_schema.py   # SQLAlchemy models
+│   │   ├── tag_repository.py    # Data access
+│   │   └── *.db                 # Database files
+│   ├── gui/                     # GUI components
+│   │   ├── designer/           # Qt Designer files
+│   │   ├── widgets/            # Custom widgets
+│   │   └── windows/            # Main windows
+│   ├── services/               # Business logic
+│   ├── utils/                  # Utilities
+│   └── main.py                # Entry point
+├── docs/                       # Documentation
+├── tests/                      # Test suite
+├── tools/                      # Development tools
+└── pyproject.toml             # Project configuration
+```
+
+## Development Environment
+
+### Package Management
+- **uv**: Fast dependency resolution (when available)
+- **pip**: Standard Python package management
+- **Virtual Environment**: Isolated development environment
+- **Development Dependencies**: Comprehensive dev tool stack
+
+### Code Quality
+- **Line Length**: 108 characters for readability
+- **Type Hints**: Comprehensive type annotations
+- **Modern Python**: Latest language features and patterns
+- **Documentation**: Google-style docstrings
+
+### Testing Strategy
+- **Unit Tests**: Component isolation testing
+- **Integration Tests**: Database operation testing
+- **GUI Tests**: User interface validation
+- **Performance Tests**: Large dataset handling
+- **Coverage Target**: 75% minimum coverage
+
+## Configuration Management
+
+### Database Configuration
+- **Connection Management**: Efficient connection handling
+- **Migration Control**: Automated schema updates
+- **Backup Procedures**: Data protection strategies
+- **Performance Tuning**: Query optimization settings
+
+### Application Configuration
+- **GUI Settings**: User interface preferences
+- **Search Preferences**: Default search behaviors
+- **Import Settings**: Data source configurations
+- **Export Options**: Output format preferences
+
+### Development Configuration
+- **Test Databases**: Isolated testing environments
+- **Debug Settings**: Development debugging options
+- **Performance Monitoring**: Runtime performance tracking
+- **Logging Configuration**: Structured logging setup
+
+## Integration Patterns
+
+### LoRAIro Integration
+- **Tag Lookup**: Image annotation tag suggestions
+- **Database Sharing**: Common tag database usage
+- **Search Integration**: Advanced tag search capabilities
+- **Quality Assessment**: Tag quality and relevance scoring
+
+### External Project Usage
+```python
+from genai_tag_db_tools.services.tag_search import TagSearchService
+from genai_tag_db_tools.data.tag_repository import TagRepository
+
+# Initialize tag services
+tag_service = TagSearchService(database_path="tags.db")
+results = tag_service.search_tags(query="landscape", limit=100)
+```
+
+### CLI Integration
+```bash
+# Launch GUI
+tag-db
+
+# Module execution
+python -m genai_tag_db_tools
+
+# Library usage
+python -c "from genai_tag_db_tools import TagSearchService; print('Available')"
+```
+
+## Performance Considerations
+
+### Database Performance
+- **Indexing Strategy**: Optimized for common queries
+- **Query Optimization**: Efficient JOIN operations
+- **Connection Pooling**: Concurrent access management
+- **Memory Management**: Large dataset handling
+
+### GUI Performance
+- **Lazy Loading**: On-demand data loading
+- **Virtual Scrolling**: Large list handling
+- **Background Processing**: Non-blocking operations
+- **Progress Indicators**: User feedback during long operations
+
+### Data Processing
+- **Polars Integration**: High-performance data operations
+- **Batch Processing**: Efficient bulk operations
+- **Memory Optimization**: Large dataset processing
+- **Caching Strategies**: Frequently accessed data
+
+## Quality Assurance
+
+### Testing Framework
+- **Comprehensive Coverage**: All major components tested
+- **Database Testing**: Transactional test isolation
+- **GUI Testing**: User interaction validation
+- **Performance Testing**: Scalability verification
+
+### Code Quality
+- **Static Analysis**: mypy type checking
+- **Linting**: Ruff code quality enforcement
+- **Documentation**: Complete API documentation
+- **Version Control**: Git-based development workflow
+
+### Data Quality
+- **Validation Rules**: Input data verification
+- **Integrity Constraints**: Database consistency
+- **Error Handling**: Graceful failure management
+- **Recovery Procedures**: Data restoration capabilities
+
+## Future Enhancements
+
+### Planned Features
+- **Advanced Analytics**: Trend analysis and predictions
+- **Machine Learning**: Automated tag suggestions
+- **Cloud Integration**: Remote database synchronization
+- **API Development**: RESTful service interface
+
+### Technical Improvements
+- **Async Operations**: Non-blocking database operations
+- **Distributed Processing**: Multi-core data processing
+- **Enhanced GUI**: Modern interface improvements
+- **Mobile Support**: Cross-platform compatibility
+
+### Integration Expansion
+- **Additional Sources**: More tag database integrations
+- **Format Support**: Extended tag format compatibility
+- **Export Options**: More output format support
+- **Plugin System**: Third-party extension support
+
+## References
+
+### Documentation Files
+- Database schema documentation in `docs/`
+- API documentation for external usage
+- User guides and tutorials
+- Development guides and best practices
+
+### External Resources
+- SQLAlchemy documentation for ORM patterns
+- PySide6 documentation for GUI development
+- Polars documentation for data processing
+- Tag source documentation and APIs
+
+This memory bank provides comprehensive context for genai-tag-db-tools development and integration.

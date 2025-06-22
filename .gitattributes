@@ -1,1 +1,85 @@
+# Git attributes for genai-tag-db-tools
+
+# Text files - ensure consistent line endings
+*.py text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.xml text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.sh text eol=lf
+*.sql text eol=lf
+# Configuration files
+*.ini text eol=lf
+*.cfg text eol=lf
+*.conf text eol=lf
+# Documentation
+*.rst text eol=lf
+README* text eol=lf
+CHANGELOG* text eol=lf
+LICENSE* text eol=lf
+CONTRIBUTING* text eol=lf
+# Binary files - do not attempt text conversion
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+# Important: tags_v4.db is tracked for distribution
+# This database contains pre-built tag data that users can extend
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar.gz binary
+*.rar binary
+*.7z binary
+*.dmg binary
+*.gz binary
+*.iso binary
+*.jar binary
+*.tar binary
+# Model files (binary, large files)
+*.onnx binary
+*.pt binary
+*.pth binary
+*.bin binary
+*.safetensors binary
+*.h5 binary
+*.pkl binary
+*.pickle binary
+# CSV files - text but preserve exact formatting
+*.csv text eol=lf
+# Qt UI files - keep as text
+*.ui text eol=lf
+# Database schema files - text
+# Archive and compressed files
+*.bz2 binary
+*.xz binary
+*.lzma binary
+# Fonts
+*.ttf binary
+*.eot binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+# Git LFS for large files (disabled for now due to setup issues)
+# *.db filter=lfs diff=lfs merge=lfs -text
+# Exclude from export (files that shouldn't be included in releases)
+.gitattributes export-ignore
+.gitignore export-ignore
+.github/ export-ignore
+tests/ export-ignore
+docs/development/ export-ignore
+.dev_context/ export-ignore
+tools/ export-ignore
+xml/ export-ignore
+tags_csv/ export-ignore
+hf_repo/ export-ignore
 *.db filter=lfs diff=lfs merge=lfs -text

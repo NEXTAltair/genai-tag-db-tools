@@ -141,3 +141,6 @@ dev = [
     "esbonio"
 ]
 
+[project.urls]
+Homepage = "https://github.com/NEXTAltair//genai-tag-db-tools"
+Repository = "https://github.com/NEXTAltair//genai-tag-db-tools.git"
