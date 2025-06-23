@@ -1,6 +1,5 @@
 import re
-from functools import lru_cache
-from typing import Set
+from functools import cache
 
 from genai_tag_db_tools.services.tag_search import TagSearcher
 
@@ -61,7 +60,7 @@ class TagCleaner:
     def __init__(self):
         self.tag_searcher = TagSearcher()
 
-    @lru_cache(maxsize=None)
+    @cache
     @staticmethod
     def clean_format(text: str) -> str:
         """
@@ -77,9 +76,7 @@ class TagCleaner:
         text = re.sub(r"\"", '"', text)  # ダブルクォートをエスケープ
         text = re.sub(r"\*\*", "", text)  # マークダウンの強調を削除
         text = re.sub(r"\.\s*$", ", ", text)  # ピリオドをカンマに変換
-        text = re.sub(
-            r"\.\s*(?=\S)", ", ", text
-        )  # ピリオド後にスペースがあればカンマとスペースに置換
+        text = re.sub(r"\.\s*(?=\S)", ", ", text)  # ピリオド後にスペースがあればカンマとスペースに置換
         text = re.sub(r"\.\n", ", ", text)  # 改行直前のピリオドをカンマに変換
         text = re.sub(r"\n", ", ", text)  # 改行をカンマに変換
         text = re.sub(r"\u2014", "-", text)  # エムダッシュをハイフンに変換
@@ -172,7 +169,7 @@ class TagCleaner:
     @staticmethod
     def _clean_color_object(tags_dict: dict[int, str]) -> dict[int, str]:
         """white shirtとshirtのような重複タグから具体的ではないタグを削除する"""
-        word_tags: dict[str, Set[str]] = {}
+        word_tags: dict[str, set[str]] = {}
 
         for tag in tags_dict.values():
             words = WORD_PATTERN.findall(tag)
@@ -182,10 +179,7 @@ class TagCleaner:
         return {
             k: v
             for k, v in tags_dict.items()
-            if not any(
-                v != other_tag and v in other_tag
-                for other_tag in word_tags.get(v, set())
-            )
+            if not any(v != other_tag and v in other_tag for other_tag in word_tags.get(v, set()))
         }
 
     @staticmethod

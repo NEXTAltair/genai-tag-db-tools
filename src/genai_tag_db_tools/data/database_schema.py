@@ -1,30 +1,29 @@
 # genai_tag_db_tools.data.database_schema
 from __future__ import annotations  # 循環参照や古いバージョン対策に入れておくと安全
 
-from logging import getLogger
-from typing import Optional, Set
 from datetime import datetime
+from logging import getLogger
 
 from sqlalchemy import (
-    ForeignKey,
-    UniqueConstraint,
     Boolean,
-    Index,
-    func,
-    DateTime,
-    ForeignKeyConstraint,
     CheckConstraint,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    UniqueConstraint,
+    func,
 )
 from sqlalchemy.orm import (
-    Session,
-    relationship,
     Mapped,
-    mapped_column,
+    Session,
     declarative_base,
+    mapped_column,
+    relationship,
 )
 
-from genai_tag_db_tools.db.database_setup import engine as production_engine
 from genai_tag_db_tools.db.database_setup import SessionLocal as production_SessionLocal
+from genai_tag_db_tools.db.database_setup import engine as production_engine
 
 # テスト時にモンキーパッチで上書きされる可能性のある変数
 engine = production_engine
@@ -40,43 +39,41 @@ class TagStatus(Base):
     __tablename__ = "TAG_STATUS"
 
     tag_id: Mapped[int] = mapped_column(ForeignKey("TAGS.tag_id"), primary_key=True)
-    format_id: Mapped[int] = mapped_column(
-        ForeignKey("TAG_FORMATS.format_id"), primary_key=True
-    )
-    type_id: Mapped[Optional[int]] = mapped_column(nullable=True)
+    format_id: Mapped[int] = mapped_column(ForeignKey("TAG_FORMATS.format_id"), primary_key=True)
+    type_id: Mapped[int | None] = mapped_column(nullable=True)
     alias: Mapped[bool] = mapped_column(Boolean, nullable=False)
     preferred_tag_id: Mapped[int] = mapped_column(ForeignKey("TAGS.tag_id"))
 
-    created_at: Mapped[Optional[datetime]] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime, server_default=func.now(), nullable=True
     )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime, server_default=func.now(), nullable=True
     )
 
     # リレーション TagStatus → Tag (tag_id)
-    tag: Mapped["Tag"] = relationship(
+    tag: Mapped[Tag] = relationship(
         "Tag",
         foreign_keys=[tag_id],
         back_populates="formats_status",
     )
 
     # リレーション TagStatus → TagFormat
-    format: Mapped["TagFormat"] = relationship(
+    format: Mapped[TagFormat] = relationship(
         "TagFormat",
         foreign_keys=[format_id],
         back_populates="tags_status",
     )
 
     # リレーション TagStatus → Tag (preferred_tag_id)
-    preferred_tag: Mapped["Tag"] = relationship(
+    preferred_tag: Mapped[Tag] = relationship(
         "Tag",
         foreign_keys=[preferred_tag_id],
         back_populates="preferred_by",
     )
 
     # (format_id, type_id) → TagTypeFormatMapping
-    type_mapping: Mapped["TagTypeFormatMapping"] = relationship(
+    type_mapping: Mapped[TagTypeFormatMapping] = relationship(
         "TagTypeFormatMapping",
         primaryjoin=(
             "and_(TagStatus.format_id == TagTypeFormatMapping.format_id, "
@@ -110,18 +107,16 @@ class TagTranslation(Base):
     language: Mapped[str] = mapped_column()
     translation: Mapped[str] = mapped_column()
 
-    created_at: Mapped[Optional[datetime]] = mapped_column(
+    created_at: Mapped[datetime | None] = mapped_column(
         DateTime, server_default=func.now(), nullable=True
     )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime, server_default=func.now(), nullable=True
     )
 
-    tag: Mapped["Tag"] = relationship("Tag", back_populates="translations")
+    tag: Mapped[Tag] = relationship("Tag", back_populates="translations")
 
-    __table_args__ = (
-        UniqueConstraint("tag_id", "language", "translation", name="uix_tag_lang_trans"),
-    )
+    __table_args__ = (UniqueConstraint("tag_id", "language", "translation", name="uix_tag_lang_trans"),)
 
 
 # --------------------------------------------------------------------------
@@ -131,19 +126,13 @@ class TagUsageCounts(Base):
     __tablename__ = "TAG_USAGE_COUNTS"
 
     tag_id: Mapped[int] = mapped_column(ForeignKey("TAGS.tag_id"), primary_key=True)
-    format_id: Mapped[int] = mapped_column(
-        ForeignKey("TAG_FORMATS.format_id"), primary_key=True
-    )
+    format_id: Mapped[int] = mapped_column(ForeignKey("TAG_FORMATS.format_id"), primary_key=True)
     count: Mapped[int] = mapped_column()
 
-    created_at: Mapped[Optional[datetime]] = mapped_column(
-        server_default=func.now(), nullable=True
-    )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
-        server_default=func.now(), nullable=True
-    )
+    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now(), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now(), nullable=True)
 
-    tag: Mapped["Tag"] = relationship("Tag", back_populates="usage_counts")
+    tag: Mapped[Tag] = relationship("Tag", back_populates="usage_counts")
 
     __table_args__ = (
         UniqueConstraint("tag_id", "format_id", name="uix_tag_format"),
@@ -162,15 +151,11 @@ class Tag(Base):
     tag: Mapped[str] = mapped_column()
     source_tag: Mapped[str] = mapped_column()
 
-    created_at: Mapped[Optional[datetime]] = mapped_column(
-        server_default=func.now(), nullable=True
-    )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
-        server_default=func.now(), nullable=True
-    )
+    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now(), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now(), nullable=True)
 
     # 1対多: Tag → TagStatus
-    formats_status: Mapped[list["TagStatus"]] = relationship(
+    formats_status: Mapped[list[TagStatus]] = relationship(
         "TagStatus",
         back_populates="tag",
         foreign_keys=[TagStatus.tag_id],
@@ -178,7 +163,7 @@ class Tag(Base):
     )
 
     # 1対多: Tag → TagStatus (preferred_tag 参照用)
-    preferred_by: Mapped[list["TagStatus"]] = relationship(
+    preferred_by: Mapped[list[TagStatus]] = relationship(
         "TagStatus",
         back_populates="preferred_tag",
         foreign_keys=[TagStatus.preferred_tag_id],
@@ -186,14 +171,14 @@ class Tag(Base):
     )
 
     # 1対多: Tag → TagTranslation
-    translations: Mapped[list["TagTranslation"]] = relationship(
+    translations: Mapped[list[TagTranslation]] = relationship(
         "TagTranslation",
         back_populates="tag",
         cascade="all, delete-orphan",
     )
 
     # 1対多: Tag → TagUsageCounts
-    usage_counts: Mapped[list["TagUsageCounts"]] = relationship(
+    usage_counts: Mapped[list[TagUsageCounts]] = relationship(
         "TagUsageCounts",
         back_populates="tag",
         cascade="all, delete-orphan",
@@ -208,13 +193,10 @@ class TagFormat(Base):
 
     format_id: Mapped[int] = mapped_column(primary_key=True)
     format_name: Mapped[str] = mapped_column(unique=True)
-    description: Mapped[Optional[str]] = mapped_column(nullable=True)
+    description: Mapped[str | None] = mapped_column(nullable=True)
 
     # 1対多: TagFormat → TagStatus
-    tags_status: Mapped[list["TagStatus"]] = relationship(
-        "TagStatus",
-        back_populates="format"
-    )
+    tags_status: Mapped[list[TagStatus]] = relationship("TagStatus", back_populates="format")
 
 
 # --------------------------------------------------------------------------
@@ -225,7 +207,7 @@ class TagTypeName(Base):
 
     type_name_id: Mapped[int] = mapped_column(primary_key=True)
     type_name: Mapped[str] = mapped_column(unique=True)
-    description: Mapped[Optional[str]] = mapped_column(nullable=True)
+    description: Mapped[str | None] = mapped_column(nullable=True)
 
 
 # --------------------------------------------------------------------------
@@ -234,17 +216,15 @@ class TagTypeName(Base):
 class TagTypeFormatMapping(Base):
     __tablename__ = "TAG_TYPE_FORMAT_MAPPING"
 
-    format_id: Mapped[int] = mapped_column(
-        ForeignKey("TAG_FORMATS.format_id"), primary_key=True
-    )
+    format_id: Mapped[int] = mapped_column(ForeignKey("TAG_FORMATS.format_id"), primary_key=True)
     type_id: Mapped[int] = mapped_column(primary_key=True)
     type_name_id: Mapped[int] = mapped_column(ForeignKey("TAG_TYPE_NAME.type_name_id"))
-    description: Mapped[Optional[str]] = mapped_column(nullable=True)
+    description: Mapped[str | None] = mapped_column(nullable=True)
 
     # リレーション: (format_id, type_id) → TagTypeName
-    type_name: Mapped["TagTypeName"] = relationship("TagTypeName")
+    type_name: Mapped[TagTypeName] = relationship("TagTypeName")
 
-    statuses: Mapped[list["TagStatus"]] = relationship(
+    statuses: Mapped[list[TagStatus]] = relationship(
         "TagStatus",
         back_populates="type_mapping",
         viewonly=True,
@@ -255,11 +235,13 @@ class TagTypeFormatMapping(Base):
 # TagDatabase クラス
 # --------------------------------------------------------------------------
 
+
 class TagDatabase:
     """タグデータベース管理クラス"""
+
     def __init__(
         self,
-        external_session: Optional[Session] = None,
+        external_session: Session | None = None,
         init_master: bool = True,
     ):
         """
@@ -268,7 +250,7 @@ class TagDatabase:
             init_master (bool): マスターデータを初期化するかどうか。デフォルトはTrue
         """
         self.logger = getLogger(__name__)
-        self._sessions: Set[Session] = set()
+        self._sessions: set[Session] = set()
 
         # 1) セッションの設定
         if external_session is not None:
@@ -309,7 +291,6 @@ class TagDatabase:
             finally:
                 self._sessions.discard(sess)
 
-
     def __del__(self):
         self.cleanup()
 
@@ -338,11 +319,7 @@ class TagDatabase:
         ]
         try:
             for data in initial_data:
-                existing = (
-                    self.session.query(TagFormat)
-                    .filter_by(format_name=data.format_name)
-                    .first()
-                )
+                existing = self.session.query(TagFormat).filter_by(format_name=data.format_name).first()
                 if not existing:
                     self.session.add(data)
             self.session.commit()
@@ -377,11 +354,7 @@ class TagDatabase:
         ]
         try:
             for data in initial_data:
-                existing = (
-                    self.session.query(TagTypeName)
-                    .filter_by(type_name_id=data.type_name_id)
-                    .first()
-                )
+                existing = self.session.query(TagTypeName).filter_by(type_name_id=data.type_name_id).first()
                 if not existing:
                     self.session.add(data)
             self.session.commit()
@@ -414,9 +387,7 @@ class TagDatabase:
             TagTypeFormatMapping(format_id=2, type_id=8, type_name_id=8),  # lore
             # Format 3 (derpibooru)
             TagTypeFormatMapping(format_id=3, type_id=0, type_name_id=1),  # general
-            TagTypeFormatMapping(
-                format_id=3, type_id=1, type_name_id=15
-            ),  # content-official
+            TagTypeFormatMapping(format_id=3, type_id=1, type_name_id=15),  # content-official
             TagTypeFormatMapping(format_id=3, type_id=2, type_name_id=1),  # general
             TagTypeFormatMapping(format_id=3, type_id=3, type_name_id=5),  # species
             TagTypeFormatMapping(format_id=3, type_id=4, type_name_id=9),  # oc
@@ -426,9 +397,7 @@ class TagDatabase:
             TagTypeFormatMapping(format_id=3, type_id=8, type_name_id=12),  # origin
             TagTypeFormatMapping(format_id=3, type_id=9, type_name_id=13),  # error
             TagTypeFormatMapping(format_id=3, type_id=10, type_name_id=14),  # spoiler
-            TagTypeFormatMapping(
-                format_id=3, type_id=11, type_name_id=16
-            ),  # content-fanmade
+            TagTypeFormatMapping(format_id=3, type_id=11, type_name_id=16),  # content-fanmade
         ]
         try:
             for data in initial_data:

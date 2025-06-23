@@ -15,18 +15,10 @@ AVAILABLE_COLUMNS = {
     "updated_at": pl.Datetime,
 }
 
-EMPTY_DF = pl.DataFrame(
-    {col: pl.Series(col, [], dtype=dtype) for col, dtype in AVAILABLE_COLUMNS.items()}
-)
+EMPTY_DF = pl.DataFrame({col: pl.Series(col, [], dtype=dtype) for col, dtype in AVAILABLE_COLUMNS.items()})
 
 DF_SCHEMA = {
-    "TAGS": pl.DataFrame(
-        {
-            "tag_id": pl.UInt32,
-            "source_tag": pl.Utf8,
-            "tag": pl.Utf8
-        }
-    ),
+    "TAGS": pl.DataFrame({"tag_id": pl.UInt32, "source_tag": pl.Utf8, "tag": pl.Utf8}),
     "TAG_TRANSLATIONS": pl.DataFrame(
         {
             "translation_id": pl.UInt32,
@@ -37,13 +29,7 @@ DF_SCHEMA = {
             "updated_at": pl.Datetime,
         }
     ),
-    "TAG_FORMATS": pl.DataFrame(
-        {
-            "format_id": pl.UInt32,
-            "format_name": pl.Utf8,
-            "description": pl.Utf8
-        }
-    ),
+    "TAG_FORMATS": pl.DataFrame({"format_id": pl.UInt32, "format_name": pl.Utf8, "description": pl.Utf8}),
     "TAG_TYPE_NAME": pl.DataFrame(
         {"type_name_id": pl.UInt32, "type_name": pl.Utf8, "description": pl.Utf8}
     ),

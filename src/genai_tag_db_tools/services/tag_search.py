@@ -1,10 +1,11 @@
 # genai_tag_db_tools.services.tag_search
 import logging
-from typing import Optional
 
 import polars as pl
 
 from genai_tag_db_tools.data.tag_repository import TagRepository
+
+
 class TagSearcher:
     """タグ検索・変換等を行うビジネスロジッククラス"""
 
@@ -13,17 +14,16 @@ class TagSearcher:
         # リポジトリはとりあえず自前でインスタンス化
         self.tag_repo = TagRepository()
 
-
     def search_tags(
         self,
         keyword: str,
         partial: bool = False,
-        format_name: Optional[str] = None,
-        type_name: Optional[str] = None,
-        language: Optional[str] = None,
-        min_usage: Optional[int] = None,
-        max_usage: Optional[int] = None,
-        alias: Optional[bool] = None,
+        format_name: str | None = None,
+        type_name: str | None = None,
+        language: str | None = None,
+        min_usage: int | None = None,
+        max_usage: int | None = None,
+        alias: bool | None = None,
     ) -> pl.DataFrame:
         """
         検索条件に合致するタグ情報を一括で取得し、PolarsのDataFrameで返す。
@@ -96,11 +96,13 @@ class TagSearcher:
                 if not fid:
                     return pl.DataFrame([])
 
-            usage_filtered_ids = set(self.tag_repo.search_tag_ids_by_usage_count_range(
-                min_count=min_usage,
-                max_count=max_usage,
-                format_id=(fid if fid != 0 else None),
-            ))
+            usage_filtered_ids = set(
+                self.tag_repo.search_tag_ids_by_usage_count_range(
+                    min_count=min_usage,
+                    max_count=max_usage,
+                    format_id=(fid if fid != 0 else None),
+                )
+            )
             tag_ids = tag_ids & usage_filtered_ids
             if not tag_ids:
                 self.logger.debug("使用回数フィルター後にタグは残りません。")
@@ -157,7 +159,7 @@ class TagSearcher:
             return pl.DataFrame([])
         return pl.DataFrame(rows)
 
-    def _collect_tag_info(self, tag_ids: set[int], format_name: Optional[str]) -> list[dict]:
+    def _collect_tag_info(self, tag_ids: set[int], format_name: str | None) -> list[dict]:
         """
         絞り込み済みの tag_id 群について、TagRepository を使って情報を収集し、
         list[dict] にまとめる。呼び出し元で pl.DataFrame 変換する想定。
@@ -207,7 +209,10 @@ class TagSearcher:
                     is_alias = status_obj.alias
                     # type_id -> TagTypeFormatMapping -> TagTypeName
                     if status_obj.type_id is not None:
-                        resolved_type_name = self.tag_repo.get_type_name_by_format_type_id(format_id, status_obj.type_id) or ""
+                        resolved_type_name = (
+                            self.tag_repo.get_type_name_by_format_type_id(format_id, status_obj.type_id)
+                            or ""
+                        )
                         pass
 
             # 翻訳一覧
@@ -216,15 +221,17 @@ class TagSearcher:
             for tr in translations:
                 trans_dict[tr.language] = tr.translation
 
-            rows.append({
-                "tag_id": t_id,
-                "tag": tag_obj.tag,
-                "source_tag": tag_obj.source_tag,
-                "usage_count": usage_count,
-                "alias": is_alias,
-                "type_name": resolved_type_name,
-                "translations": trans_dict,
-            })
+            rows.append(
+                {
+                    "tag_id": t_id,
+                    "tag": tag_obj.tag,
+                    "source_tag": tag_obj.source_tag,
+                    "usage_count": usage_count,
+                    "alias": is_alias,
+                    "type_name": resolved_type_name,
+                    "translations": trans_dict,
+                }
+            )
 
         return rows
 
@@ -309,7 +316,7 @@ class TagSearcher:
         """
         return self.tag_repo.get_tag_formats()
 
-    def get_format_id(self, format_name: Optional[str]) -> int:
+    def get_format_id(self, format_name: str | None) -> int:
         """
         フォーマット名からフォーマットIDを取得する。
 
@@ -322,6 +329,7 @@ class TagSearcher:
         if format_name is None:
             return 0
         return self.tag_repo.get_format_id(format_name)
+
 
 if __name__ == "__main__":
     word = "1boy"

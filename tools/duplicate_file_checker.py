@@ -24,9 +24,9 @@ Pathオブジェクトを使用してファイルシステム操作を行いま�
     - 重複ファイルの削除は慎重に行ってください。重要なファイルが失われる可能性があります
 """
 
-from pathlib import Path
 import hashlib
 from collections import defaultdict
+from pathlib import Path
 
 
 def get_file_hash(file_path):
@@ -57,9 +57,7 @@ def remove_duplicates(duplicates):
 
 
 def main():
-    directory = Path(
-        input("重複ファイルを検索するディレクトリのパスを入力してください: ")
-    )
+    directory = Path(input("重複ファイルを検索するディレクトリのパスを入力してください: "))
     if not directory.is_dir():
         print("無効なディレクトリパスです。")
         return

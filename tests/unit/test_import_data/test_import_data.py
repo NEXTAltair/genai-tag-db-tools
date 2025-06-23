@@ -1,9 +1,10 @@
-import pytest
-from unittest.mock import ANY, MagicMock
-import polars as pl
 from pathlib import Path
+from unittest.mock import MagicMock
 
-from genai_tag_db_tools.services.import_data import TagDataImporter, ImportConfig
+import polars as pl
+import pytest
+
+from genai_tag_db_tools.services.import_data import ImportConfig, TagDataImporter
 
 """
 本ファイルでは TagDataImporter の主要メソッドを一通りテストします。
@@ -31,9 +32,7 @@ def test_configure_import_basic(importer: TagDataImporter):
     """
     df = pl.DataFrame({"source_tag": ["foo"], "tag": ["bar"], "count": [123]})
     # 例: format_id=1 (danbooru), language="ja"
-    processed_df, config = importer.configure_import(
-        source_df=df, format_id=1, language="ja"
-    )
+    processed_df, config = importer.configure_import(source_df=df, format_id=1, language="ja")
 
     # DataFrame 側の検証
     assert set(processed_df.columns) == {"source_tag", "tag", "count"}
@@ -63,18 +62,13 @@ def test_import_data_flow(importer: TagDataImporter):
     # TagRegister をモック化
     mock_register = MagicMock()
     # normalize_tagsの戻り値を設定
-    mock_register.normalize_tags.return_value = pl.DataFrame({
-        "source_tag": ["Tag A", "Tag B"],
-        "tag": ["Tag A", "Tag B"],
-        "count": [5, 10]
-    })
+    mock_register.normalize_tags.return_value = pl.DataFrame(
+        {"source_tag": ["Tag A", "Tag B"], "tag": ["Tag A", "Tag B"], "count": [5, 10]}
+    )
     # insert_tags_and_attach_idの戻り値を設定
-    mock_register.insert_tags_and_attach_id.return_value = pl.DataFrame({
-        "source_tag": ["Tag A", "Tag B"],
-        "tag": ["Tag A", "Tag B"],
-        "count": [5, 10],
-        "tag_id": [1, 2]
-    })
+    mock_register.insert_tags_and_attach_id.return_value = pl.DataFrame(
+        {"source_tag": ["Tag A", "Tag B"], "tag": ["Tag A", "Tag B"], "count": [5, 10], "tag_id": [1, 2]}
+    )
     importer._register_svc = mock_register
 
     # シグナルをモックに置き換え

@@ -1,4 +1,5 @@
 import pytest
+
 from genai_tag_db_tools.utils.cleanup_str import TagCleaner
 
 

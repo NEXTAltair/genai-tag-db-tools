@@ -1,11 +1,13 @@
-import pytest
 from unittest.mock import MagicMock
-from typing import List, Dict, Any, Optional, Set
+
+import pytest
 
 # テスト対象クラスをインポート
 from genai_tag_db_tools.data.tag_repository import TagRepository
 from genai_tag_db_tools.db.db_maintenance_tool import DatabaseMaintenanceTool
+
 # ↑ 実際のファイル構成に合わせて import パスを調整してください
+
 
 @pytest.fixture
 def mock_tag_repository() -> MagicMock:
@@ -14,6 +16,7 @@ def mock_tag_repository() -> MagicMock:
     各テストでリポジトリの振る舞いを自由に差し替えられるようにします。
     """
     return MagicMock(spec=TagRepository)
+
 
 @pytest.fixture
 def db_tool(mock_tag_repository) -> DatabaseMaintenanceTool:
@@ -24,6 +27,7 @@ def db_tool(mock_tag_repository) -> DatabaseMaintenanceTool:
     tool = DatabaseMaintenanceTool(db_path="dummy_path.db")
     tool.tag_repository = mock_tag_repository
     return tool
+
 
 def test_detect_duplicates_in_tag_status(db_tool: DatabaseMaintenanceTool, mock_tag_repository: MagicMock):
     """
@@ -39,7 +43,9 @@ def test_detect_duplicates_in_tag_status(db_tool: DatabaseMaintenanceTool, mock_
 
     # TagRepositoryのモック: list_tag_statuses() が上記ステータスを返す
     mock_tag_repository.list_tag_statuses.return_value = [
-        mock_status_dup, mock_status_dup_2, mock_status_unique
+        mock_status_dup,
+        mock_status_dup_2,
+        mock_status_unique,
     ]
 
     # tag_id=10 に紐づく Tagオブジェクト
@@ -72,10 +78,11 @@ def test_detect_duplicates_in_tag_status(db_tool: DatabaseMaintenanceTool, mock_
     assert len(duplicates) == 1
     dup_info = duplicates[0]
     assert dup_info["tag"] == "duplicate_tag_10"
-    assert dup_info["format"] == "danbooru"   # format_id=1 → インデックス0
+    assert dup_info["format"] == "danbooru"  # format_id=1 → インデックス0
     # alias, preferred_tag など、最初の status を参照している
     assert dup_info["alias"] == bool(mock_status_dup.alias)
     assert dup_info["preferred_tag"] == "pref_tag_20"
+
 
 def test_detect_usage_counts_for_tags(db_tool: DatabaseMaintenanceTool, mock_tag_repository: MagicMock):
     """
@@ -123,6 +130,7 @@ def test_detect_usage_counts_for_tags(db_tool: DatabaseMaintenanceTool, mock_tag
     assert record2["format_name"] == "derpibooru"
     assert record2["use_count"] == 99
 
+
 def test_detect_foreign_key_issues(db_tool: DatabaseMaintenanceTool, mock_tag_repository: MagicMock):
     """
     detect_foreign_key_issues のテスト。
@@ -137,7 +145,7 @@ def test_detect_foreign_key_issues(db_tool: DatabaseMaintenanceTool, mock_tag_re
 
     def fake_get_tag_by_id(tag_id):
         if tag_id == 99:
-            return None   # 存在しない
+            return None  # 存在しない
         return MagicMock(tag="some_valid_tag")
 
     mock_tag_repository.get_tag_by_id.side_effect = fake_get_tag_by_id
@@ -145,6 +153,7 @@ def test_detect_foreign_key_issues(db_tool: DatabaseMaintenanceTool, mock_tag_re
     issues = db_tool.detect_foreign_key_issues()
     assert len(issues) == 1
     assert issues[0] == (99, None)
+
 
 def test_detect_orphan_records(db_tool: DatabaseMaintenanceTool, mock_tag_repository: MagicMock):
     """
@@ -156,7 +165,9 @@ def test_detect_orphan_records(db_tool: DatabaseMaintenanceTool, mock_tag_reposi
     mock_tag_repository.get_all_tag_ids.return_value = [1, 2]
 
     # タグ1,2 は存在
-    mock_tag_repository.get_tag_by_id.side_effect = lambda tid: MagicMock(tag=f"tag_{tid}") if tid in [1, 2] else None
+    mock_tag_repository.get_tag_by_id.side_effect = (
+        lambda tid: MagicMock(tag=f"tag_{tid}") if tid in [1, 2] else None
+    )
 
     # 翻訳: tag_id=2→OK, tag_id=99→孤立
     mock_translation_1 = MagicMock(tag_id=2, language="en", translation="foo")
@@ -168,6 +179,7 @@ def test_detect_orphan_records(db_tool: DatabaseMaintenanceTool, mock_tag_reposi
         elif tag_id == 2:
             return [mock_translation_1, mock_translation_2]
         return []
+
     mock_tag_repository.get_translations.side_effect = fake_get_translations
 
     # ステータス: tag_id=2→OK, tag_id=3→孤立
@@ -184,6 +196,7 @@ def test_detect_orphan_records(db_tool: DatabaseMaintenanceTool, mock_tag_reposi
     # usage_countsは未実装で空想定
     assert len(orphans["usage_counts"]) == 0
 
+
 def test_detect_inconsistent_alias_status(db_tool: DatabaseMaintenanceTool, mock_tag_repository: MagicMock):
     """
     detect_inconsistent_alias_status のテスト。
@@ -191,9 +204,9 @@ def test_detect_inconsistent_alias_status(db_tool: DatabaseMaintenanceTool, mock
     - alias=True なのにpreferred_tag_id == tag_id
     """
     s1 = MagicMock(tag_id=10, format_id=1, alias=False, preferred_tag_id=11)  # 不整合
-    s2 = MagicMock(tag_id=20, format_id=1, alias=True,  preferred_tag_id=20)  # 不整合
+    s2 = MagicMock(tag_id=20, format_id=1, alias=True, preferred_tag_id=20)  # 不整合
     s3 = MagicMock(tag_id=30, format_id=2, alias=False, preferred_tag_id=30)  # OK
-    s4 = MagicMock(tag_id=40, format_id=2, alias=True,  preferred_tag_id=50)  # OK
+    s4 = MagicMock(tag_id=40, format_id=2, alias=True, preferred_tag_id=50)  # OK
     mock_tag_repository.list_tag_statuses.return_value = [s1, s2, s3, s4]
 
     results = db_tool.detect_inconsistent_alias_status()
@@ -207,6 +220,7 @@ def test_detect_inconsistent_alias_status(db_tool: DatabaseMaintenanceTool, mock
     all_reasons = [r["reason"] for r in results]
     assert "alias=Falseなのにpreferred_tag_id != tag_id" in all_reasons
     assert "alias=Trueなのにpreferred_tag_id == tag_id" in all_reasons
+
 
 def test_detect_missing_translations(db_tool: DatabaseMaintenanceTool, mock_tag_repository: MagicMock):
     """
@@ -255,6 +269,7 @@ def test_detect_missing_translations(db_tool: DatabaseMaintenanceTool, mock_tag_
     assert missing[0]["missing_languages"] == ["ja"]
     # タグ101 は 全言語揃っているため不足なし
 
+
 def test_detect_abnormal_usage_counts(db_tool: DatabaseMaintenanceTool, mock_tag_repository: MagicMock):
     """
     detect_abnormal_usage_counts のテスト。
@@ -300,6 +315,7 @@ def test_detect_abnormal_usage_counts(db_tool: DatabaseMaintenanceTool, mock_tag
     assert rec2["tag_id"] == 6
     assert rec2["count"] == 999999999
 
+
 def test_fix_inconsistent_alias_status(db_tool: DatabaseMaintenanceTool, mock_tag_repository: MagicMock):
     """
     fix_inconsistent_alias_status のテスト。
@@ -319,8 +335,9 @@ def test_fix_inconsistent_alias_status(db_tool: DatabaseMaintenanceTool, mock_ta
         format_id=1,
         alias=False,
         preferred_tag_id=10,  # fix で tag_idと一致させる
-        type_id=None
+        type_id=None,
     )
+
 
 def test_fix_duplicate_status(db_tool: DatabaseMaintenanceTool, mock_tag_repository: MagicMock):
     """
@@ -340,6 +357,7 @@ def test_fix_duplicate_status(db_tool: DatabaseMaintenanceTool, mock_tag_reposit
     mock_tag_repository.delete_tag_status.assert_called_once_with(s2.tag_id, s2.format_id)
     # 他フォーマット s_other は影響なし
 
+
 def test_detect_invalid_tag_id(db_tool: DatabaseMaintenanceTool, mock_tag_repository: MagicMock):
     """
     detect_invalid_tag_id のテスト。
@@ -356,6 +374,7 @@ def test_detect_invalid_tag_id(db_tool: DatabaseMaintenanceTool, mock_tag_reposi
     mock_tag_repository.get_tag_id_by_name.assert_any_call("invalid tag")
     mock_tag_repository.get_tag_id_by_name.assert_any_call("invalid_tag")
 
+
 def test_detect_invalid_preferred_tags(db_tool: DatabaseMaintenanceTool, mock_tag_repository: MagicMock):
     """
     detect_invalid_preferred_tags のテスト。
@@ -364,12 +383,13 @@ def test_detect_invalid_preferred_tags(db_tool: DatabaseMaintenanceTool, mock_ta
     # 全ステータス
     s1 = MagicMock(tag_id=10, format_id=1, alias=False, preferred_tag_id=999)  # invalid
     s2 = MagicMock(tag_id=11, format_id=1, alias=False, preferred_tag_id=12)
-    s3 = MagicMock(tag_id=12, format_id=1, alias=True,  preferred_tag_id=999)  # invalid
+    s3 = MagicMock(tag_id=12, format_id=1, alias=True, preferred_tag_id=999)  # invalid
     mock_tag_repository.list_tag_statuses.return_value = [s1, s2, s3]
 
     # それぞれのタグ
     def fake_tag_by_id(tid):
         return MagicMock(tag=f"tag_{tid}")
+
     mock_tag_repository.get_tag_by_id.side_effect = fake_tag_by_id
 
     invalid_prefs = db_tool.detect_invalid_preferred_tags(999)

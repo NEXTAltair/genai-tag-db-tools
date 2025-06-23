@@ -1,6 +1,9 @@
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
+
 from genai_tag_db_tools.services.tag_search import TagSearcher
+
 
 @pytest.fixture
 def mock_tag_repo():
@@ -9,6 +12,7 @@ def mock_tag_repo():
     メソッドの戻り値を自由に設定できるようにする。
     """
     return MagicMock()
+
 
 @pytest.fixture
 def tag_searcher(mock_tag_repo, monkeypatch):
@@ -24,6 +28,7 @@ def tag_searcher(mock_tag_repo, monkeypatch):
     ts = TagSearcher()
     ts.tag_repo = mock_tag_repo
     return ts
+
 
 def test_convert_tag_found_alias(tag_searcher, mock_tag_repo):
     """
@@ -52,6 +57,7 @@ def test_convert_tag_found_alias(tag_searcher, mock_tag_repo):
     mock_tag_repo.find_preferred_tag.assert_called_once_with(123, 2)
     mock_tag_repo.get_tag_by_id.assert_called_once_with(999)
 
+
 def test_convert_tag_no_alias(tag_searcher, mock_tag_repo):
     """
     alias=False のケース、preferred_tag_id=None でそのまま返す。
@@ -66,6 +72,7 @@ def test_convert_tag_no_alias(tag_searcher, mock_tag_repo):
     assert result == "some_tag"
     mock_tag_repo.get_tag_by_id.assert_not_called()
 
+
 def test_convert_tag_no_tag_in_db(tag_searcher, mock_tag_repo):
     """
     DBにタグが存在しない場合、元のタグを返す。
@@ -78,6 +85,7 @@ def test_convert_tag_no_tag_in_db(tag_searcher, mock_tag_repo):
     assert result == "unknown_tag"
     mock_tag_repo.find_preferred_tag.assert_not_called()
     mock_tag_repo.get_tag_by_id.assert_not_called()
+
 
 def test_convert_tag_invalid_preferred(tag_searcher, mock_tag_repo, caplog):
     """
@@ -98,6 +106,7 @@ def test_convert_tag_invalid_preferred(tag_searcher, mock_tag_repo, caplog):
         assert "invalid tag" in caplog.text  # ログに「invalid tag」が出ているか
     assert result == "test_tag"
 
+
 def test_convert_tag_db_error(tag_searcher, mock_tag_repo):
     """
     preferred_tag_id があるが、それに紐づくTagオブジェクトが取得できない(DB不整合)場合
@@ -112,6 +121,7 @@ def test_convert_tag_db_error(tag_searcher, mock_tag_repo):
     result = tag_searcher.convert_tag("tag_in_db", format_id)
     assert result == "tag_in_db"
 
+
 def test_get_tag_types(tag_searcher, mock_tag_repo):
     """
     フォーマットに紐づくタグタイプ一覧を取得。
@@ -123,6 +133,7 @@ def test_get_tag_types(tag_searcher, mock_tag_repo):
     assert result == ["general", "artist", "meta"]
     mock_tag_repo.get_tag_types.assert_called_once_with(2)
 
+
 def test_get_tag_types_no_format(tag_searcher, mock_tag_repo):
     """
     フォーマット名がDBに無い場合は空リストを返す。
@@ -132,6 +143,7 @@ def test_get_tag_types_no_format(tag_searcher, mock_tag_repo):
     result = tag_searcher.get_tag_types("unknown_fmt")
     assert result == []
 
+
 def test_get_tag_languages(tag_searcher, mock_tag_repo):
     """
     言語一覧を取得。
@@ -140,6 +152,7 @@ def test_get_tag_languages(tag_searcher, mock_tag_repo):
     result = tag_searcher.get_tag_languages()
     assert result == ["en", "ja", "fr"]
 
+
 def test_get_tag_formats(tag_searcher, mock_tag_repo):
     """
     フォーマット一覧を取得。
@@ -147,6 +160,7 @@ def test_get_tag_formats(tag_searcher, mock_tag_repo):
     mock_tag_repo.get_tag_formats.return_value = ["danbooru", "e621", "All"]
     result = tag_searcher.get_tag_formats()
     assert result == ["danbooru", "e621", "All"]
+
 
 def test_search_tags_with_logging(tag_searcher, mock_tag_repo, caplog):
     """
@@ -164,6 +178,7 @@ def test_search_tags_with_logging(tag_searcher, mock_tag_repo, caplog):
         assert "test" in caplog.text  # キーワードがログに含まれているか
         assert "partial=True" in caplog.text  # パラメータがログに含まれているか
 
+
 def test_search_tags_with_format_all(tag_searcher, mock_tag_repo):
     """
     フォーマット名が "All" の場合のテスト。
@@ -172,7 +187,7 @@ def test_search_tags_with_format_all(tag_searcher, mock_tag_repo):
     mock_tag_repo.search_tag_ids.return_value = [1, 2]
     mock_tag_repo.get_tag_by_id.side_effect = lambda id: {
         1: MagicMock(tag=f"tag{id}", source_tag=f"src{id}"),
-        2: MagicMock(tag=f"tag{id}", source_tag=f"src{id}")
+        2: MagicMock(tag=f"tag{id}", source_tag=f"src{id}"),
     }.get(id)
     mock_tag_repo.get_translations.return_value = []
 
@@ -180,6 +195,7 @@ def test_search_tags_with_format_all(tag_searcher, mock_tag_repo):
     assert len(result) == 2
     # フォーマットによる絞り込みは呼ばれないはず
     mock_tag_repo.search_tag_ids_by_format_name.assert_not_called()
+
 
 def test_search_tags_with_alias_and_status(tag_searcher, mock_tag_repo):
     """
@@ -201,14 +217,11 @@ def test_search_tags_with_alias_and_status(tag_searcher, mock_tag_repo):
     mock_status = MagicMock(alias=True, type_id=None)  # type_id が None
     mock_tag_repo.get_tag_status.return_value = mock_status
 
-    result = tag_searcher.search_tags(
-        "test",
-        format_name="e621",
-        alias=True
-    )
+    result = tag_searcher.search_tags("test", format_name="e621", alias=True)
     assert len(result) == 1
     assert result["tag"].to_list() == ["tag1"]
     assert result["type_name"].to_list() == [""]  # type_id が None なので空文字
+
 
 def test_search_tags_collect_info_with_translations(tag_searcher, mock_tag_repo):
     """
@@ -219,7 +232,7 @@ def test_search_tags_collect_info_with_translations(tag_searcher, mock_tag_repo)
     mock_tag_repo.get_tag_by_id.return_value = MagicMock(tag="tag1", source_tag="src1")
     mock_tag_repo.get_translations.return_value = [
         MagicMock(language="ja", translation="タグ1"),
-        MagicMock(language="en", translation="tag1")
+        MagicMock(language="en", translation="tag1"),
     ]
     mock_tag_repo.get_tag_status.return_value = None
 
@@ -228,6 +241,7 @@ def test_search_tags_collect_info_with_translations(tag_searcher, mock_tag_repo)
     assert result["tag"].to_list() == ["tag1"]
     assert result["translations"].to_list() == [{"ja": "タグ1", "en": "tag1"}]
 
+
 def test_search_tags_with_invalid_language(tag_searcher, mock_tag_repo):
     """
     存在しない言語を指定した場合のテスト。
@@ -235,12 +249,11 @@ def test_search_tags_with_invalid_language(tag_searcher, mock_tag_repo):
     """
     mock_tag_repo.search_tag_ids.return_value = [1]
     mock_tag_repo.get_tag_by_id.return_value = MagicMock(tag="tag1", source_tag="src1")
-    mock_tag_repo.get_translations.return_value = [
-        MagicMock(language="ja", translation="タグ1")
-    ]
+    mock_tag_repo.get_translations.return_value = [MagicMock(language="ja", translation="タグ1")]
 
     result = tag_searcher.search_tags("test", language="unknown")
     assert len(result) == 0  # 指定した言語の翻訳がないので0件
+
 
 def test_get_format_id_with_none(tag_searcher, mock_tag_repo):
     """
@@ -250,6 +263,7 @@ def test_get_format_id_with_none(tag_searcher, mock_tag_repo):
     result = tag_searcher.get_format_id(None)
     assert result == 0
     mock_tag_repo.get_format_id.assert_not_called()  # None の場合は呼ばれない
+
 
 def test_get_tag_types_with_none(tag_searcher, mock_tag_repo):
     """

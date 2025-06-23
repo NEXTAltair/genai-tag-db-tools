@@ -1,7 +1,7 @@
-from pathlib import Path
-import sqlite3
 import logging
+import sqlite3
 from datetime import datetime
+from pathlib import Path
 
 
 def migrate_data(src_db: Path, dst_db: Path):
@@ -31,7 +31,7 @@ def migrate_data(src_db: Path, dst_db: Path):
 
     except Exception as e:
         dst_conn.rollback()
-        logging.error(f"Migration failed: {str(e)}")
+        logging.error(f"Migration failed: {e!s}")
         raise
     finally:
         src_conn.close()
@@ -44,9 +44,7 @@ def fix_tag_status_data(rows):
     issues = []
 
     for row in rows:
-        tag_id, format_id, type_id, alias, preferred_tag_id = row[
-            :5
-        ]  # 最初の5カラムを取得
+        tag_id, format_id, type_id, alias, preferred_tag_id = row[:5]  # 最初の5カラムを取得
 
         # エイリアスフラグがNULLの場合はFalseとして扱う
         alias = bool(alias) if alias is not None else False
@@ -58,9 +56,7 @@ def fix_tag_status_data(rows):
         # 制約条件に基づいてデータを修正
         if not alias and preferred_tag_id != tag_id:
             # エイリアスでないのに preferred_tag_id が異なる場合
-            issues.append(
-                f"Non-alias tag {tag_id} had different preferred_tag {preferred_tag_id}"
-            )
+            issues.append(f"Non-alias tag {tag_id} had different preferred_tag {preferred_tag_id}")
             preferred_tag_id = tag_id
         elif alias and preferred_tag_id == tag_id:
             # エイリアスなのに preferred_tag_id が同じ場合
@@ -122,13 +118,11 @@ def migrate_tag_status(src_conn: sqlite3.Connection, dst_conn: sqlite3.Connectio
         dst_cursor.executemany(insert_sql, fixed_rows)
         logging.info(f"Migrated {len(fixed_rows)} rows for TAG_STATUS")
     except sqlite3.Error as e:
-        logging.error(f"Error migrating TAG_STATUS: {str(e)}")
+        logging.error(f"Error migrating TAG_STATUS: {e!s}")
         raise
 
 
-def merge_master_data(
-    src_conn: sqlite3.Connection, dst_conn: sqlite3.Connection, table_name: str
-):
+def merge_master_data(src_conn: sqlite3.Connection, dst_conn: sqlite3.Connection, table_name: str):
     """マスターデータの統合(既存データを保持しつつ新規データを追加)"""
     logging.info(f"Merging master data for table: {table_name}")
 
@@ -160,18 +154,14 @@ def merge_master_data(
     if new_rows:
         # データ挿入
         placeholders = ",".join(["?" for _ in columns])
-        insert_sql = (
-            f"INSERT INTO {table_name} ({','.join(columns)}) VALUES ({placeholders})"
-        )
+        insert_sql = f"INSERT INTO {table_name} ({','.join(columns)}) VALUES ({placeholders})"
         dst_cursor.executemany(insert_sql, new_rows)
         logging.info(f"Added {len(new_rows)} new rows to {table_name}")
     else:
         logging.info(f"No new data to add for {table_name}")
 
 
-def migrate_table(
-    src_conn: sqlite3.Connection, dst_conn: sqlite3.Connection, table_name: str
-):
+def migrate_table(src_conn: sqlite3.Connection, dst_conn: sqlite3.Connection, table_name: str):
     """通常テーブルのデータを移行"""
     logging.info(f"Migrating table: {table_name}")
 
@@ -240,8 +230,7 @@ def verify_migration(src_conn: sqlite3.Connection, dst_conn: sqlite3.Connection)
         else:
             if src_count != dst_count:
                 logging.error(
-                    f"Count mismatch for table {table}: "
-                    f"source={src_count}, destination={dst_count}"
+                    f"Count mismatch for table {table}: source={src_count}, destination={dst_count}"
                 )
                 all_matched = False
             else:
@@ -255,9 +244,7 @@ def verify_migration(src_conn: sqlite3.Connection, dst_conn: sqlite3.Connection)
 
 def main():
     # ロギングの設定
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
     # データベースのパスを設定
     data_dir = Path(__file__).resolve().parent.parent / "genai_tag_db_tools" / "data"
@@ -286,7 +273,7 @@ def main():
     try:
         migrate_data(src_db, dst_db)
     except Exception as e:
-        logging.error(f"Migration failed: {str(e)}")
+        logging.error(f"Migration failed: {e!s}")
         logging.info(f"Backup available at: {dst_backup}")
         raise
 

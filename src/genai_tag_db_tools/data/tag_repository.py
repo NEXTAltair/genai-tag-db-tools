@@ -1,24 +1,23 @@
 # genai_tag_db_tools.data.tag_repository
+from collections.abc import Callable
 from logging import getLogger
-from typing import Optional, Callable
 
 import polars as pl
-
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 from sqlalchemy.sql import or_
 
 from genai_tag_db_tools.data.database_schema import (
     Tag,
+    TagFormat,
     TagStatus,
     TagTranslation,
-    TagFormat,
-    TagTypeName,
     TagTypeFormatMapping,
+    TagTypeName,
     TagUsageCounts,
 )
-
 from genai_tag_db_tools.utils.messages import ErrorMessages
+
 
 class TagRepository:
     """
@@ -33,6 +32,7 @@ class TagRepository:
       - TAG_TRANSLATIONS: タグの翻訳情報
       - TAG_TYPE_FORMAT_MAPPING: タグタイプとフォーマットの紐付け
     """
+
     def __init__(self, session_factory: Callable[[], Session] | None = None):
         self.logger = getLogger(__name__)
         # test時にsession_factoryで別のDBを指定するための処理
@@ -40,6 +40,7 @@ class TagRepository:
             self.session_factory = session_factory
         else:
             from genai_tag_db_tools.db.database_setup import SessionLocal
+
             self.session_factory = SessionLocal
 
     # --- TAG CRUD ---
@@ -65,7 +66,7 @@ class TagRepository:
         if missing_fields:
             msg = ErrorMessages.MISSING_REQUIRED_FIELDS.format(fields=", ".join(missing_fields))
             self.logger.error(msg)  # ロギング
-            raise ValueError(msg)   # エラーをスロー
+            raise ValueError(msg)  # エラーをスロー
 
         # 1) 同名tagの有無をチェック
         existing_id = self.get_tag_id_by_name(tag, partial=False)
@@ -85,7 +86,7 @@ class TagRepository:
             raise ValueError(msg)
         return tag_id
 
-    def get_tag_id_by_name(self, keyword: str, partial: bool = False) -> Optional[int]:
+    def get_tag_id_by_name(self, keyword: str, partial: bool = False) -> int | None:
         """
         TAGSテーブルからタグIDを検索する。
         部分一致やワイルドカード `*` をサポート。
@@ -102,19 +103,19 @@ class TagRepository:
             ValueError: 複数のタグがヒットした場合（仕様次第で挙動変更可）。
         """
         # 'cat*' などユーザーが入力した場合 '*' を '%' に置き換え
-        if '*' in keyword:
-            keyword = keyword.replace('*', '%')
+        if "*" in keyword:
+            keyword = keyword.replace("*", "%")
 
         with self.session_factory() as session:
             query = session.query(Tag)
 
             # partial=True or 置換後に'%'が含まれる なら LIKE検索
-            if partial or '%' in keyword:
+            if partial or "%" in keyword:
                 # 部分一致用に補助。必要なら "%keyword%" に付け足すなど
-                if not keyword.startswith('%'):
-                    keyword = '%' + keyword
-                if not keyword.endswith('%'):
-                    keyword = keyword + '%'
+                if not keyword.startswith("%"):
+                    keyword = "%" + keyword
+                if not keyword.endswith("%"):
+                    keyword = keyword + "%"
                 query = query.filter(Tag.tag.like(keyword))
             else:
                 # 完全一致
@@ -127,7 +128,7 @@ class TagRepository:
             if len(results) == 1:
                 return results[0].tag_id
 
-            if partial or '%' in keyword:
+            if partial or "%" in keyword:
                 # 部分一致/ワイルドカード -> 先頭を返す
                 # TODO: この処理は後で調整
                 return results[0].tag_id
@@ -135,7 +136,7 @@ class TagRepository:
                 # 完全一致で2件以上はエラー
                 raise ValueError(f"複数ヒット: {results}")
 
-    def get_tag_by_id(self, tag_id: int) -> Optional[Tag]:
+    def get_tag_by_id(self, tag_id: int) -> Tag | None:
         """
         指定されたtag_idに対応するTagオブジェクトをデータベースから取得
 
@@ -156,7 +157,9 @@ class TagRepository:
         with self.session_factory() as session:
             return session.query(Tag).filter(Tag.tag_id == tag_id).one_or_none()
 
-    def update_tag(self, tag_id: int, *, source_tag: Optional[str] = None, tag: Optional[str] = None) -> None:
+    def update_tag(
+        self, tag_id: int, *, source_tag: str | None = None, tag: str | None = None
+    ) -> None:
         """
         タグIDを指定して、タグ情報を更新する。
         # HACK: 常にペアで更新するようにすれば片方が None の処理は不要かもしれない
@@ -250,13 +253,8 @@ class TagRepository:
             dict[str, int]: タグをキーとしたタグIDの辞書
         """
         with self.session_factory() as session:
-            existing_tags = (
-                session.query(Tag.tag, Tag.tag_id)
-                .filter(Tag.tag.in_(tag_list))
-                .all()
-            )
+            existing_tags = session.query(Tag.tag, Tag.tag_id).filter(Tag.tag.in_(tag_list)).all()
             return {tag: tag_id for tag, tag_id in existing_tags}
-
 
     # --- TAG_FORMATS ---
     def get_format_id(self, format_name: str) -> int:
@@ -274,7 +272,7 @@ class TagRepository:
             return format_obj.format_id if format_obj else 0
 
     # --- TAG_TYPE_FORMAT_MAPPING ---
-    def get_type_name_by_format_type_id(self, format_id: int, type_id: int) -> Optional[str]:
+    def get_type_name_by_format_type_id(self, format_id: int, type_id: int) -> str | None:
         """
         (format_id, type_id) に対応する TagTypeFormatMapping を検索し、
         その type_name (TagTypeName.type_name) を返す。
@@ -290,8 +288,7 @@ class TagRepository:
             mapping_obj = (
                 session.query(TagTypeFormatMapping)
                 .filter(
-                    TagTypeFormatMapping.format_id == format_id,
-                    TagTypeFormatMapping.type_id == type_id
+                    TagTypeFormatMapping.format_id == format_id, TagTypeFormatMapping.type_id == type_id
                 )
                 .one_or_none()
             )
@@ -302,7 +299,7 @@ class TagRepository:
             return mapping_obj.type_name.type_name if mapping_obj.type_name else None
 
     # --- TAG_TYPE_NAME ---
-    def get_type_id(self, type_name: str) -> Optional[int]:
+    def get_type_id(self, type_name: str) -> int | None:
         """
         指定されたタイプ名に対応するタイプIDを取得する。
 
@@ -316,9 +313,8 @@ class TagRepository:
             type_obj = session.query(TagTypeName).filter(TagTypeName.type_name == type_name).one_or_none()
             return type_obj.type_name_id if type_obj else None
 
-
     # --- TAG_STATUS ---
-    def get_tag_status(self, tag_id: int, format_id: int) -> Optional[TagStatus]:
+    def get_tag_status(self, tag_id: int, format_id: int) -> TagStatus | None:
         """
         指定された tag_id, format_id に対する TagStatus を1件取得。
         見つからなければ None を返す。
@@ -337,8 +333,9 @@ class TagRepository:
                 .one_or_none()
             )
 
-    def update_tag_status(self, tag_id: int, format_id: int,
-                          alias: bool, preferred_tag_id: int, type_id: Optional[int]= None) -> None:
+    def update_tag_status(
+        self, tag_id: int, format_id: int, alias: bool, preferred_tag_id: int, type_id: int | None = None
+    ) -> None:
         """
         DB へ TagStatus を INSERT/UPDATE するメソッド。
         スキーマ制約に従ってデータを検証し、違反する場合はValueErrorを発生させる。
@@ -369,15 +366,14 @@ class TagRepository:
                 mapping = (
                     session.query(TagTypeFormatMapping)
                     .filter(
-                        TagTypeFormatMapping.format_id == format_id,
-                        TagTypeFormatMapping.type_id == type_id
+                        TagTypeFormatMapping.format_id == format_id, TagTypeFormatMapping.type_id == type_id
                     )
                     .first()
                 )
                 if not mapping:
                     msg = ErrorMessages.DB_OPERATION_FAILED.format(
                         error_msg=f"指定されたformat_id={format_id}とtype_id={type_id}の組み合わせが"
-                                "TAG_TYPE_FORMAT_MAPPINGテーブルに存在しません"
+                        "TAG_TYPE_FORMAT_MAPPINGテーブルに存在しません"
                     )
                     raise ValueError(msg)
 
@@ -388,7 +384,7 @@ class TagRepository:
                     format_id=format_id,
                     type_id=type_id,
                     alias=alias,
-                    preferred_tag_id=preferred_tag_id
+                    preferred_tag_id=preferred_tag_id,
                 )
                 session.add(status_obj)
                 session.commit()
@@ -417,7 +413,7 @@ class TagRepository:
                 session.delete(status_obj)
                 session.commit()
 
-    def list_tag_statuses(self, tag_id: Optional[int] = None) -> list[TagStatus]:
+    def list_tag_statuses(self, tag_id: int | None = None) -> list[TagStatus]:
         """
         複数のステータスをまとめて取得。
         tag_idが指定されていればそのタグだけ、指定されなければ全件。
@@ -437,7 +433,7 @@ class TagRepository:
             return query.all()
 
     # --- TAG_USAGE_COUNTS ---
-    def get_usage_count(self, tag_id: int, format_id: int) -> Optional[int]:
+    def get_usage_count(self, tag_id: int, format_id: int) -> int | None:
         """
         TAG_USAGE_COUNTS テーブルから使用回数を取得。
         見つからなければ None を返す。
@@ -521,7 +517,7 @@ class TagRepository:
                 .filter(
                     TagTranslation.tag_id == tag_id,
                     TagTranslation.language == language,
-                    TagTranslation.translation == translation
+                    TagTranslation.translation == translation,
                 )
                 .one_or_none()
             )
@@ -533,11 +529,7 @@ class TagRepository:
 
             try:
                 # 4) 新規作成
-                translation_obj = TagTranslation(
-                    tag_id=tag_id,
-                    language=language,
-                    translation=translation
-                )
+                translation_obj = TagTranslation(tag_id=tag_id, language=language, translation=translation)
                 session.add(translation_obj)
                 session.commit()
             except IntegrityError as e:
@@ -559,8 +551,8 @@ class TagRepository:
         Returns:
             list[int]: 検索にヒットしたtag_idのリスト（重複排除済み）
         """
-        if '*' in keyword:
-            keyword = keyword.replace('*', '%')
+        if "*" in keyword:
+            keyword = keyword.replace("*", "%")
 
         with self.session_factory() as session:
             # 初期クエリを定義
@@ -568,22 +560,22 @@ class TagRepository:
             translation_query = session.query(TagTranslation.tag_id)
 
             # partial=True またはワイルドカード検索の場合
-            if partial or '%' in keyword:
-                if not keyword.startswith('%'):
-                    keyword = '%' + keyword
-                if not keyword.endswith('%'):
-                    keyword = keyword + '%'
+            if partial or "%" in keyword:
+                if not keyword.startswith("%"):
+                    keyword = "%" + keyword
+                if not keyword.endswith("%"):
+                    keyword = keyword + "%"
             # Tagテーブルのクエリ
             tag_conditions = or_(
-                Tag.tag.like(keyword) if partial or '%' in keyword else Tag.tag == keyword,
-                Tag.source_tag.like(keyword) if partial or '%' in keyword else Tag.source_tag == keyword
+                Tag.tag.like(keyword) if partial or "%" in keyword else Tag.tag == keyword,
+                Tag.source_tag.like(keyword) if partial or "%" in keyword else Tag.source_tag == keyword,
             )
             tag_query = session.query(Tag.tag_id).filter(tag_conditions)
 
             # TagTranslationテーブルのクエリ
             translation_condition = (
                 TagTranslation.translation.like(keyword)
-                if partial or '%' in keyword
+                if partial or "%" in keyword
                 else TagTranslation.translation == keyword
             )
             translation_query = session.query(TagTranslation.tag_id).filter(translation_condition)
@@ -596,9 +588,9 @@ class TagRepository:
 
     def search_tag_ids_by_usage_count_range(
         self,
-        min_count: Optional[int] = None,
-        max_count: Optional[int] = None,
-        format_id: Optional[int] = None
+        min_count: int | None = None,
+        max_count: int | None = None,
+        format_id: int | None = None,
     ) -> list[int]:
         """
         TagUsageCountsテーブルから使用回数(count)の範囲で検索し、
@@ -626,14 +618,10 @@ class TagRepository:
                 query = query.filter(TagUsageCounts.count <= max_count)
 
             rows = query.all()  # [(tag_id,), (tag_id,)]
-            tag_ids = {r[0] for r in rows} #setで重複排除
+            tag_ids = {r[0] for r in rows}  # setで重複排除
             return list(tag_ids)
 
-    def search_tag_ids_by_alias(
-        self,
-        alias: bool = True,
-        format_id: Optional[int] = None
-    ) -> list[int]:
+    def search_tag_ids_by_alias(self, alias: bool = True, format_id: int | None = None) -> list[int]:
         """
         TagStatusテーブルのaliasカラムが指定の真偽値に一致するtag_idを取得。
         フォーマットIDを指定すると、そのフォーマットだけに限定。
@@ -653,11 +641,7 @@ class TagRepository:
             rows = query.all()
             return [r[0] for r in rows]
 
-    def search_tag_ids_by_type_name(
-        self,
-        type_name: str,
-        format_id: Optional[int] = None
-    ) -> list[int]:
+    def search_tag_ids_by_type_name(self, type_name: str, format_id: int | None = None) -> list[int]:
         """
         指定されたタイプ名を持つタグIDを検索する。
         フォーマットIDが指定されていればさらに絞り込む。
@@ -707,7 +691,7 @@ class TagRepository:
             rows = query.all()
             return [r[0] for r in rows]
 
-    def find_preferred_tag(self, tag_id: int, format_id: int) -> Optional[int]:
+    def find_preferred_tag(self, tag_id: int, format_id: int) -> int | None:
         """
         タグIDとフォーマットIDを指定して、優先タグIDを取得する。
 
@@ -743,11 +727,7 @@ class TagRepository:
             list[int]: すべてのフォーマットIDのリスト。
         """
         with self.session_factory() as session:
-            tag_ids = (
-                session.query(TagFormat.format_id)
-                .distinct()
-                .all()
-            )
+            tag_ids = session.query(TagFormat.format_id).distinct().all()
             return [tag_id[0] for tag_id in tag_ids]
 
     def get_tag_formats(self) -> list[str]:
@@ -758,11 +738,7 @@ class TagRepository:
             list[str]: フォーマット名のリスト。
         """
         with self.session_factory() as session:
-            formats = (
-                session.query(TagFormat.format_name)
-                .distinct()
-                .all()
-            )
+            formats = session.query(TagFormat.format_name).distinct().all()
             return [format[0] for format in formats]
 
     def get_tag_languages(self) -> list[str]:
@@ -773,11 +749,7 @@ class TagRepository:
         """
         with self.session_factory() as session:
             # DISTINCTを使用して重複を排除
-            languages = (
-                session.query(TagTranslation.language)
-                .distinct()
-                .all()
-            )
+            languages = session.query(TagTranslation.language).distinct().all()
             return [lang[0] for lang in languages]
 
     def get_tag_types(self, format_id: int) -> list[str]:
@@ -793,10 +765,7 @@ class TagRepository:
         with self.session_factory() as session:
             rows = (
                 session.query(TagTypeName.type_name)
-                .join(
-                    TagTypeFormatMapping,
-                    TagTypeName.type_name_id == TagTypeFormatMapping.type_name_id
-                )
+                .join(TagTypeFormatMapping, TagTypeName.type_name_id == TagTypeFormatMapping.type_name_id)
                 .filter(TagTypeFormatMapping.format_id == format_id)
                 .all()
             )

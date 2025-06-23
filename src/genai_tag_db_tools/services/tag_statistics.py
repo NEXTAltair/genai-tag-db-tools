@@ -1,7 +1,8 @@
 # genai_tag_db_tools.services.tag_statistics
 
+from typing import Any
+
 import polars as pl
-from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from genai_tag_db_tools.data.tag_repository import TagRepository
@@ -19,9 +20,10 @@ class TagStatistics:
       6) タグが持つ翻訳の総数・言語別翻訳状況
     """
 
-    def __init__(self, session: Optional[Session] = None):
+    def __init__(self, session: Session | None = None):
         # セッションからセッションファクトリを作成
         if session is not None:
+
             def session_factory():
                 return session
         else:
@@ -84,18 +86,22 @@ class TagStatistics:
             for t_id in all_tag_ids:
                 usage = self.repo.get_usage_count(t_id, fmt_id)
                 if usage is not None:
-                    rows.append({
-                        "tag_id": t_id,
-                        "format_name": fmt_name,
-                        "usage_count": usage,
-                    })
+                    rows.append(
+                        {
+                            "tag_id": t_id,
+                            "format_name": fmt_name,
+                            "usage_count": usage,
+                        }
+                    )
                 else:
                     # usage_count レコードが無い場合は 0 として扱うなら以下のように:
-                    rows.append({
-                        "tag_id": t_id,
-                        "format_name": fmt_name,
-                        "usage_count": 0,
-                    })
+                    rows.append(
+                        {
+                            "tag_id": t_id,
+                            "format_name": fmt_name,
+                            "usage_count": 0,
+                        }
+                    )
 
         if not rows:
             return pl.DataFrame([])
@@ -123,11 +129,7 @@ class TagStatistics:
             for t_name in type_names:
                 # その type_name に属する tag_id リスト
                 tag_ids = self.repo.search_tag_ids_by_type_name(t_name, format_id=fmt_id)
-                rows.append({
-                    "format_name": fmt_name,
-                    "type_name": t_name,
-                    "tag_count": len(tag_ids)
-                })
+                rows.append({"format_name": fmt_name, "type_name": t_name, "tag_count": len(tag_ids)})
 
         return pl.DataFrame(rows)
 
@@ -145,11 +147,9 @@ class TagStatistics:
         for t_id in all_tag_ids:
             translations = self.repo.get_translations(t_id)
             lang_set = {tr.language for tr in translations}
-            rows.append({
-                "tag_id": t_id,
-                "total_translations": len(translations),
-                "languages": list(lang_set)
-            })
+            rows.append(
+                {"tag_id": t_id, "total_translations": len(translations), "languages": list(lang_set)}
+            )
         return pl.DataFrame(rows)
 
 
