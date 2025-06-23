@@ -1,12 +1,14 @@
-import sys
 import logging
+import sys
+
 from PySide6.QtCore import Slot
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
+
 from genai_tag_db_tools.gui.designer.MainWindow_ui import Ui_MainWindow
-from genai_tag_db_tools.gui.widgets.tag_search import TagSearchWidget
 from genai_tag_db_tools.gui.widgets.tag_cleaner import TagCleanerWidget
 from genai_tag_db_tools.gui.widgets.tag_import import TagDataImportDialog
 from genai_tag_db_tools.gui.widgets.tag_register import TagRegisterWidget
+from genai_tag_db_tools.gui.widgets.tag_search import TagSearchWidget
 from genai_tag_db_tools.gui.widgets.tag_statistics import TagStatisticsWidget
 
 
@@ -34,19 +36,22 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         except Exception as e:
             self.logger.error(f"Error during MainWindow initialization: {e}", exc_info=True)
-            QMessageBox.critical(self, "初期化エラー", f"アプリケーションの初期化中にエラーが発生しました: {e}")
+            QMessageBox.critical(
+                self, "初期化エラー", f"アプリケーションの初期化中にエラーが発生しました: {e}"
+            )
             raise
 
     def _initialize_services(self):
         """サービスの初期化"""
         try:
             from genai_tag_db_tools.services.app_services import (
-                TagSearchService,
                 TagCleanerService,
                 TagImportService,
                 TagRegisterService,
-                TagStatisticsService
+                TagSearchService,
+                TagStatisticsService,
             )
+
             self.tag_search_service = TagSearchService()
             self.tag_cleaner_service = TagCleanerService()
             self.tag_register_service = TagRegisterService()
@@ -119,11 +124,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         """
         # ファイル選択ダイアログを表示して、CSVファイルを選択
         from PySide6.QtWidgets import QFileDialog
+
         file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "CSVファイルを選択",
-            "",
-            "CSV files (*.csv);;All files (*.*)"
+            self, "CSVファイルを選択", "", "CSV files (*.csv);;All files (*.*)"
         )
 
         if not file_path:
@@ -131,14 +134,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         # CSVファイルを読み込み
         import polars as pl
+
         try:
             df = pl.read_csv(file_path)
             # インポートダイアログを表示
-            import_dialog = TagDataImportDialog(
-                source_df=df,
-                service=self.tag_import_service,
-                parent=self
-            )
+            import_dialog = TagDataImportDialog(source_df=df, service=self.tag_import_service, parent=self)
             import_dialog.exec_()
         except Exception as e:
             self.logger.error(f"Error during import: {e}", exc_info=True)
@@ -156,10 +156,7 @@ if __name__ == "__main__":
     from pathlib import Path
 
     # ロギングの設定
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     logger = logging.getLogger(__name__)
 
     try:
@@ -175,7 +172,7 @@ if __name__ == "__main__":
 
     except Exception as e:
         logger.error(f"Application failed to start: {e}", exc_info=True)
-        QMessageBox.critical(QApplication.activeWindow() or None,
-                           "起動エラー",
-                           f"アプリケーションの起動に失敗しました: {e}")
+        QMessageBox.critical(
+            QApplication.activeWindow() or None, "起動エラー", f"アプリケーションの起動に失敗しました: {e}"
+        )
         sys.exit(1)

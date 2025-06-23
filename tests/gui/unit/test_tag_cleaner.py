@@ -1,5 +1,7 @@
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
+
 from genai_tag_db_tools.gui.widgets.tag_cleaner import TagCleanerWidget
 
 

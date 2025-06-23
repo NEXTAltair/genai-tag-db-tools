@@ -1,12 +1,13 @@
 # tests.unit.test_tag_statistics
-import pytest
 import polars as pl
+import pytest
+
+# 2) テストで使用する DB セッション関連クラスをインポート
+from genai_tag_db_tools.data.database_schema import TagDatabase
 
 # 1) テスト対象のクラスをインポート
 from genai_tag_db_tools.services.tag_statistics import TagStatistics
 
-# 2) テストで使用する DB セッション関連クラスをインポート
-from genai_tag_db_tools.data.database_schema import TagDatabase
 
 @pytest.fixture(scope="function")
 def tag_statistics(db_session):
@@ -53,7 +54,7 @@ def tag_statistics(db_session):
             format_id=format_e621_id,
             alias=True,
             preferred_tag_id=tag_id_dog,
-            type_id=0  # e621のgeneralタイプを使用
+            type_id=0,  # e621のgeneralタイプを使用
         )
     except ValueError:
         # alias=False で再設定 (エイリアス設定のバリデーションが通らない場合の例)
@@ -62,7 +63,7 @@ def tag_statistics(db_session):
             format_id=format_e621_id,
             alias=False,
             preferred_tag_id=tag_id_cat,
-            type_id=0  # e621のgeneralタイプを使用
+            type_id=0,  # e621のgeneralタイプを使用
         )
 
     # 翻訳を追加 (dog: 英語=dog, 日本語=犬, cat: 英語=cat, 日本語=猫)
@@ -117,16 +118,12 @@ def test_usage_stats(tag_statistics):
 
     # dog(danbooru) = 10
     # フォーマット名からフィルタ
-    subset_dog_danbooru = df.filter(
-        (pl.col("tag_id") == dog_id) & (pl.col("format_name") == "danbooru")
-    )
+    subset_dog_danbooru = df.filter((pl.col("tag_id") == dog_id) & (pl.col("format_name") == "danbooru"))
     assert len(subset_dog_danbooru) == 1
     assert subset_dog_danbooru[0, "usage_count"] == 10
 
     # cat(e621) = 2
-    subset_cat_e621 = df.filter(
-        (pl.col("tag_id") == cat_id) & (pl.col("format_name") == "e621")
-    )
+    subset_cat_e621 = df.filter((pl.col("tag_id") == cat_id) & (pl.col("format_name") == "e621"))
     assert len(subset_cat_e621) == 1
     assert subset_cat_e621[0, "usage_count"] == 2
 

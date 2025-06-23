@@ -1,13 +1,16 @@
-import pytest
 from unittest.mock import MagicMock
+
 import polars as pl
+import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTableWidgetItem
 
 # TagSearchWidget をインポート
 from genai_tag_db_tools.gui.widgets.tag_search import TagSearchWidget
+
 # TagSearchService などサービス層をインポート
 from genai_tag_db_tools.services.app_services import TagSearchService
+
 
 @pytest.fixture
 def widget_fixture(qtbot):
@@ -23,11 +26,7 @@ def widget_fixture(qtbot):
 
     # 検索結果用の DataFrame サンプル
     # 例: 2行×3列くらい
-    sample_df = pl.DataFrame({
-        "tag_id": [101, 102],
-        "tag": ["cat", "dog"],
-        "usage_count": [10, 20]
-    })
+    sample_df = pl.DataFrame({"tag_id": [101, 102], "tag": ["cat", "dog"], "usage_count": [10, 20]})
 
     # search_tags() が呼ばれたときに sample_df を返す
     mock_service.search_tags.return_value = sample_df
@@ -55,6 +54,7 @@ def test_initialize_ui(widget_fixture):
     assert "All" in lang_items
     assert "en" in lang_items
     assert "ja" in lang_items
+
 
 def test_on_pushButtonSearch_clicked(widget_fixture, qtbot):
     """
@@ -87,6 +87,7 @@ def test_on_pushButtonSearch_clicked(widget_fixture, qtbot):
     item_0_1 = table.item(0, 1)
     assert item_0_1.text() == "cat"
 
+
 def test_empty_result(widget_fixture, qtbot):
     """
     search_tags が空の DataFrame を返した場合、テーブルがクリアされるかテスト。
@@ -103,6 +104,7 @@ def test_empty_result(widget_fixture, qtbot):
     table = widget.tableWidgetResults
     assert table.rowCount() == 0
     assert table.columnCount() == 0
+
 
 def test_slider_usage_range(widget_fixture):
     """
@@ -126,6 +128,7 @@ def test_slider_usage_range(widget_fixture):
     assert call_kwargs["max_usage"] is not None
     # 具体的に scale_to_count(25), scale_to_count(75) の値を確認したいなら
     # slider.valueChanged等を経由して計算されるため、CustomLogScaleSliderの挙動をモック or assert
+
 
 @pytest.mark.skip(reason="save 機能未実装のためスキップ")
 def test_save_search_button_clicked(widget_fixture, qtbot):

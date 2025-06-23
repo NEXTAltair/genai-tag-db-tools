@@ -1,6 +1,6 @@
-from pathlib import Path
 import logging
 import sqlite3
+from pathlib import Path
 
 import polars as pl
 
@@ -9,12 +9,7 @@ from genai_tag_db_tools.services.processor import CSVToDatabaseProcessor
 
 class DanbooruJaTagBatch:
     def __init__(self, df: pl.DataFrame):
-        db_path = (
-            Path(__file__).resolve().parent.parent
-            / "genai_tag_db_tools"
-            / "data"
-            / "tags_v4.db"
-        )
+        db_path = Path(__file__).resolve().parent.parent / "genai_tag_db_tools" / "data" / "tags_v4.db"
         self.conn = sqlite3.connect(db_path)
         self.df = df
         self.logger = logging.getLogger(__name__)
@@ -24,16 +19,11 @@ class DanbooruJaTagBatch:
         """TAGSテーブルから既存のタグを取得し辞書化"""
         query = "SELECT tag_id, source_tag FROM TAGS"
         existing_tags = pl.read_database(query, self.conn)
-        return {
-            row["source_tag"]: row["tag_id"]
-            for row in existing_tags.iter_rows(named=True)
-        }
+        return {row["source_tag"]: row["tag_id"] for row in existing_tags.iter_rows(named=True)}
 
     def insert_new_tags(self, new_tags):
         """新しいタグを一括挿入"""
-        normalized_tags = [
-            (tag, CSVToDatabaseProcessor.normalize_tag(tag)) for tag in new_tags
-        ]
+        normalized_tags = [(tag, CSVToDatabaseProcessor.normalize_tag(tag)) for tag in new_tags]
         query = "INSERT INTO TAGS (source_tag, tag) VALUES (?, ?)"
         cursor = self.conn.cursor()
         cursor.executemany(query, normalized_tags)
@@ -63,9 +53,7 @@ class DanbooruJaTagBatch:
     def process_tags(self):
         # 新規タグと既存タグを区別
         new_tags = [
-            row["title"]
-            for row in self.df.iter_rows(named=True)
-            if row["title"] not in self.existing_tags
+            row["title"] for row in self.df.iter_rows(named=True) if row["title"] not in self.existing_tags
         ]
         if new_tags:
             self.existing_tags.update(self.insert_new_tags(new_tags))

@@ -1,19 +1,25 @@
 # genai_tag_db_tools/gui/widgets/tag_register.py
 
-from PySide6.QtWidgets import QWidget, QMessageBox
 from PySide6.QtCore import Slot
+from PySide6.QtWidgets import QMessageBox, QWidget
 
 from genai_tag_db_tools.gui.designer.TagRegisterWidget_ui import Ui_TagRegisterWidget
-from genai_tag_db_tools.utils.cleanup_str import TagCleaner
 
 # 新しく使うサービスクラス
-from genai_tag_db_tools.services.app_services import TagSearchService
-from genai_tag_db_tools.services.app_services import TagRegisterService  # 上記例で追加したクラス
+from genai_tag_db_tools.services.app_services import (
+    TagRegisterService,  # 上記例で追加したクラス
+    TagSearchService,
+)
+from genai_tag_db_tools.utils.cleanup_str import TagCleaner
+
 
 class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
-    def __init__(self, parent=None,
-                 search_service: TagSearchService = None,
-                 register_service: TagRegisterService = None):
+    def __init__(
+        self,
+        parent=None,
+        search_service: TagSearchService = None,
+        register_service: TagRegisterService = None,
+    ):
         super().__init__(parent)
         self.setupUi(self)
 
@@ -66,7 +72,7 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
 
         except Exception as e:
             QMessageBox.warning(self, "エラー", str(e))
-            self.textEditOutput.append(f"エラー: {str(e)}")
+            self.textEditOutput.append(f"エラー: {e!s}")
 
     @Slot()
     def on_pushButtonImport_clicked(self):
@@ -138,8 +144,10 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
         self.comboBoxLanguage.setCurrentText("japanese")
         self.lineEditTranslation.clear()
 
+
 if __name__ == "__main__":
     import sys
+
     from PySide6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)

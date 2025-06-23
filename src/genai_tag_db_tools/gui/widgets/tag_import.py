@@ -3,18 +3,17 @@ import logging
 from functools import partial
 
 import polars as pl
-from PySide6.QtCore import Slot, Qt, QAbstractTableModel, Signal
+from PySide6.QtCore import QAbstractTableModel, Qt, Signal, Slot
 from PySide6.QtWidgets import QDialog, QMenu, QMessageBox
 
 from genai_tag_db_tools.gui.designer.TagDataImportDialog_ui import (
     Ui_TagDataImportDialog,
 )
 
-from genai_tag_db_tools.services.import_data import ImportConfig
-from genai_tag_db_tools.services.polars_schema import AVAILABLE_COLUMNS
-
 # 新規作成したサービス層をインポート (TagImportService)
 from genai_tag_db_tools.services.app_services import TagImportService
+from genai_tag_db_tools.services.import_data import ImportConfig
+from genai_tag_db_tools.services.polars_schema import AVAILABLE_COLUMNS
 
 
 class PolarsModel(QAbstractTableModel):
@@ -22,6 +21,7 @@ class PolarsModel(QAbstractTableModel):
     Polars DataFrame の表示と、カラムマッピング（元カラム名→新カラム名）の管理を担当するモデル。
     DB操作やビジネスロジックは含まない。
     """
+
     mappingChanged = Signal()
 
     def __init__(self, data: pl.DataFrame):
@@ -30,7 +30,7 @@ class PolarsModel(QAbstractTableModel):
         self._data = data
         self._headers = list(self._data.columns)
         # 「カラムインデックス → '未選択' or カラム名」の辞書
-        self._mapping = {i: "未選択" for i in range(len(self._headers))}
+        self._mapping = dict.fromkeys(range(len(self._headers)), "未選択")
 
     def rowCount(self, parent=None):
         return self._data.height
@@ -72,11 +72,7 @@ class PolarsModel(QAbstractTableModel):
         { "元カラム名": "新カラム名" } の辞書を返す。
         '未選択' は含めない。
         """
-        return {
-            self._headers[col]: mapped
-            for col, mapped in self._mapping.items()
-            if mapped != "未選択"
-        }
+        return {self._headers[col]: mapped for col, mapped in self._mapping.items() if mapped != "未選択"}
 
 
 class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
@@ -85,12 +81,7 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
     カラムマッピングやUI操作を担当。
     """
 
-    def __init__(
-        self,
-        source_df: pl.DataFrame,
-        service: TagImportService,
-        parent=None
-    ):
+    def __init__(self, source_df: pl.DataFrame, service: TagImportService, parent=None):
         """
         コンストラクタで TagImportService を受け取り、GUI側で使う。
         source_df はプレビュー表示用のPolars DataFrame。
@@ -230,7 +221,7 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
 
         # コンボボックスの状態を確認
         format_chosen = bool(self.formatComboBox.currentText())
-        language_chosen = (self.languageComboBox.currentText() != "None")
+        language_chosen = self.languageComboBox.currentText() != "None"
 
         # 簡易バリデーション
         if not has_source_tag and not has_tag:
@@ -291,9 +282,7 @@ class TagDataImportDialog(QDialog, Ui_TagDataImportDialog):
             action = mapping_menu.addAction(mapped_name)
             # アクションがトリガーされたときに対応するメソッドを呼び出す
             # functools.partialを使用して引数を渡す
-            action.triggered.connect(
-                partial(self.set_column_mapping, column, mapped_name)
-            )
+            action.triggered.connect(partial(self.set_column_mapping, column, mapped_name))
 
         if not isinstance(pos_or_column, int):
             menu.exec(self.dataPreviewTable.horizontalHeader().mapToGlobal(pos_or_column))
@@ -309,19 +298,16 @@ if __name__ == "__main__":
     """
     import sys
     from pathlib import Path
+
     from PySide6.QtWidgets import QApplication
 
     # テスト用CSV (例)
-    csv_path = (
-        Path(__file__).resolve().parent.parent.parent.parent
-        / "tests"
-        / "resource"
-        / "case_03.csv"
-    )
+    csv_path = Path(__file__).resolve().parent.parent.parent.parent / "tests" / "resource" / "case_03.csv"
     df = pl.read_csv(csv_path, has_header=False)
 
     # サービス層を生成
     from genai_tag_db_tools.services.app_services import TagImportService
+
     service = TagImportService()
 
     app = QApplication(sys.argv)

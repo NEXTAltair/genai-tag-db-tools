@@ -1,17 +1,19 @@
 import pytest
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
-from genai_tag_db_tools.data.database_schema import Base
-from genai_tag_db_tools.data.database_schema import(
-        Tag,
-        TagStatus,
-        TagTranslation,
-        TagFormat, TagTypeName,
-        TagTypeFormatMapping,
-        TagUsageCounts
-    )
+from genai_tag_db_tools.data.database_schema import (
+    Base,
+    Tag,
+    TagFormat,
+    TagStatus,
+    TagTranslation,
+    TagTypeFormatMapping,
+    TagTypeName,
+    TagUsageCounts,
+)
 from genai_tag_db_tools.data.tag_repository import TagRepository
+
 
 # =============================================================================
 # 1) テスト用インメモリDBのフィクスチャ
@@ -31,6 +33,7 @@ def tag_repository(db_session: Session):
 
     # session_factory をオーバーライド
     from sqlalchemy.orm import sessionmaker
+
     session_factory_override = sessionmaker(bind=db_session.bind)
     repository.session_factory = session_factory_override
 
@@ -40,9 +43,11 @@ def tag_repository(db_session: Session):
     # 今回は functionスコープで db_session が切れるときにロールバックされるため特になし
     Base.metadata.drop_all(bind=db_session.bind)
 
+
 # =============================================================================
 # 2) 正常系テスト
-#=============================================================================
+# =============================================================================
+
 
 def test_create_tag(tag_repository):
     """
@@ -54,6 +59,7 @@ def test_create_tag(tag_repository):
     # 再度同じタグを登録 → 既存を返す
     same_id = tag_repository.create_tag("source_2", "mytag")
     assert same_id == 1  # 既存IDが返る
+
 
 def test_get_tag_id_by_name(tag_repository):
     """
@@ -75,6 +81,7 @@ def test_get_tag_id_by_name(tag_repository):
     found_partial = tag_repository.get_tag_id_by_name("ban*", partial=True)
     assert found_partial == t2
 
+
 def test_update_tag(tag_repository):
     """
     update_tag のテスト。
@@ -88,6 +95,7 @@ def test_update_tag(tag_repository):
     assert updated.source_tag == "src_after"
     assert updated.tag == "after"
 
+
 def test_delete_tag(tag_repository):
     """
     delete_tag のテスト。
@@ -97,6 +105,7 @@ def test_delete_tag(tag_repository):
     # 削除されたので None になるはず
     deleted = tag_repository.get_tag_by_id(tag_id)
     assert deleted is None
+
 
 def test_bulk_insert_tags(tag_repository):
     """
@@ -108,12 +117,7 @@ def test_bulk_insert_tags(tag_repository):
     except ImportError:
         pytest.skip("polarsがインストールされていないためスキップ")
 
-    df = pl.DataFrame(
-        {
-            "source_tag": ["src1", "src2", "src3"],
-            "tag": ["foo", "bar", "baz"]
-        }
-    )
+    df = pl.DataFrame({"source_tag": ["src1", "src2", "src3"], "tag": ["foo", "bar", "baz"]})
     tag_repository.bulk_insert_tags(df)
 
     # 登録確認
@@ -124,6 +128,7 @@ def test_bulk_insert_tags(tag_repository):
     assert t_foo is not None
     assert t_bar is not None
     assert t_baz is not None
+
 
 def test_get_format_id(tag_repository):
     """
@@ -141,6 +146,7 @@ def test_get_format_id(tag_repository):
     # 異常系: 存在しないformat_nameの場合は 0 を返す
     fid_none = tag_repository.get_format_id("unknown")
     assert fid_none == 0
+
 
 def test_get_tag_formats(tag_repository):
     """
@@ -172,6 +178,7 @@ def test_get_tag_formats(tag_repository):
     assert "test_format2" in format_list
     assert "test_format3" in format_list
 
+
 def test_update_tag_status(tag_repository):
     """
     update_tag_status のテスト。
@@ -191,10 +198,13 @@ def test_update_tag_status(tag_repository):
     # 3) もう一度同じ (tag_id=5, format_id=20) で登録
     #    → DBのPK/UNIQUE制約が発動して IntegrityError → リポジトリで ValueError に変換
     with pytest.raises(ValueError) as exc_info:
-        tag_repository.update_tag_status(tag_id=5, format_id=20, type_id=None, alias=False, preferred_tag_id=5)
+        tag_repository.update_tag_status(
+            tag_id=5, format_id=20, type_id=None, alias=False, preferred_tag_id=5
+        )
 
     # 必要ならメッセージ内容をチェック
     assert "データベース操作に失敗しました:" in str(exc_info.value)
+
 
 def test_get_usage_count_and_update_usage_count(tag_repository):
     """
@@ -217,6 +227,7 @@ def test_get_usage_count_and_update_usage_count(tag_repository):
     tag_repository.update_usage_count(10, 30, 15)
     assert tag_repository.get_usage_count(10, 30) == 15
 
+
 def test_add_or_update_translation(tag_repository):
     """
     翻訳テーブルへの追加テスト。
@@ -237,6 +248,7 @@ def test_add_or_update_translation(tag_repository):
     translations = tag_repository.get_translations(50)
     assert len(translations) == 1  # 変わらない
 
+
 def test_find_preferred_tag(tag_repository):
     """
     find_preferred_tag のテスト。
@@ -256,12 +268,7 @@ def test_find_preferred_tag(tag_repository):
 
     # ここでTagStatusをINSERT
     with tag_repository.session_factory() as session:
-        status_cat = TagStatus(
-            tag_id=201,
-            format_id=60,
-            alias=True,
-            preferred_tag_id=999
-        )
+        status_cat = TagStatus(tag_id=201, format_id=60, alias=True, preferred_tag_id=999)
         session.add(status_cat)
         session.commit()
 
@@ -271,6 +278,7 @@ def test_find_preferred_tag(tag_repository):
         # 存在しなければNone
         none_pref = tag_repository.find_preferred_tag(tag_id=999, format_id=60)
         assert none_pref is None
+
 
 def test_search_tag_ids_with_translation(tag_repository):
     """
@@ -388,8 +396,9 @@ def test_search_tag_ids_by_usage_count_range(tag_repository):
         assert len(res_4) == 0
 
 
+
 import pytest
-from unittest.mock import PropertyMock
+
 
 def test_search_tag_ids_by_alias(tag_repository):
     with tag_repository.session_factory() as session:
@@ -458,14 +467,8 @@ def test_search_tag_ids_by_type_name(tag_repository):
         tid_n = tag_n.tag_id
 
         # 3) TagStatus
-        status_m = TagStatus(
-            tag_id=tid_m, format_id=301, type_id=100,
-            alias=False, preferred_tag_id=tid_m
-        )
-        status_n = TagStatus(
-            tag_id=tid_n, format_id=301, type_id=101,
-            alias=False, preferred_tag_id=tid_n
-        )
+        status_m = TagStatus(tag_id=tid_m, format_id=301, type_id=100, alias=False, preferred_tag_id=tid_m)
+        status_n = TagStatus(tag_id=tid_n, format_id=301, type_id=101, alias=False, preferred_tag_id=tid_n)
         session.add_all([status_m, status_n])
         session.commit()
 
@@ -536,6 +539,7 @@ def test_search_tag_ids_by_format_name(tag_repository):
 # 3) 異常系テストの追加
 # =============================================================================
 
+
 def test_create_tag_with_invalid_arguments(tag_repository):
     """
     create_tag の異常系テスト例。
@@ -549,6 +553,7 @@ def test_create_tag_with_invalid_arguments(tag_repository):
     with pytest.raises(ValueError):
         tag_repository.create_tag(None, "some_tag")
 
+
 def test_update_tag_nonexistent_id(tag_repository):
     """
     update_tag の異常系テスト。
@@ -559,6 +564,7 @@ def test_update_tag_nonexistent_id(tag_repository):
     with pytest.raises(ValueError):
         tag_repository.update_tag(non_existent_id, source_tag="does_not_exist", tag="does_not_exist")
 
+
 def test_delete_tag_nonexistent_id(tag_repository):
     """
     delete_tag の異常系テスト。
@@ -567,6 +573,7 @@ def test_delete_tag_nonexistent_id(tag_repository):
     non_existent_id = 9999
     with pytest.raises(ValueError):
         tag_repository.delete_tag(non_existent_id)
+
 
 def test_update_tag_status_inconsistent_preferred_id(tag_repository):
     """
@@ -589,8 +596,9 @@ def test_update_tag_status_inconsistent_preferred_id(tag_repository):
             format_id=201,
             type_id=100,
             alias=False,
-            preferred_tag_id=999  # 本来なら1 を指定すべき
+            preferred_tag_id=999,  # 本来なら1 を指定すべき
         )
+
 
 def test_update_tag_status_nonexistent_foreign_keys(tag_repository):
     """
@@ -600,12 +608,9 @@ def test_update_tag_status_nonexistent_foreign_keys(tag_repository):
     with pytest.raises((IntegrityError, ValueError)):
         # 事前にTagやFormatを入れていないので、DBレイヤーでFK制約エラーになる想定
         tag_repository.update_tag_status(
-            tag_id=9999,
-            format_id=8888,
-            type_id=100,
-            alias=False,
-            preferred_tag_id=9999
+            tag_id=9999, format_id=8888, type_id=100, alias=False, preferred_tag_id=9999
         )
+
 
 def test_bulk_insert_tags_invalid_data(tag_repository):
     """
@@ -626,6 +631,7 @@ def test_bulk_insert_tags_invalid_data(tag_repository):
     )
     with pytest.raises(ValueError):
         tag_repository.bulk_insert_tags(df_missing_column)
+
 
 def test_add_or_update_translation_nonexistent_tag(tag_repository):
     """

@@ -1,20 +1,19 @@
 # genai_tag_db_tools/gui/widgets/tag_statistics.py
 
-from typing import Optional, Any
-
-from PySide6.QtWidgets import QWidget, QListWidgetItem, QVBoxLayout, QLabel
-from PySide6.QtCore import Qt, Slot
-from PySide6.QtCharts import (
-    QChartView,
-    QChart,
-    QBarSeries,
-    QBarSet,
-    QPieSeries,
-    QBarCategoryAxis,
-    QValueAxis,
-)
+from typing import Any
 
 import polars as pl
+from PySide6.QtCharts import (
+    QBarCategoryAxis,
+    QBarSeries,
+    QBarSet,
+    QChart,
+    QChartView,
+    QPieSeries,
+    QValueAxis,
+)
+from PySide6.QtCore import Qt, Slot
+from PySide6.QtWidgets import QLabel, QListWidgetItem, QVBoxLayout, QWidget
 
 from genai_tag_db_tools.gui.designer.TagStatisticsWidget_ui import Ui_TagStatisticsWidget
 from genai_tag_db_tools.services.app_services import TagStatisticsService
@@ -37,6 +36,7 @@ def safe_float(val: Any) -> float:
     except (ValueError, TypeError):
         return 0.0
 
+
 class TagStatisticsWidget(QWidget, Ui_TagStatisticsWidget):
     """
     Polarsデータを用いて統計情報を表示するウィジェットクラス。
@@ -47,7 +47,7 @@ class TagStatisticsWidget(QWidget, Ui_TagStatisticsWidget):
     def __init__(
         self,
         parent=None,
-        service: Optional[TagStatisticsService] = None,
+        service: TagStatisticsService | None = None,
     ):
         super().__init__(parent)
         self.setupUi(self)
@@ -102,9 +102,9 @@ class TagStatisticsWidget(QWidget, Ui_TagStatisticsWidget):
         3) update_statistics()でUI反映
         """
         # 1) 統計を取得
-        general_stats = self.service.get_general_stats()       # dict
-        usage_df = self.service.get_usage_stats()             # pl.DataFrame
-        type_dist_df = self.service.get_type_distribution()   # pl.DataFrame
+        general_stats = self.service.get_general_stats()  # dict
+        usage_df = self.service.get_usage_stats()  # pl.DataFrame
+        type_dist_df = self.service.get_type_distribution()  # pl.DataFrame
         translation_df = self.service.get_translation_stats()  # pl.DataFrame
 
         # 2) 取得データを self.statistics に格納
@@ -153,10 +153,7 @@ class TagStatisticsWidget(QWidget, Ui_TagStatisticsWidget):
 
         # 2) Pivot して行=type_name, 列=format_name, 値=tag_count
         pivoted = type_df.pivot(
-            on="format_name",
-            index="type_name",
-            values="tag_count",
-            aggregate_function="first"
+            on="format_name", index="type_name", values="tag_count", aggregate_function="first"
         ).fill_null(0)
 
         # pivoted のカラムは ["type_name", "danbooru", "e621", ...] 等になる想定
@@ -227,9 +224,7 @@ class TagStatisticsWidget(QWidget, Ui_TagStatisticsWidget):
             return
 
         # フォーマット別に usage_count を合計
-        grouped = usage_df.group_by("format_name").agg([
-            pl.col("usage_count").sum().alias("total_usage")
-        ])
+        grouped = usage_df.group_by("format_name").agg([pl.col("usage_count").sum().alias("total_usage")])
         # grouped カラム: [format_name, total_usage]
 
         # QChart組み立て (円グラフ)
@@ -262,9 +257,7 @@ class TagStatisticsWidget(QWidget, Ui_TagStatisticsWidget):
         # polars 0.17 以降なら
         exploded = translation_df.explode("languages")
         # groupby("languages") で件数カウント
-        freq = exploded.group_by("languages").agg([
-            pl.count().alias("count")
-        ])
+        freq = exploded.group_by("languages").agg([pl.count().alias("count")])
         # freq カラム: [languages, tag_id, total_translations] など
         # "tag_id" にレコード数が入るのでリネーム
         freq = freq.rename({"tag_id": "count"}).select(["languages", "count"])
@@ -325,9 +318,7 @@ class TagStatisticsWidget(QWidget, Ui_TagStatisticsWidget):
             return
 
         # 全フォーマット合計でソート → 上位10
-        grouped = usage_df.group_by("tag_id").agg([
-            pl.col("usage_count").sum().alias("sum_usage")
-        ])
+        grouped = usage_df.group_by("tag_id").agg([pl.col("usage_count").sum().alias("sum_usage")])
         top_10 = grouped.sort("sum_usage", descending=True).head(10)
 
         self.listWidgetTopTags.clear()
@@ -378,6 +369,7 @@ class TagStatisticsWidget(QWidget, Ui_TagStatisticsWidget):
 
 if __name__ == "__main__":
     import sys
+
     from PySide6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)

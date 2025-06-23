@@ -1,20 +1,22 @@
 # genai_tag_db_tools/gui/widgets/tag_search.py
 
 import logging
-from typing import Optional
 
-import polars as pl
 import numpy as np
-
+import polars as pl
+from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel,QTableWidgetItem,QMessageBox,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, Slot, Signal
-
 from superqt import QRangeSlider
 
 from genai_tag_db_tools.gui.designer.TagSearchWidget_ui import Ui_TagSearchWidget
+
 # 例: TagSearchService (または TagSearcher などサービス層) を利用
 from genai_tag_db_tools.services.app_services import TagSearchService
 
@@ -26,6 +28,7 @@ class CustomLogScaleSlider(QWidget):
     (UI内にはQWidget(usageCountSlider)が配置されており、
      そこにレイアウトを追加して使う)
     """
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setup_ui()
@@ -93,7 +96,7 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
 
     error_occurred = Signal(str)
 
-    def __init__(self, service: Optional[TagSearchService] = None, parent=None):
+    def __init__(self, service: TagSearchService | None = None, parent=None):
         super().__init__(parent)
         # QtDesignerで自動生成されたUIを適用
         self.setupUi(self)
@@ -234,6 +237,7 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         """
         # 今の検索条件を取得し、どこかに保存...
         print("[on_pushButtonSaveSearch_clicked] 保存ロジックを実装する...")
+
     # TODO:
     # ここではgroupBoxSavedSearches, comboBoxSavedSearches などを使って
     # 複数の検索条件をロードしたりする処理を追加実装できる。
@@ -241,12 +245,14 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
 
 if __name__ == "__main__":
     import sys
+
     from PySide6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)
 
     # 例: TagSearchServiceを生成
     from genai_tag_db_tools.services.app_services import TagSearchService
+
     service = TagSearchService()
 
     widget = TagSearchWidget(service=service)

@@ -1,9 +1,10 @@
-import pytest
-import polars as pl
 from unittest.mock import MagicMock
 
-from genai_tag_db_tools.services.tag_register import TagRegister
+import polars as pl
+import pytest
+
 from genai_tag_db_tools.data.tag_repository import TagRepository
+from genai_tag_db_tools.services.tag_register import TagRegister
 
 
 @pytest.fixture
@@ -127,10 +128,7 @@ def test_update_usage_counts(register: TagRegister):
     """
     update_usage_counts メソッドのテスト
     """
-    df = pl.DataFrame({
-        "tag_id": [1, 2],
-        "count": [10, 20]
-    })
+    df = pl.DataFrame({"tag_id": [1, 2], "count": [10, 20]})
     format_id = 1
 
     register.update_usage_counts(df, format_id)
@@ -145,10 +143,7 @@ def test_update_translations(register: TagRegister):
     """
     update_translations メソッドのテスト
     """
-    df = pl.DataFrame({
-        "tag_id": [1, 2],
-        "translation": ["翻訳1", "翻訳2"]
-    })
+    df = pl.DataFrame({"tag_id": [1, 2], "translation": ["翻訳1", "翻訳2"]})
     language = "ja"
 
     register.update_translations(df, language)
@@ -163,10 +158,12 @@ def test_update_deprecated_tags(register: TagRegister):
     """
     update_deprecated_tags メソッドのテスト
     """
-    df = pl.DataFrame({
-        "tag_id": [1],
-        "deprecated_tags": ["old_tag1,old_tag2"]  # カンマの後にスペースを入れない
-    })
+    df = pl.DataFrame(
+        {
+            "tag_id": [1],
+            "deprecated_tags": ["old_tag1,old_tag2"],  # カンマの後にスペースを入れない
+        }
+    )
     format_id = 1
 
     # create_tagの戻り値を設定

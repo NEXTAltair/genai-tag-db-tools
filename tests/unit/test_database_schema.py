@@ -1,20 +1,23 @@
+
 import pytest
-from unittest.mock import Mock, patch
-from sqlalchemy import inspect, create_engine, StaticPool
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy import StaticPool, create_engine, inspect
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, sessionmaker
 
 # --- テスト対象のクラス・モデルをインポート ---
 from genai_tag_db_tools.data.database_schema import (
-    Tag, TagFormat, TagTranslation, TagStatus, TagTypeName, TagTypeFormatMapping
+    Base,  # Baseはmetadata.create_all()用
+    Tag,
+    TagDatabase,
+    TagFormat,
+    TagStatus,
+    TagTranslation,
 )
-from genai_tag_db_tools.data.database_schema import Base  # Baseはmetadata.create_all()用
-from genai_tag_db_tools.db.database_setup import engine as global_engine, SessionLocal as GlobalSessionLocal
-from genai_tag_db_tools.data.database_schema import TagDatabase
 
 # =============================================================================
 # フィクスチャ定義: テスト用のメモリDBエンジンとセッション
 # =============================================================================
+
 
 @pytest.fixture(scope="function")
 def memory_engine():
@@ -30,6 +33,7 @@ def memory_engine():
     yield test_engine
     # teardownは不要: :memory: のためテスト終了後に消える
 
+
 @pytest.fixture(scope="function")
 def db_session(memory_engine) -> Session:
     """
@@ -40,6 +44,7 @@ def db_session(memory_engine) -> Session:
     yield session
     # teardown
     session.close()
+
 
 @pytest.fixture(scope="function")
 def tag_database_test(db_session, memory_engine):
@@ -58,17 +63,20 @@ def tag_database_test(db_session, memory_engine):
 
     return db
 
+
 # =============================================================================
 # テスト群
 # =============================================================================
+
 
 def test_tagdatabase_initialization(tag_database_test):
     db = tag_database_test
     assert db.engine is not None
     assert db.session is not None
 
+
 def test_create_tables(tag_database_test, memory_engine):
-    """ 必要なテーブルが作成されているのかの確認 """
+    """必要なテーブルが作成されているのかの確認"""
     db = tag_database_test
 
     # SQLAlchemyのインスペクター(Inspector)でテーブル一覧を取得
@@ -89,8 +97,9 @@ def test_create_tables(tag_database_test, memory_engine):
     for table in expected_tables:
         assert table in tables
 
+
 def test_init_master_data(tag_database_test):
-    """ Tag Format のマスターデータが初期化されているかの確認 """
+    """Tag Format のマスターデータが初期化されているかの確認"""
     db = tag_database_test
     session = db.session
 
@@ -107,8 +116,9 @@ def test_init_master_data(tag_database_test):
     assert "e621" in format_names
     assert "derpibooru" in format_names
 
+
 def test_insert_tag(tag_database_test):
-    """ タグが正しく挿入されるかの確認 """
+    """タグが正しく挿入されるかの確認"""
     db = tag_database_test
     session = db.session
 
@@ -119,6 +129,7 @@ def test_insert_tag(tag_database_test):
     retrieved_tag = session.query(Tag).filter_by(tag_id=1).one()
     assert retrieved_tag.tag == "test_tag"
     assert retrieved_tag.source_tag == "source_tag"
+
 
 def test_tag_translations(tag_database_test):
     db = tag_database_test
@@ -142,6 +153,7 @@ def test_tag_translations(tag_database_test):
     assert retrieved_tag.translations[0].language == "en"
     assert retrieved_tag.translations[0].translation == "translated_tag"
 
+
 def test_cleanup(tag_database_test):
     """
     cleanup メソッドがセッションを正しく管理するかテスト
@@ -163,6 +175,7 @@ def test_cleanup(tag_database_test):
 
     # cleanup後、_sessions から除外されていることを確認
     assert session not in db._sessions
+
 
 def test_tagdatabase_with_existing_session():
     """
@@ -199,6 +212,7 @@ def test_tagdatabase_with_existing_session():
     retrieved = session.query(Tag).filter_by(tag_id=99).one()
     assert retrieved.tag == "existing_session"
 
+
 def test_tagstatus_primarykey_violation(tag_database_test):
     """
     TagStatusテーブルの複合主キー(tag_id, format_id)が既に存在する状態で
@@ -215,8 +229,8 @@ def test_tagstatus_primarykey_violation(tag_database_test):
     # 1件目のTagStatusレコード
     status1 = TagStatus(
         tag_id=1,
-        format_id=1,    # 'danbooru'想定
-        type_id=0,      # general
+        format_id=1,  # 'danbooru'想定
+        type_id=0,  # general
         alias=False,
         preferred_tag_id=1,
     )
@@ -227,14 +241,15 @@ def test_tagstatus_primarykey_violation(tag_database_test):
     status2 = TagStatus(
         tag_id=1,
         format_id=1,
-        type_id=3,      # copyrightとか
+        type_id=3,  # copyrightとか
         alias=False,
-        preferred_tag_id=1
+        preferred_tag_id=1,
     )
 
     with pytest.raises(IntegrityError):
         session.add(status2)
         session.commit()
+
 
 def test_tagstatus_checkconstraint_violation(tag_database_test):
     """
@@ -247,31 +262,21 @@ def test_tagstatus_checkconstraint_violation(tag_database_test):
     session = db.session
 
     # 事前にTagを2件挿入 (tag_id=1, tag_id=2)
-    session.add_all([
-        Tag(tag_id=1, source_tag="source1", tag="test_tag1"),
-        Tag(tag_id=2, source_tag="source2", tag="test_tag2"),
-    ])
+    session.add_all(
+        [
+            Tag(tag_id=1, source_tag="source1", tag="test_tag1"),
+            Tag(tag_id=2, source_tag="source2", tag="test_tag2"),
+        ]
+    )
     session.commit()
 
     # OK例: alias=False, preferred_tag_id=tag_id
-    status_ok = TagStatus(
-        tag_id=1,
-        format_id=1,
-        type_id=0,
-        alias=False,
-        preferred_tag_id=1
-    )
+    status_ok = TagStatus(tag_id=1, format_id=1, type_id=0, alias=False, preferred_tag_id=1)
     session.add(status_ok)
     session.commit()
 
     # 違反例: alias=False なのに preferred_tag_id != tag_id
-    status_ng = TagStatus(
-        tag_id=2,
-        format_id=1,
-        type_id=3,
-        alias=False,
-        preferred_tag_id=1
-    )
+    status_ng = TagStatus(tag_id=2, format_id=1, type_id=3, alias=False, preferred_tag_id=1)
     with pytest.raises(IntegrityError):
         session.add(status_ng)
         session.commit()

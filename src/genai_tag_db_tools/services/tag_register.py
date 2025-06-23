@@ -1,12 +1,12 @@
 # genai_tag_db_tools/services/tag_register.py
 
 import logging
-from typing import Optional
 
 import polars as pl
 
 from genai_tag_db_tools.data.tag_repository import TagRepository
 from genai_tag_db_tools.utils.cleanup_str import TagCleaner
+
 
 class TagRegister:
     """
@@ -14,7 +14,7 @@ class TagRegister:
     GUI依存は持たず、import_data など他のモジュールから利用される想定。
     """
 
-    def __init__(self, repository: Optional[TagRepository] = None):
+    def __init__(self, repository: TagRepository | None = None):
         self.logger = logging.getLogger(self.__class__.__name__)
         self._repo = repository if repository else TagRepository()
 
@@ -77,11 +77,7 @@ class TagRegister:
             tag_id = row["tag_id"]
             usage_count = row["count"]
             if tag_id is not None and usage_count is not None:
-                self._repo.update_usage_count(
-                    tag_id,
-                    format_id,
-                    usage_count
-                )
+                self._repo.update_usage_count(tag_id, format_id, usage_count)
 
     def update_translations(self, df: pl.DataFrame, language: str) -> None:
         """
@@ -94,11 +90,7 @@ class TagRegister:
             tag_id = row["tag_id"]
             trans = row["translation"]
             if tag_id is not None and trans:
-                self._repo.add_or_update_translation(
-                    tag_id,
-                    language,
-                    trans
-                )
+                self._repo.add_or_update_translation(tag_id, language, trans)
 
     def update_deprecated_tags(self, df: pl.DataFrame, format_id: int) -> None:
         """
@@ -121,8 +113,5 @@ class TagRegister:
                 alias_tag_id = self._repo.create_tag(dep_tag, dep_tag)
                 # alias=True, preferred_tag_id=tag_id
                 self._repo.update_tag_status(
-                    tag_id=alias_tag_id,
-                    format_id=format_id,
-                    alias=True,
-                    preferred_tag_id=tag_id
+                    tag_id=alias_tag_id, format_id=format_id, alias=True, preferred_tag_id=tag_id
                 )

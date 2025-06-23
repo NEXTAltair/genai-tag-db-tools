@@ -1,16 +1,16 @@
 # genai_tag_db_tools/services/app_services.py
 
 import logging
+from typing import Any
+
 import polars as pl
-from typing import Optional, Any
+from PySide6.QtCore import QObject, Signal
 from sqlalchemy.orm import Session
 
-from PySide6.QtCore import QObject, Signal
-from genai_tag_db_tools.services.tag_statistics import TagStatistics
-
-from genai_tag_db_tools.services.import_data import TagDataImporter, ImportConfig
-from genai_tag_db_tools.services.tag_search import TagSearcher
 from genai_tag_db_tools.data.tag_repository import TagRepository
+from genai_tag_db_tools.services.import_data import ImportConfig, TagDataImporter
+from genai_tag_db_tools.services.tag_search import TagSearcher
+from genai_tag_db_tools.services.tag_statistics import TagStatistics
 
 
 class GuiServiceBase(QObject):
@@ -20,11 +20,11 @@ class GuiServiceBase(QObject):
     """
 
     # GUI向けに進捗や完了、エラーを通知するためのシグナルを共通定義
-    progress_updated = Signal(int, str)   # (進捗度, メッセージ)
-    process_finished = Signal(str)        # (完了時のメッセージや処理名)
-    error_occurred = Signal(str)          # (エラー内容)
+    progress_updated = Signal(int, str)  # (進捗度, メッセージ)
+    process_finished = Signal(str)  # (完了時のメッセージや処理名)
+    error_occurred = Signal(str)  # (エラー内容)
 
-    def __init__(self, parent: Optional[QObject] = None):
+    def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
         # 各サービスクラスで共通して使いたいロガー
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -36,7 +36,7 @@ class TagCoreService:
     すべてのサービス(Import/Clean/Cleanup/Search/etc.)が共通で使える機能を集約。
     """
 
-    def __init__(self, searcher: Optional[TagSearcher] = None):
+    def __init__(self, searcher: TagSearcher | None = None):
         self.logger = logging.getLogger(self.__class__.__name__)
         # TagSearcher を内包
         self._searcher = searcher or TagSearcher()
@@ -71,7 +71,8 @@ class TagSearchService(GuiServiceBase):
     """
     TagSearcherを内部で利用し、GUI用のメソッド（検索やフォーマット一覧取得など）をまとめる。
     """
-    def __init__(self, parent: Optional[QObject] = None, searcher: Optional[TagSearcher] = None):
+
+    def __init__(self, parent: QObject | None = None, searcher: TagSearcher | None = None):
         super().__init__(parent)
         self._searcher = searcher or TagSearcher()
 
@@ -97,7 +98,7 @@ class TagSearchService(GuiServiceBase):
             self.error_occurred.emit(str(e))
             raise
 
-    def get_tag_types(self, format_name: Optional[str]) -> list[str]:
+    def get_tag_types(self, format_name: str | None) -> list[str]:
         """
         指定フォーマットに紐づくタグタイプ一覧を取得。
 
@@ -113,15 +114,17 @@ class TagSearchService(GuiServiceBase):
             self.error_occurred.emit(str(e))
             raise
 
-    def search_tags(self,
-                    keyword: str,
-                    partial: bool = False,
-                    format_name: str | None = None,
-                    type_name: str | None = None,
-                    language: str | None = None,
-                    min_usage: int | None = None,
-                    max_usage: int | None = None,
-                    alias: bool | None = None) -> pl.DataFrame:
+    def search_tags(
+        self,
+        keyword: str,
+        partial: bool = False,
+        format_name: str | None = None,
+        type_name: str | None = None,
+        language: str | None = None,
+        min_usage: int | None = None,
+        max_usage: int | None = None,
+        alias: bool | None = None,
+    ) -> pl.DataFrame:
         """
         タグを検索し、結果を list[dict] 形式で返す想定。
         partial=True の場合は部分一致、partial=False は完全一致。
@@ -136,7 +139,7 @@ class TagSearchService(GuiServiceBase):
                 language=language,
                 min_usage=min_usage,
                 max_usage=max_usage,
-                alias=alias
+                alias=alias,
             )
         except Exception as e:
             self.logger.error(f"タグ検索中にエラー: {e}")
@@ -153,7 +156,7 @@ class TagCleanerService(GuiServiceBase):
     - GUI用のシグナルやロガーは GuiServiceBase の継承で使う。
     """
 
-    def __init__(self, parent: Optional[QObject] = None, core: Optional[TagCoreService] = None):
+    def __init__(self, parent: QObject | None = None, core: TagCoreService | None = None):
         super().__init__(parent)
         self._core = core or TagCoreService()
 
@@ -197,9 +200,9 @@ class TagImportService(GuiServiceBase):
 
     def __init__(
         self,
-        parent: Optional[QObject] = None,
-        importer: Optional[TagDataImporter] = None,
-        core: Optional[TagCoreService] = None,
+        parent: QObject | None = None,
+        importer: TagDataImporter | None = None,
+        core: TagCoreService | None = None,
     ):
         super().__init__(parent)
         self._importer = importer or TagDataImporter()
@@ -282,7 +285,7 @@ class TagRegisterService(GuiServiceBase):
     GUIに進捗やエラーを通知するために、GuiServiceBaseを継承したタグ登録サービス。
     """
 
-    def __init__(self, parent=None, repository: Optional[TagRepository] = None):
+    def __init__(self, parent=None, repository: TagRepository | None = None):
         super().__init__(parent)
         self.logger = logging.getLogger(self.__class__.__name__)
         self._repo = repository if repository else TagRepository()
@@ -293,12 +296,12 @@ class TagRegisterService(GuiServiceBase):
         """
         try:
             normalized_tag = tag_info.get("normalized_tag")
-            source_tag     = tag_info.get("source_tag")
-            format_name    = tag_info.get("format_name", "")
-            type_name      = tag_info.get("type_name", "")
-            usage_count    = tag_info.get("use_count", 0)
-            language       = tag_info.get("language", "")
-            translation    = tag_info.get("translation", "")
+            source_tag = tag_info.get("source_tag")
+            format_name = tag_info.get("format_name", "")
+            type_name = tag_info.get("type_name", "")
+            usage_count = tag_info.get("use_count", 0)
+            language = tag_info.get("language", "")
+            translation = tag_info.get("translation", "")
 
             if not normalized_tag or not source_tag:
                 raise ValueError("タグまたは元タグが空です。")
@@ -322,11 +325,7 @@ class TagRegisterService(GuiServiceBase):
 
             # 5) TagStatus 更新 (alias=Falseで登録例)
             self._repo.update_tag_status(
-                tag_id=tag_id,
-                format_id=fmt_id,
-                alias=False,
-                preferred_tag_id=tag_id,
-                type_id=type_id
+                tag_id=tag_id, format_id=fmt_id, alias=False, preferred_tag_id=tag_id, type_id=type_id
             )
 
             return tag_id
@@ -351,17 +350,18 @@ class TagRegisterService(GuiServiceBase):
             status_list = self._repo.list_tag_statuses(tag_id)
             translations = self._repo.get_translations(tag_id)
 
-            rows = [{
-                "tag": tag_obj.tag,
-                "source_tag": tag_obj.source_tag,
-                "formats": [s.format_id for s in status_list],
-                "types":   [s.type_id for s in status_list],
-                "total_usage_count": sum(
-                    self._repo.get_usage_count(tag_id, s.format_id) or 0
-                    for s in status_list
-                ),
-                "translations": {t.language: t.translation for t in translations}
-            }]
+            rows = [
+                {
+                    "tag": tag_obj.tag,
+                    "source_tag": tag_obj.source_tag,
+                    "formats": [s.format_id for s in status_list],
+                    "types": [s.type_id for s in status_list],
+                    "total_usage_count": sum(
+                        self._repo.get_usage_count(tag_id, s.format_id) or 0 for s in status_list
+                    ),
+                    "translations": {t.language: t.translation for t in translations},
+                }
+            ]
 
             return pl.DataFrame(rows)
 
@@ -379,10 +379,11 @@ class TagStatisticsService(GuiServiceBase):
     - TagStatistics はデータベースにアクセスし Polars DataFrame や dict で統計を返す
     - GUI層ではシグナルによるエラーハンドリングを利用可能
     """
+
     def __init__(
         self,
-        parent: Optional[QObject] = None,
-        session: Optional[Session] = None,
+        parent: QObject | None = None,
+        session: Session | None = None,
     ):
         super().__init__(parent)
         self.logger = logging.getLogger(self.__class__.__name__)

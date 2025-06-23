@@ -1,20 +1,17 @@
 # genai_tag_db_tools/services/import_data.py
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Optional
-
-import polars as pl
-from PySide6.QtCore import QObject, Signal
 
 # DBアクセスやタグ登録ロジックは、新規 tag_register.py の TagRegister に委譲
-from typing import Callable
-
+import polars as pl
+from PySide6.QtCore import QObject, Signal
 from sqlalchemy.orm import Session
 
-from genai_tag_db_tools.services.tag_register import TagRegister
 from genai_tag_db_tools.data.tag_repository import TagRepository
 from genai_tag_db_tools.services.polars_schema import AVAILABLE_COLUMNS
+from genai_tag_db_tools.services.tag_register import TagRegister
 
 
 class ImportConfig:
@@ -24,7 +21,10 @@ class ImportConfig:
     - language: 翻訳登録に使う言語コード
     - column_names: 最終的に使用するDataFrameカラム名
     """
-    def __init__(self, format_id: int = 0, language: Optional[str] = None, column_names: Optional[list[str]] = None):
+
+    def __init__(
+        self, format_id: int = 0, language: str | None = None, column_names: list[str] | None = None
+    ):
         self.format_id = format_id
         self.language = language
         self.column_names = column_names or []
@@ -40,15 +40,13 @@ class TagDataImporter(QObject):
     """
 
     # --- PySide6 Signals ---
-    process_started = Signal(str)         # 処理開始メッセージ ("インポート開始"など)
-    progress_updated = Signal(int, str)   # (進捗度, メッセージ)
-    process_finished = Signal(str)        # 処理完了メッセージ ("インポート完了"など)
-    error_occurred = Signal(str)          # エラーメッセージ
+    process_started = Signal(str)  # 処理開始メッセージ ("インポート開始"など)
+    progress_updated = Signal(int, str)  # (進捗度, メッセージ)
+    process_finished = Signal(str)  # 処理完了メッセージ ("インポート完了"など)
+    error_occurred = Signal(str)  # エラーメッセージ
 
     def __init__(
-        self,
-        parent: Optional[QObject] = None,
-        session_factory: Optional[Callable[[], Session]] = None
+        self, parent: QObject | None = None, session_factory: Callable[[], Session] | None = None
     ):
         super().__init__(parent)
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -81,7 +79,7 @@ class TagDataImporter(QObject):
         ヘッダあり/なしをざっくり判定するサンプルロジック。
         """
         try:
-            with open(csv_file_path, "r", encoding="utf-8") as f:
+            with open(csv_file_path, encoding="utf-8") as f:
                 first_line = f.readline().strip()
                 if any(col in first_line for col in AVAILABLE_COLUMNS):
                     return True
@@ -105,10 +103,7 @@ class TagDataImporter(QObject):
     #  (2) DataFrameの前処理 (カラム補完・型変換等)
     # ----------------------------------------------------------------------
     def configure_import(
-        self,
-        source_df: pl.DataFrame,
-        format_id: int = 0,
-        language: Optional[str] = None
+        self, source_df: pl.DataFrame, format_id: int = 0, language: str | None = None
     ) -> tuple[pl.DataFrame, ImportConfig]:
         """
         インポート用の設定(ImportConfig)やカラム名の整合性を確認し、
@@ -131,11 +126,7 @@ class TagDataImporter(QObject):
         processed_df = self._normalize_typing(processed_df)
 
         # インポート設定オブジェクトを生成
-        config = ImportConfig(
-            format_id=format_id,
-            language=language,
-            column_names=processed_df.columns
-        )
+        config = ImportConfig(format_id=format_id, language=language, column_names=processed_df.columns)
         return processed_df, config
 
     def _ensure_minimum_columns(self, df: pl.DataFrame) -> pl.DataFrame:
