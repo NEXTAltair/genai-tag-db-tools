@@ -1,0 +1,212 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# genai-tag-db-tools Project Context
+
+This file serves as the central context repository for the genai-tag-db-tools project, maintaining context across development sessions.
+
+## Project Overview
+
+genai-tag-db-tools is a comprehensive tag database management application designed for AI-generated image workflows. It provides unified tag management across different platforms and formats, with a focus on database integrity, performance, and user experience.
+
+## Core Architecture
+
+### Application Layer
+- **Entry Point**: `src/genai_tag_db_tools/main.py` - GUI application launcher
+- **CLI Interface**: `tag-db` command for easy access
+- **Module Interface**: Importable for external projects like LoRAIro
+
+### Service Layer Architecture (As Implemented)
+- **GuiServiceBase**: Base class with Qt signals for GUI integration
+- **TagCoreService**: Central business logic coordination
+- **TagSearcher**: Core search logic implementation
+- **Specialized Services**: TagSearchService, TagCleanerService, TagImportService, TagRegisterService, TagStatisticsService
+
+### Data Layer
+- **Database Schema**: `src/genai_tag_db_tools/data/database_schema.py` - SQLAlchemy 2.0 models (7 tables)
+- **Tag Repository**: `src/genai_tag_db_tools/data/tag_repository.py` - Comprehensive data access (50+ methods)
+- **Database Setup**: `src/genai_tag_db_tools/db/database_setup.py` - SQLite engine configuration
+
+### GUI Architecture
+- **Framework**: PySide6 with Qt Designer integration
+- **Designer Files**: `src/genai_tag_db_tools/gui/designer/` - UI definitions
+- **Widgets**: `src/genai_tag_db_tools/gui/widgets/` - Comprehensive widget set
+- **Windows**: `src/genai_tag_db_tools/gui/windows/main_window.py` - Main application window
+
+## Database Architecture (Actual Implementation)
+
+### Core Tables (7 Tables)
+1. **TAGS** - Primary tag information storage
+2. **TAG_TRANSLATIONS** - Multi-language support
+3. **TAG_FORMATS** - Platform-specific format definitions (Danbooru, E621, Derpibooru)
+4. **TAG_TYPE_NAME** - Tag type definitions (general, artist, character, etc.)
+5. **TAG_STATUS** - Tag state management and relationships
+6. **TAG_USAGE_COUNTS** - Usage frequency tracking per format
+7. **TAG_TYPE_FORMAT_MAPPING** - Cross-format type compatibility
+
+### Database Configuration
+- **SQLite Engine**: WAL mode enabled, foreign keys enforced
+- **Master Data**: Pre-initialized formats and tag types
+- **Complex Relationships**: Proper foreign keys and constraints
+- **Performance Optimization**: Strategic indexing for common queries
+
+## Technology Stack (Current)
+
+### Core Technologies
+- **Python 3.12+**: Modern Python with advanced type features
+- **PySide6**: Qt-based GUI framework with comprehensive widgets
+- **SQLAlchemy 2.0+**: Modern ORM with typed relationships
+- **Polars**: High-performance data processing for bulk operations
+
+### Development Tools
+- **Ruff**: Fast linting and formatting
+- **mypy**: Static type checking
+- **pytest**: Testing framework with GUI support (75% coverage requirement)
+- **uv**: Modern dependency management
+
+## Service Architecture Implementation
+
+### Core Service Pattern
+```python
+# Base service with Qt integration
+class GuiServiceBase(QObject):
+    # Qt signals for GUI communication
+    
+# Business logic wrapper
+class TagCoreService:
+    # Coordinates between services
+    
+# Actual search implementation
+class TagSearcher:
+    def __init__(self):
+        self.repository = TagRepository()
+```
+
+### GUI Service Integration
+- **Qt Signals**: Real-time GUI updates
+- **Error Handling**: Comprehensive error propagation
+- **Progress Reporting**: User feedback for long operations
+- **Thread Safety**: Background processing support
+
+## Key Features (Implemented)
+
+### Tag Management
+- **Registration**: New tag creation with validation via TagRegisterService
+- **Search**: Advanced search with TagSearcher and TagSearchService
+- **Statistics**: Usage analytics via TagStatisticsService
+- **Import**: Data import via TagImportService
+- **Cleaning**: Tag maintenance via TagCleanerService
+
+### Database Operations
+- **Repository Pattern**: Comprehensive TagRepository with 50+ methods
+- **Transaction Management**: Proper ACID compliance
+- **Performance**: Optimized queries with strategic indexing
+- **Data Integrity**: Foreign key constraints and validation
+
+### GUI Features
+- **Real-time Search**: Immediate search result updates
+- **Bulk Operations**: Large dataset processing capabilities
+- **Statistics Dashboard**: Visual usage analytics
+- **Error Handling**: User-friendly error messages with Qt signals
+
+## Integration Patterns (Current)
+
+### External Library Usage
+```python
+from genai_tag_db_tools.services.tag_search import TagSearcher
+from genai_tag_db_tools.services.app_services import TagSearchService
+from genai_tag_db_tools.data.tag_repository import TagRepository
+
+# Core search functionality
+searcher = TagSearcher()
+results = searcher.search_tags("landscape")
+
+# GUI-integrated services
+search_service = TagSearchService()  # Has Qt signals
+repository = TagRepository()  # Direct database access
+```
+
+### LoRAIro Integration
+- **Tag Lookup**: Database access for image annotation
+- **Real-time Suggestions**: Based on usage statistics
+- **Cross-reference Validation**: Tag quality assessment
+
+## Project Structure (Actual)
+
+```
+genai-tag-db-tools/
+├── src/genai_tag_db_tools/
+│   ├── data/                    # Database layer
+│   │   ├── database_schema.py   # SQLAlchemy 2.0 models (7 tables)
+│   │   ├── tag_repository.py    # Data access (50+ methods)
+│   │   └── *.db                 # Database files
+│   ├── db/                      # Database configuration
+│   │   └── database_setup.py    # SQLite engine setup
+│   ├── gui/                     # GUI components
+│   │   ├── designer/           # Qt Designer files
+│   │   ├── widgets/            # Complete widget set
+│   │   └── windows/            # Main application window
+│   ├── services/               # Business logic
+│   │   ├── app_services.py     # GUI service wrappers
+│   │   ├── tag_search.py       # Core search (TagSearcher)
+│   │   ├── tag_statistics.py   # Statistics
+│   │   ├── import_data.py      # Data import
+│   │   ├── tag_register.py     # Tag registration
+│   │   └── polars_schema.py    # Data processing schemas
+│   ├── utils/                  # Utilities
+│   │   ├── cleanup_str.py      # String processing
+│   │   └── messages.py         # Error messages
+│   └── main.py                 # Entry point
+├── tests/                      # Comprehensive test suite
+├── scripts/                    # Development scripts
+├── Makefile                    # Development automation
+├── .cursor/rules/             # Development rules
+├── .roo/                      # Rule references
+└── pyproject.toml             # Project configuration
+```
+
+## Development Environment (Current)
+
+### Cross-Platform Support
+- **Linux Environment**: `.venv_linux` with UV_PROJECT_ENVIRONMENT
+- **Windows Environment**: `.venv_windows` with cross-platform compatibility
+- **Unified Scripts**: `scripts/setup.sh` with OS detection
+- **Makefile**: Cross-platform development commands
+
+### Testing Strategy (Implemented)
+- **Unit Tests**: Component isolation with proper mocking
+- **Integration Tests**: Database operation validation
+- **GUI Tests**: PySide6 component testing (headless in Linux)
+- **Coverage**: 75% minimum requirement with pytest-cov
+
+## Performance Considerations (Current)
+
+### Database Performance
+- **WAL Mode**: SQLite optimization for concurrency
+- **Strategic Indexing**: Optimized for common query patterns
+- **Connection Management**: Efficient session handling
+- **Memory Optimization**: Large dataset processing with Polars
+
+### GUI Performance
+- **Qt Signals**: Non-blocking UI updates
+- **Background Processing**: Long operations in separate threads
+- **Progress Feedback**: Real-time operation status
+- **Lazy Loading**: On-demand data fetching
+
+## Error Handling (Implemented)
+
+### Service Layer
+- **Qt Signal Integration**: Real-time error propagation to GUI
+- **Custom Exceptions**: Meaningful error classification
+- **Comprehensive Logging**: Detailed error context
+- **Graceful Degradation**: Fallback behaviors for failures
+
+### Database Layer
+- **Transaction Safety**: Proper rollback on failures
+- **Constraint Validation**: Foreign key and integrity checks
+- **Connection Recovery**: Automatic reconnection handling
+- **Data Validation**: Input sanitization and verification
+
+This memory bank provides accurate context reflecting the current implementation of genai-tag-db-tools.

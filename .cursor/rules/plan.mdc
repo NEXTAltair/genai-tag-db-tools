@@ -1,0 +1,3 @@
+# LLM File Reference: Planning Guidelines
+# This file provides a relative path reference for LLM tools to access planning and architecture documentation
+../../.cursor/rules/plan.mdc

@@ -1,0 +1,3 @@
+# LLM File Reference: Implementation Patterns
+# This file provides a relative path reference for LLM tools to access implementation guidelines documentation
+../../.cursor/rules/implement.mdc

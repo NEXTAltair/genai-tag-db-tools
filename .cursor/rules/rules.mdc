@@ -1,0 +1,144 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# GenAI Tag DB Tools Development Rules
+
+This file provides guidance for developing the GenAI Tag DB Tools tag database management application using Claude Code.
+
+## Core Principles
+# GenAI Tag DB Tools プロジェクト開発ワークフロー・アーキテクチャルール
+
+## プロジェクト概要
+
+GenAI Tag DB Toolsは機械学習データセット準備のためのタグデータベース管理・検索アプリケーションです。
+
+## 開発ワークフロー
+
+### 1. 要件・明確化
+- 実装前に常に要件を明確化する
+- 仮定と設計決定を文書化する
+- 既存のアーキテクチャパターンを参照する
+
+### 2. 計画・設計
+- 既存のコードベース構造をレビューする
+- `src/genai_tag_db_tools/`の確立されたパターンに従う
+- データベーススキーマとマイグレーションへの影響を考慮する
+- 適切なエラーハンドリングとログ記録を計画する
+
+### 3. 実装
+- インクリメンタル開発アプローチに従う
+- テストと共に一度に1つの機能を実装する
+- サービスには依存性注入を使用する
+- 命名規則とコードスタイルに従う
+
+### 4. テスト・検証
+- 全テストカテゴリを実行: `pytest -m unit`, `pytest -m integration`, `pytest -m gui`
+- 適切なテストカバレッジを確保: `pytest --cov=src --cov-report=html`
+- リンティング実行: `ruff check` と `ruff format`
+- 型チェック実行: `mypy src/`
+
+### 5. ドキュメント更新
+- 関連ドキュメントファイルを更新する
+- 開発コマンドが変更された場合はCLAUDE.mdを更新する
+- アーキテクチャ決定を文書化する
+
+## アーキテクチャパターン
+
+### サービス層パターン
+```python
+# コアサービスはビジネスロジックを処理
+class TagSearcher:
+    def __init__(self):
+        self.repository = TagRepository()
+
+# GUIサービスはQtシグナルでGUI統合
+class TagSearchService(GuiServiceBase):
+    def __init__(self):
+        super().__init__()
+        self.core_service = TagCoreService()
+```
+
+### リポジトリパターン
+```python
+# リポジトリ層を通じたデータベースアクセス
+class TagRepository:
+    def search_tags_by_name(self, name: str) -> list[TagRecord]:
+        pass
+```
+
+### データベース設定管理
+```python
+# SQLite設定とデータベース接続管理
+from genai_tag_db_tools.db.database_setup import get_engine
+engine = get_engine()
+```
+
+## 重要なファイル位置
+
+- **データベーススキーマ**: `src/genai_tag_db_tools/data/database_schema.py`
+- **メインアプリケーション**: `src/genai_tag_db_tools/main.py`
+- **GUIコンポーネント**: `src/genai_tag_db_tools/gui/`
+- **サービス**: `src/genai_tag_db_tools/services/`
+- **データアクセス**: `src/genai_tag_db_tools/data/`
+- **データベースセットアップ**: `src/genai_tag_db_tools/db/database_setup.py`
+
+## 実装されたサービス構造
+
+### コアサービス
+- `TagSearcher` - 主要な検索ロジック
+- `TagCoreService` - ビジネスロジック統合
+- `GuiServiceBase` - Qtシグナル統合基底クラス
+
+### 専門サービス
+- `TagSearchService` - GUI検索サービス
+- `TagCleanerService` - タグクリーニング
+- `TagImportService` - データインポート
+- `TagRegisterService` - タグ登録
+- `TagStatisticsService` - 統計分析
+
+## データベース操作
+
+- SQLiteベースのタグデータベース管理（7テーブル構成）
+- 複数バージョンサポート: `tags_v3.db`, `tags_v4.db`
+- `src/genai_tag_db_tools/data/database_schema.py`の確立されたスキーマに従う
+- トランザクション管理と整合性保証
+- WALモードとforeign_keys有効化
+
+## テストガイドライン
+
+- **単体テスト**: モッキングを使用した高速で独立したテスト
+- **統合テスト**: サービス間の相互作用とデータベース操作をテスト
+- **GUIテスト**: PySide6コンポーネントとユーザーインタラクションをテスト
+- テストリソースは`tests/resource/`に配置
+- 共通セットアップにはpytestフィクスチャを使用
+
+## エラーハンドリング
+
+- 適切な場所でカスタム例外を使用
+- Qtシグナルを通じた適切なエラー通知
+- GUIでユーザーフレンドリーなエラーメッセージを提供
+- データベース接続エラーを適切に処理
+
+## データベース統合
+
+- SQLiteベースの高性能タグ検索・管理
+- 複数フォーマットサポート (Danbooru, E621, Derpibooru, etc.)
+- 多言語翻訳サポート
+- 使用頻度統計とトレンド分析
+
+## メモリ管理
+
+- 大きなデータベースクエリのメモリ使用量を監視
+- 適切なデータベース接続プールを実装
+- バッチ処理での効率的なデータ処理（Polars活用）
+- キャッシュ戦略の適用
+
+## 品質基準
+
+1. **コード品質**: 適切な型ヒント、ドキュメント、テストで高いコード品質を維持
+2. **アーキテクチャ一貫性**: 確立されたサービス層パターンと依存性注入に従う
+3. **データベース駆動**: SQLiteベースの高性能タグ管理
+4. **エラーハンドリング**: 包括的なエラーハンドリングとQtシグナル統合
+5. **テスト**: 適切な単体、統合、GUIテストで75%以上のテストカバレッジを維持

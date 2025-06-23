@@ -1,0 +1,3 @@
+# LLM File Reference: Debugging Workflows
+# This file provides a relative path reference for LLM tools to access debugging procedures documentation
+../../.cursor/rules/debug.mdc

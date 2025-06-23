@@ -1,70 +1,96 @@
-# ビルドシステムの設定
 [build-system]
-# Pythonパッケージングツールの指定
-requires = ["hatchling"]  # モダンなビルドシステム
-build-backend = "hatchling.build"  # ビルドバックエンドの指定
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-# プロジェクトの基本情報
 [project]
 name = "genai-tag-db-tools"  # パッケージ名 ハイフン推奨なぜかは知らん
-version = "0.2.0"  # バージョン番号
+version = "0.2.2"
 description = "AI生成画像のタグ管理ツール"  # プロジェクトの説明
+readme = "README.md"
 requires-python = ">=3.12"  # 必要なPythonバージョン
+license = { text = "MIT" }
+authors = [{ name = "NEXTAltair" }]
 
-# 必要なパッケージの依存関係
-dependencies = [
-    "PySide6>=6.8.0.2",        # Qt GUIフレームワーク
-    "superqt>=0.6.7",          # PySide6の拡張機能
-    "polars[all]>=1.9.0",           # 高性能データフレームライブラリ [all] は全機能をインストール必要ない部分は後で削る
-    "alembic>=1.13.1",         # データベースマイグレーションツール
-    "SQLAlchemy>=2.0.0",       # データベースライブラリ
-]
 
 # プロジェクトの分類情報
 classifiers = [
-    "Operating System :: Microsoft :: Windows :: Windows 11"  # 対応OS
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.12"
+]
+
+# 必要なパッケージの依存関係
+dependencies = [
+    "PySide6>=6.8.0.2", # Qt GUIフレームワーク
+    "superqt>=0.6.7", # PySide6の拡張機能
+    "polars[all]>=1.9.0", # 高性能データフレームライブラリ [all] は全機能をインストール必要ない部分は後で削る
+    "alembic>=1.13.1", # データベースマイグレーションツール
+    "sqlalchemy>=2.0.0", # データベースライブラリ
 ]
 
 # 開発時のみ必要な追加パッケージ
 [project.optional-dependencies]
-dev = [
-    "ruff>=0.9.2" ,          # コード整形ツール
-    "pytest>=8.3.3",          # テストフレームワーク
-    "pytest-cov>=6.0.0",      # テストカバレッジツール
-    "pytest-qt",        # Qtアプリケーションのテストツール
-    "sphinx",           # ドキュメント生成ツール
-    "sphinx-rtd-theme", # Sphinxのテーマ
-    "sphinx-autobuild", # Sphinxの自動ビルドツール
-    "restructuredtext_lint", # RST文法チェックツール
-    "esbonio",          # ドキュメント生成ツール
-]
+
+[project.scripts]
+tag-db = "genai_tag_db_tools.main:main"
+#インストールして tag-db をターミナルで入力するとmainが実行されるよという話
 
 [tool.ruff]
+fix = true
+line-length = 108
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "C",   # flake8-comprehensions
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "RUF" # Ruff-specific rules
+]
 exclude = [
     "*/gui/designer/*", # Qtdesignerで自動生成されたファイル
-    "*/__pycache__",
-    "*/tests/*",
-    "*/shibokensupport/*",
-    "*/site-packages/*",
-    "*/pyscript",
-    "*/signature_bootstrap.py",
-    "*/__init__.py",
+    "*/__pycache__"
 ]
+
+ignore = [
+    "RUF002", # カタカナの `ノ` でのメッセージを無視
+    "E501",   # Line too long (line-lengthで制御)
+    "F541"   # f-string in logging (同等のpylint警告W1203 - Ruffでは直接の対応がない)
+]
+fixable = ["ALL"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
 
 # pytestの設定オプション
 [tool.pytest.ini_options]
-pythonpath = ["genai_tag_db_tools"]          # テスト実行時のPythonパス
-addopts ="""
-    -ra -q -v
-    --cov=genai_tag_db_tools
-    --cov-report=term-missing tests/
-    """
+pythonpath = ["src"]          # テスト実
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = ["-v", "-s", "-ra", "--tb=short", "--showlocals", "--cov=src", "--cov-report=xml"]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "gui: GUI tests",
+    "slow: Tests that take more time",
+]
 
-# テスト実行時のオプション（結果表示の詳細度など）
-testpaths = ["tests"]          # テストファイルの場所
 
 [tool.coverage.run]
-source = ["genai_tag_db_tools"]
+source = ["src"]
 omit = [
     "*/shibokensupport/*",
     "*/site-packages/*",
@@ -77,38 +103,41 @@ omit = [
 ]
 
 [tool.coverage.report]
+fail_under = 75 # カバレッジが75%未満なら失敗
+show_missing = true
 exclude_lines = [
     "pragma: no cover",
-    "def __repr__",
-    "if __name__ == \"__main__\":",
     "raise NotImplementedError",
     "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "@(abc\\.)?abstractmethod",
+    "\\.\\.\\.",                  # ... (Ellipsis)
 ]
 
 # ビルド設定
 [tool.hatch.build.targets.wheel]
-packages = ["genai_tag_db_tools"] # Pythonパッケージ名（アンダースコア）
+packages = ["src/genai_tag_db_tools"] # Pythonパッケージ名（アンダースコア）
+
+[tool.hatch.build.targets.sdist]
+# sdist用の設定が必要ならここに追加
 
 [tool.hatch.build.targets.wheel.package-data]
 genai_tag_db_tools = ["data/*.db"]
 
-# プロジェクトスクリプト
-[project.scripts]
-gtdtools = "genai_tag_db_tools.main:main"
-#インストールして genai_tag_db_tools をターミナルで入力するとmainが実行されるよという話
-
-# Pyright（静的型チェッカー）の設定
-[tool.pyright]
-include = ["genai_tag_db_tools"]             # 型チェック対象
-exclude = [                   # 型チェック除外対象
-    "**/__pycache__",
-    "test"
+[dependency-groups]
+dev = [
+    "ruff",
+    "pytest",
+    "pytest-cov",
+    "pytest-qt",
+    "mypy>=1.8.0",
+    "types-requests>=2.32.0",
+    "types-Pillow",
+    "types-toml",
+    "alembic>=1.15.2",
+    "psutil"
 ]
-venvPath = "."               # 仮想環境のパス
-venv = "gtdt"               # 仮想環境の名前
-typeCheckingMode = "basic"  # 型チェックの厳格さ
 
-# PySide6関連の特別な設定
-reportGeneralTypeIssues = "warning"     # 一般的な型の問題を警告として報告
-reportMissingTypeStubs = false          # 型定義ファイルの不足を無視
-reportUnknownMemberType = false         # 不明なメンバー型を無視
+[project.urls]
+Homepage = "https://github.com/NEXTAltair//genai-tag-db-tools"
+Repository = "https://github.com/NEXTAltair//genai-tag-db-tools.git"
