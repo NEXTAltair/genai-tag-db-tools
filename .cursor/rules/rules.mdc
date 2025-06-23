@@ -1,205 +1,144 @@
-# genai-tag-db-tools Development Rules
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# GenAI Tag DB Tools Development Rules
 
-This file provides guidance for developing the genai-tag-db-tools tag database management application using Claude Code.
+This file provides guidance for developing the GenAI Tag DB Tools tag database management application using Claude Code.
 
 ## Core Principles
+# GenAI Tag DB Tools プロジェクト開発ワークフロー・アーキテクチャルール
 
-1. **Database Integrity**: Maintain data consistency and integrity across all tag operations
-2. **Performance**: Optimize for large-scale tag database operations with efficient queries
-3. **User Experience**: Provide intuitive GUI for tag management and search operations
-4. **Modularity**: Design for reuse by external projects like LoRAIro
-5. **Type Safety**: Comprehensive type hints and validation for all database operations
+## プロジェクト概要
 
-## Development Workflow
+GenAI Tag DB Toolsは機械学習データセット準備のためのタグデータベース管理・検索アプリケーションです。
 
-### 1. Requirements & Clarification
-- Understand tag database schema and relationships
-- Define success criteria for tag operations
-- Consider performance implications for large datasets
-- Review existing tag data sources and formats
+## 開発ワークフロー
 
-### 2. Planning & Design
-- Review database schema design and migrations
-- Follow established patterns in `src/genai_tag_db_tools/`
-- Consider impact on tag relationships and foreign keys
-- Plan for proper error handling and transaction management
+### 1. 要件・明確化
+- 実装前に常に要件を明確化する
+- 仮定と設計決定を文書化する
+- 既存のアーキテクチャパターンを参照する
 
-### 3. Implementation
-- Follow incremental development with database transactions
-- Use SQLAlchemy ORM patterns consistently
-- Implement proper data validation and sanitization
-- Follow naming conventions and code style
+### 2. 計画・設計
+- 既存のコードベース構造をレビューする
+- `src/genai_tag_db_tools/`の確立されたパターンに従う
+- データベーススキーマとマイグレーションへの影響を考慮する
+- 適切なエラーハンドリングとログ記録を計画する
 
-### 4. Testing & Validation
-- Test database operations with sample data
-- Verify tag relationships and foreign key constraints
-- Run comprehensive test suite: `pytest`
-- Ensure proper test coverage: `pytest --cov=src --cov-report=xml`
+### 3. 実装
+- インクリメンタル開発アプローチに従う
+- テストと共に一度に1つの機能を実装する
+- サービスには依存性注入を使用する
+- 命名規則とコードスタイルに従う
 
-### 5. Documentation Update
-- Update database schema documentation
-- Document any migration procedures
-- Update API documentation for external usage
+### 4. テスト・検証
+- 全テストカテゴリを実行: `pytest -m unit`, `pytest -m integration`, `pytest -m gui`
+- 適切なテストカバレッジを確保: `pytest --cov=src --cov-report=html`
+- リンティング実行: `ruff check` と `ruff format`
+- 型チェック実行: `mypy src/`
 
-## Code Style Guidelines
+### 5. ドキュメント更新
+- 関連ドキュメントファイルを更新する
+- 開発コマンドが変更された場合はCLAUDE.mdを更新する
+- アーキテクチャ決定を文書化する
 
-- Line length: 108 characters (configured in pyproject.toml)
-- Use modern Python type hints (list/dict not typing.List/Dict)
-- Use SQLAlchemy ORM patterns consistently
-- Type hints required for all database operations
-- Use Polars for data processing and analysis
-- Follow PySide6 patterns for GUI components
+## アーキテクチャパターン
 
-## Architecture Patterns
-
-### Database Layer Pattern
+### サービス層パターン
 ```python
-from sqlalchemy.orm import Session
-from genai_tag_db_tools.data.database_schema import TagsTable
+# コアサービスはビジネスロジックを処理
+class TagSearcher:
+    def __init__(self):
+        self.repository = TagRepository()
 
-class TagRepository:
-    def __init__(self, session: Session):
-        self.session = session
-    
-    def create_tag(self, tag_data: dict) -> TagsTable:
-        tag = TagsTable(**tag_data)
-        self.session.add(tag)
-        self.session.commit()
-        return tag
+# GUIサービスはQtシグナルでGUI統合
+class TagSearchService(GuiServiceBase):
+    def __init__(self):
+        super().__init__()
+        self.core_service = TagCoreService()
 ```
 
-### Service Layer Pattern
+### リポジトリパターン
 ```python
-from genai_tag_db_tools.data.tag_repository import TagRepository
-
-class TagManagementService:
-    def __init__(self, tag_repository: TagRepository):
-        self.tag_repository = tag_repository
-    
-    def register_new_tag(self, tag_name: str, translations: dict) -> bool:
-        # Business logic here
+# リポジトリ層を通じたデータベースアクセス
+class TagRepository:
+    def search_tags_by_name(self, name: str) -> list[TagRecord]:
         pass
 ```
 
-### GUI Widget Pattern
+### データベース設定管理
 ```python
-from PySide6.QtWidgets import QWidget
-from genai_tag_db_tools.gui.designer.TagSearchWidget_ui import Ui_TagSearchWidget
-
-class TagSearchWidget(QWidget):
-    def __init__(self, tag_service: TagManagementService, parent=None):
-        super().__init__(parent)
-        self.ui = Ui_TagSearchWidget()
-        self.ui.setupUi(self)
-        self.tag_service = tag_service
+# SQLite設定とデータベース接続管理
+from genai_tag_db_tools.db.database_setup import get_engine
+engine = get_engine()
 ```
 
-## Important File Locations
+## 重要なファイル位置
 
-- **Database Schema**: `src/genai_tag_db_tools/data/database_schema.py`
-- **Tag Repository**: `src/genai_tag_db_tools/data/tag_repository.py`
-- **Main Entry Point**: `src/genai_tag_db_tools/main.py`
-- **GUI Components**: `src/genai_tag_db_tools/gui/`
-- **Services**: `src/genai_tag_db_tools/services/`
-- **Database Files**: `src/genai_tag_db_tools/data/tags_v*.db`
+- **データベーススキーマ**: `src/genai_tag_db_tools/data/database_schema.py`
+- **メインアプリケーション**: `src/genai_tag_db_tools/main.py`
+- **GUIコンポーネント**: `src/genai_tag_db_tools/gui/`
+- **サービス**: `src/genai_tag_db_tools/services/`
+- **データアクセス**: `src/genai_tag_db_tools/data/`
+- **データベースセットアップ**: `src/genai_tag_db_tools/db/database_setup.py`
 
-## Database Management
+## 実装されたサービス構造
 
-### Migration Guidelines
-- Use Alembic for schema changes
-- Test migrations with sample data before production
-- Document breaking changes in migration messages
-- Provide rollback procedures for complex migrations
+### コアサービス
+- `TagSearcher` - 主要な検索ロジック
+- `TagCoreService` - ビジネスロジック統合
+- `GuiServiceBase` - Qtシグナル統合基底クラス
 
-### Tag Data Integrity
-- Maintain referential integrity across tag relationships
-- Validate tag formats and naming conventions
-- Handle duplicate tags and aliases properly
-- Ensure proper Unicode handling for international tags
+### 専門サービス
+- `TagSearchService` - GUI検索サービス
+- `TagCleanerService` - タグクリーニング
+- `TagImportService` - データインポート
+- `TagRegisterService` - タグ登録
+- `TagStatisticsService` - 統計分析
 
-### Performance Considerations
-- Index frequently queried columns (tag names, IDs)
-- Use efficient JOIN operations for tag relationships
-- Implement pagination for large result sets
-- Consider caching for frequently accessed tag data
+## データベース操作
 
-## Testing Guidelines
+- SQLiteベースのタグデータベース管理（7テーブル構成）
+- 複数バージョンサポート: `tags_v3.db`, `tags_v4.db`
+- `src/genai_tag_db_tools/data/database_schema.py`の確立されたスキーマに従う
+- トランザクション管理と整合性保証
+- WALモードとforeign_keys有効化
 
-- **Unit Tests**: Test individual components with mocked dependencies
-- **Integration Tests**: Test database operations with test database
-- **GUI Tests**: Test user interface components with pytest-qt
-- **Performance Tests**: Validate performance with large tag datasets
+## テストガイドライン
 
-## External Integration
+- **単体テスト**: モッキングを使用した高速で独立したテスト
+- **統合テスト**: サービス間の相互作用とデータベース操作をテスト
+- **GUIテスト**: PySide6コンポーネントとユーザーインタラクションをテスト
+- テストリソースは`tests/resource/`に配置
+- 共通セットアップにはpytestフィクスチャを使用
 
-### Module Usage Pattern
-```python
-# For external projects like LoRAIro
-from genai_tag_db_tools.services.tag_search import TagSearchService
-from genai_tag_db_tools.data.tag_repository import TagRepository
+## エラーハンドリング
 
-# Initialize and use tag services
-tag_service = TagSearchService(database_path="path/to/tags.db")
-results = tag_service.search_tags("landscape")
-```
+- 適切な場所でカスタム例外を使用
+- Qtシグナルを通じた適切なエラー通知
+- GUIでユーザーフレンドリーなエラーメッセージを提供
+- データベース接続エラーを適切に処理
 
-### CLI Interface
-- Command: `tag-db` launches GUI application
-- Module execution: `python -m genai_tag_db_tools`
-- Support for programmatic usage by other applications
+## データベース統合
 
-## Error Handling
+- SQLiteベースの高性能タグ検索・管理
+- 複数フォーマットサポート (Danbooru, E621, Derpibooru, etc.)
+- 多言語翻訳サポート
+- 使用頻度統計とトレンド分析
 
-### Database Errors
-- Handle connection failures gracefully
-- Provide meaningful error messages for constraint violations
-- Implement proper transaction rollback on errors
-- Log database errors with sufficient context
+## メモリ管理
 
-### GUI Error Handling
-- Display user-friendly error messages
-- Prevent data loss during error conditions
-- Provide recovery options where possible
-- Maintain application stability during errors
+- 大きなデータベースクエリのメモリ使用量を監視
+- 適切なデータベース接続プールを実装
+- バッチ処理での効率的なデータ処理（Polars活用）
+- キャッシュ戦略の適用
 
-## Data Source Management
+## 品質基準
 
-### Tag Data Integration
-- Support multiple tag data sources (Danbooru, E621, etc.)
-- Handle different tag formats and naming conventions
-- Maintain data provenance and source attribution
-- Implement conflict resolution for duplicate tags
-
-### Translation Management
-- Support multiple language translations for tags
-- Maintain translation quality and consistency
-- Handle missing translations gracefully
-- Provide translation update mechanisms
-
-## Performance Optimization
-
-### Database Optimization
-- Use appropriate indexes for search operations
-- Optimize complex queries with EXPLAIN QUERY PLAN
-- Implement connection pooling for concurrent access
-- Monitor and optimize memory usage for large datasets
-
-### GUI Performance
-- Implement efficient search and filtering
-- Use virtual scrolling for large tag lists
-- Optimize rendering for large result sets
-- Provide responsive progress indicators
-
-## Security Considerations
-
-### Data Validation
-- Sanitize all user input for database operations
-- Validate tag format and content
-- Prevent SQL injection through parameterized queries
-- Handle file system access securely
-
-### Database Security
-- Use read-only connections where appropriate
-- Implement proper backup and recovery procedures
-- Protect database files from unauthorized access
-- Validate database integrity regularly
+1. **コード品質**: 適切な型ヒント、ドキュメント、テストで高いコード品質を維持
+2. **アーキテクチャ一貫性**: 確立されたサービス層パターンと依存性注入に従う
+3. **データベース駆動**: SQLiteベースの高性能タグ管理
+4. **エラーハンドリング**: 包括的なエラーハンドリングとQtシグナル統合
+5. **テスト**: 適切な単体、統合、GUIテストで75%以上のテストカバレッジを維持

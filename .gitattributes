@@ -1,5 +1,4 @@
 # Git attributes for genai-tag-db-tools
-
 # Text files - ensure consistent line endings
 *.py text eol=lf
 *.md text eol=lf
@@ -25,7 +24,7 @@ CHANGELOG* text eol=lf
 LICENSE* text eol=lf
 CONTRIBUTING* text eol=lf
 # Binary files - do not attempt text conversion
-*.db binary
+*.db filter=lfs diff=lfs merge=lfs -text
 *.sqlite binary
 *.sqlite3 binary
 # Important: tags_v4.db is tracked for distribution
@@ -82,4 +81,3 @@ tools/ export-ignore
 xml/ export-ignore
 tags_csv/ export-ignore
 hf_repo/ export-ignore
-*.db filter=lfs diff=lfs merge=lfs -text

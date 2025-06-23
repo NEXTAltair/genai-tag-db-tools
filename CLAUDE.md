@@ -2,47 +2,83 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Important Instructions
+Do what has been asked; nothing more, nothing less.
+NEVER create files unless they're absolutely necessary for achieving your goal.
+ALWAYS prefer editing an existing file to creating a new one.
+NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
+
 ## Development Commands
 
 ### Environment Setup
+
+#### Cross-Platform Environment Management
+
+This project supports Windows/Linux environments with independent virtual environments to manage platform-specific dependencies properly.
+
 ```bash
-# Install dependencies using standard pip or uv (if available)
-pip install -e .
+# Automatic OS detection setup (recommended)
+./scripts/setup.sh
 
-# Install development dependencies
-pip install -e .[dev]
+# Manual environment specification
+UV_PROJECT_ENVIRONMENT=.venv_linux uv sync --dev     # Linux
+$env:UV_PROJECT_ENVIRONMENT=".venv_windows"; uv sync --dev  # Windows
 
-# Using uv (if available, faster)
+# Traditional single environment
 uv sync --dev
+
+# Add new dependencies
+uv add package-name
+
+# Add development dependencies
+uv add --dev package-name
 ```
 
-### Testing
+### Running the Application
+
+#### Cross-Platform Execution
+
 ```bash
-# Run all tests
+# Windows Environment
+$env:UV_PROJECT_ENVIRONMENT = ".venv_windows"; uv run tag-db
+
+# Linux Environment  
+UV_PROJECT_ENVIRONMENT=.venv_linux uv run tag-db
+
+# Using Makefile (all platforms)
+make run-gui
+
+# Traditional single environment
+uv run tag-db
+
+# Alternative module execution
+uv run python -m genai_tag_db_tools.main
+```
+
+### Development Tools
+```bash
+# Run tests
 pytest
 
-# Run specific test categories using markers
+# Run specific test categories
 pytest -m unit        # Unit tests only
 pytest -m integration # Integration tests only
-pytest -m gui         # GUI tests only
-pytest -m slow        # Slow tests only
+pytest -m gui         # GUI tests only (headless in dev container)
 
-# Run single test file
-pytest tests/unit/test_tag_search.py
+# For GUI tests in cross-platform environments (headless in Linux/container)
 
-# Run with coverage
-pytest --cov=src --cov-report=xml
-pytest --cov=src --cov-report=html
-```
-
-### Code Quality
-```bash
 # Run linting and formatting
 ruff check
 ruff format
 
 # Run type checking
 mypy src/
+
+# Check test coverage
+pytest --cov=src --cov-report=html
+
+# Run single test file
+pytest tests/path/to/test_file.py
 ```
 
 ### Application Usage
@@ -54,7 +90,7 @@ tag-db
 python -m genai_tag_db_tools
 
 # Library usage example
-python -c "from genai_tag_db_tools.services.tag_search import TagSearchService; print('Available')"
+python -c "from genai_tag_db_tools.services.tag_search import TagSearcher; print('Available')"
 ```
 
 ## Project Architecture
@@ -80,10 +116,12 @@ The application follows a clean 3-layer architecture optimized for database-cent
 - `data/tags_v*.db` - SQLite database files with tag data
 
 **Service Layer:**
-- `services/tag_management.py` - Tag CRUD operations and validation
-- `services/tag_search.py` - Advanced search and filtering capabilities
-- `services/tag_statistics.py` - Usage analytics and reporting
+- `services/app_services.py` - GUI service wrappers with Qt signals
+- `services/tag_search.py` - Core search logic with TagSearcher class
+- `services/tag_statistics.py` - Statistics computation and analytics
 - `services/import_data.py` - Data import from various sources
+- `services/tag_register.py` - Tag registration and validation logic
+- `services/polars_schema.py` - Polars DataFrame schemas for data processing
 
 **GUI Layer:**
 - `gui/windows/main_window.py` - Primary application window
@@ -97,9 +135,11 @@ The database uses a sophisticated multi-table schema designed for comprehensive 
 **Core Tables:**
 - `TAGS` - Primary tag storage with metadata
 - `TAG_TRANSLATIONS` - Multi-language translation support
-- `TAG_FORMATS` - Platform-specific format definitions (Danbooru, E621, etc.)
+- `TAG_FORMATS` - Platform-specific format definitions (Danbooru, E621, Derpibooru, etc.)
+- `TAG_TYPE_NAME` - Tag type definitions (general, artist, character, etc.)
 - `TAG_STATUS` - Tag state management and relationships
 - `TAG_USAGE_COUNTS` - Usage frequency tracking per format
+- `TAG_TYPE_FORMAT_MAPPING` - Mapping between tag types and formats
 
 **Key Relationships:**
 - Tags have multiple translations (one-to-many)
@@ -129,18 +169,21 @@ The database uses a sophisticated multi-table schema designed for comprehensive 
 
 **Library Usage Pattern:**
 ```python
-from genai_tag_db_tools.services.tag_search import TagSearchService
-from genai_tag_db_tools.services.tag_management import TagManagementService
+from genai_tag_db_tools.services.tag_search import TagSearcher
+from genai_tag_db_tools.services.app_services import TagSearchService, TagRegisterService
+from genai_tag_db_tools.data.tag_repository import TagRepository
 
-# Initialize services with database path
-search_service = TagSearchService("path/to/tags.db")
-management_service = TagManagementService("path/to/tags.db")
+# Initialize core searcher
+searcher = TagSearcher()
+results = searcher.search_tags("landscape")
 
-# Search tags
-results = search_service.search_tags("landscape")
+# Or use GUI service wrappers (with Qt signals)
+search_service = TagSearchService()
+register_service = TagRegisterService()
 
-# Register new tag
-new_tag = management_service.register_tag("new_tag", "source_tag")
+# Repository pattern for direct database access
+repository = TagRepository()
+tags = repository.search_tags_by_name("landscape")
 ```
 
 **LoRAIro Integration:**
@@ -262,5 +305,66 @@ new_tag = management_service.register_tag("new_tag", "source_tag")
 - Provide clear error messages for validation failures
 - Handle edge cases and boundary conditions
 - Implement proper fallback behaviors
+
+## Rule Files and Documentation References
+
+### .cursor Directory Structure
+Claude Code should reference these files for development guidance:
+
+**Core Development Rules:**
+- `.cursor/rules/rules.mdc` - Master development workflow and architectural rules
+- `.cursor/rules/coding-rules.mdc` - Coding standards, type hints, error handling, documentation requirements
+
+**Module-Specific Rules:**
+- `.cursor/rules/module_rules/module-database-rules.mdc` - Database operation patterns
+- `.cursor/rules/test_rules/testing-rules.mdc` - Test strategy and pytest configuration
+
+### Reference Guidelines for Claude Code
+
+**When Planning (PLAN/Architect Mode):**
+1. Reference `.cursor/rules/rules.mdc` for planning guidelines
+2. Check existing documentation in `docs/` directory
+
+**When Implementing (ACT/Code Mode):**
+1. Follow `.cursor/rules/coding-rules.mdc` for code quality standards
+2. Reference module-specific rules for relevant components
+
+**When Testing:**
+1. Use guidelines from `.cursor/rules/test_rules/testing-rules.mdc`
+2. Ensure coverage requirements are met
+
+**Key Principles:**
+- Reference rules before starting any development task
+- Follow established patterns and conventions
+- Always check for existing solutions in documentation
+
+## Troubleshooting
+
+### Cross-Platform Development Environment
+
+**Environment Isolation:**
+- Windows environment: `.venv_windows` - Windows-specific dependencies and binaries
+- Linux environment: `.venv_linux` - Linux-specific dependencies and binaries  
+- Independent GUI operation support for both environments
+
+**Development Workflow:**
+```bash
+# Setup using unified script (automatic OS detection)
+./scripts/setup.sh
+
+# Linux/Container environment - development and testing
+UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest
+
+# Windows environment - execution and GUI verification
+$env:UV_PROJECT_ENVIRONMENT = ".venv_windows"; uv run tag-db
+
+# Unified execution using Makefile
+make run-gui  # Automatically selects appropriate environment
+```
+
+**GUI Testing Notes:**
+- Linux environment: Headless execution (pytest-qt + QT_QPA_PLATFORM=offscreen)
+- Windows environment: Native GUI window display
+- Cross-platform test compatibility guaranteed
 
 This documentation provides comprehensive guidance for developing and maintaining the genai-tag-db-tools application while ensuring high performance, reliability, and integration capabilities.

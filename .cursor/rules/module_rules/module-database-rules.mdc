@@ -1,0 +1,139 @@
+---
+description: genai-tag-db-tools データベース層 設計指針（SQLAlchemyパターン）@src/genai_tag_db_tools/data
+globs: src/genai_tag_db_tools/data/**/*
+alwaysApply: false
+---
+version: "1.0.1"
+# genai-tag-db-tools データベース層 設計指針（SQLAlchemyパターン）
+
+## 1. 設計思想・全体方針
+- 疎結合・単一責任・テスト容易性を最優先。
+- SQLAlchemy ORMを標準とし、直接SQL文の埋め込みは原則禁止（特殊なクエリ最適化の例外は明記）。
+- 依存性注入（DI）やモック化を前提とした設計。
+- 高性能なタグ検索・管理機能の提供。
+
+## 2. レイヤー構成と責務
+- **ドメイン層** [database_schema.py](mdc:src/genai_tag_db_tools/data/database_schema.py) : データ構造・リレーションのみ定義。ビジネスロジックは持たない。
+- **Repository層** [tag_repository.py](mdc:src/genai_tag_db_tools/data/tag_repository.py) : DBアクセス・永続化・検索ロジックのみ担当。セッション管理はwith構文で。
+- **Service層** [tag_management.py](mdc:src/genai_tag_db_tools/services/tag_management.py) : ユースケース単位の集約ロジック。Repositoryのメソッドを組み合わせて提供。
+- **外部DB連携**: 複数バージョンのタグDBファイル（tags_v3.db, tags_v4.db）を統合管理。
+
+## 3. コーディング規約・パターン
+- セッション管理は必ず`with self.session_factory() as session:`で行う。
+- 例外処理はcatchしてロギング後、必要に応じて再送出。呼び出し元での冗長なcatchは避ける。
+- DTO/TypedDictでデータ受け渡しを明確化し、dictのまま渡すのは避ける。
+- Polarsを活用した高性能なバッチ処理の実装。
+
+## 4. 拡張・変更時のルール
+- 新しいタグフォーマット追加時は、schema/Repository/Service/テストをセットで追加。
+- DBスキーマ変更は必ずSQLiteマイグレーション管理で行い、手動でのALTERは禁止。
+- 依存性注入を徹底し、テスト時はモック/スタブを利用可能にする。
+
+## 5. テスト・品質保証
+- Repository層はユニットテスト必須。DB操作はテスト用DBで検証。
+- 主要ユースケース（タグ検索、統計取得、データインポート等）は結合テストを用意。
+- テストカバレッジはプロジェクト方針で数値目標を決定。
+
+## 6. パフォーマンス考慮事項
+- 大量データ処理にはPolarsを活用。
+- 検索頻度の高いカラムには適切なインデックスを設定。
+- SQLite WAL(Write-Ahead Logging)モードの活用。
+
+---
+
+## 典型的な設計パターン例
+
+### セッション管理（Repository内）
+
+```python
+class TagRepository:
+    def __init__(self, session_factory):
+        self.session_factory = session_factory
+
+    def search_tags(self, query: str) -> list[TagRecord]:
+        with self.session_factory() as session:
+            # DB操作
+            result = session.execute(...)
+            return result.fetchall()
+```
+
+### DTO/TypedDictによるデータ受け渡し
+
+```python
+class TagSearchResult(TypedDict):
+    tag_id: int
+    tag_name: str
+    category: str | None
+    usage_count: int
+    translations: list[str]
+```
+
+### 高性能検索クエリの実装
+
+```python
+def search_tags_with_filters(self, session, query: str, filters: dict) -> list[TagRecord]:
+    stmt = select(Tag).where(
+        Tag.tag_name.contains(query)
+    ).join(TagTranslation).options(
+        selectinload(Tag.translations)
+    )
+    return session.execute(stmt).scalars().all()
+```
+
+---
+
+## Mermaid図（レイヤー構成イメージ）
+
+```mermaid
+flowchart TD
+    GUI[GUI層]
+    Service[サービス層<br>（TagSearchService, TagManagementService等）]
+    Repo[Repository層<br>（TagRepository等）]
+    Schema[ドメイン層<br>（SQLAlchemyモデル）]
+    DB[(SQLite DB<br>tags_v*.db)]
+
+    GUI --> Service
+    Service --> Repo
+    Repo --> Schema
+    Schema --> DB
+    Repo -.->|統計・分析| DB
+```
+
+---
+
+## タグデータベース特有の考慮事項
+
+### マルチフォーマット対応
+- Danbooru, E621などの異なるタグフォーマットに対応
+- フォーマット固有の制約とルールの管理
+- クロスフォーマットでの検索・変換機能
+
+### 多言語対応
+- タグの多言語翻訳管理
+- 言語別検索とフィルタリング
+- 翻訳品質の管理とバージョニング
+
+### 使用統計管理
+- タグの使用頻度追跡
+- 人気度ランキングとトレンド分析
+- 時系列でのデータ蓄積と分析
+
+---
+
+## アンチパターン例
+
+- Fat Service/Repository（肥大化したクラス）
+- 直接SQL文を多用する（ORMの利点を損なう）
+- セッションをグローバルに使い回す
+- 例外を握りつぶしてロギングしない
+- テスト不能な密結合設計
+- インデックス未設定による性能劣化
+
+---
+
+## 運用・拡張時の注意
+
+- SQLiteマイグレーションでDBスキーマを一元管理
+- 新機能追加時は必ずテスト・ドキュメントもセットで
+- 既存コードの責務が増えたら分割・リファクタリングを検討
+- パフォーマンス要件に応じたクエリ最適化の実施

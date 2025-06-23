@@ -14,7 +14,9 @@ authors = [{ name = "NEXTAltair" }]
 
 # プロジェクトの分類情報
 classifiers = [
-    "Operating System :: Microsoft :: Windows :: Windows 11"  # 対応OS
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.12"
 ]
 
 # 必要なパッケージの依存関係
@@ -133,12 +135,7 @@ dev = [
     "types-Pillow",
     "types-toml",
     "alembic>=1.15.2",
-    "psutil",
-    "sphinx",
-    "sphinx-rtd-theme",
-    "sphinx-autobuild",
-    "restructuredtext_lint",
-    "esbonio"
+    "psutil"
 ]
 
 [project.urls]
