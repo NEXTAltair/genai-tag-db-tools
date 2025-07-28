@@ -157,9 +157,7 @@ class TagRepository:
         with self.session_factory() as session:
             return session.query(Tag).filter(Tag.tag_id == tag_id).one_or_none()
 
-    def update_tag(
-        self, tag_id: int, *, source_tag: str | None = None, tag: str | None = None
-    ) -> None:
+    def update_tag(self, tag_id: int, *, source_tag: str | None = None, tag: str | None = None) -> None:
         """
         タグIDを指定して、タグ情報を更新する。
         # HACK: 常にペアで更新するようにすれば片方が None の処理は不要かもしれない

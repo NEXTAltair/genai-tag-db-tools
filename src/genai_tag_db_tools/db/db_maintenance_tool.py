@@ -52,15 +52,23 @@ class DatabaseMaintenanceTool:
                     continue
 
                 status = statuses[0]  # 最初のステータスを使用
-                preferred_tag = self.tag_repository.get_tag_by_id(status.preferred_tag_id) if status.preferred_tag_id else None
+                preferred_tag = (
+                    self.tag_repository.get_tag_by_id(status.preferred_tag_id)
+                    if status.preferred_tag_id
+                    else None
+                )
 
-                duplicates.append({
-                    "tag": tag.tag,
-                    "format": self.tag_repository.get_tag_formats()[format_id - 1],  # format_idは1から始まる
-                    "type": None,  # type_idからtype_nameへの変換は現在未実装
-                    "alias": bool(status.alias),
-                    "preferred_tag": preferred_tag.tag if preferred_tag else None,
-                })
+                duplicates.append(
+                    {
+                        "tag": tag.tag,
+                        "format": self.tag_repository.get_tag_formats()[
+                            format_id - 1
+                        ],  # format_idは1から始まる
+                        "type": None,  # type_idからtype_nameへの変換は現在未実装
+                        "alias": bool(status.alias),
+                        "preferred_tag": preferred_tag.tag if preferred_tag else None,
+                    }
+                )
 
         return duplicates
 
@@ -82,12 +90,10 @@ class DatabaseMaintenanceTool:
             for format_id in format_ids:
                 count = self.tag_repository.get_usage_count(tag_id, format_id)
                 if count:
-                    format_name = self.tag_repository.get_tag_formats()[format_id - 1]  # format_idは1から始まる
-                    usage_counts.append({
-                        "tag": tag.tag,
-                        "format_name": format_name,
-                        "use_count": count
-                    })
+                    format_name = self.tag_repository.get_tag_formats()[
+                        format_id - 1
+                    ]  # format_idは1から始まる
+                    usage_counts.append({"tag": tag.tag, "format_name": format_name, "use_count": count})
 
         return usage_counts
 
@@ -121,11 +127,7 @@ class DatabaseMaintenanceTool:
             Dict[str, List[tuple]]: テーブル名をキーとした孤立レコードのリスト
         """
         all_tag_ids = set(self.tag_repository.get_all_tag_ids())
-        orphans = {
-            "translations": [],
-            "status": [],
-            "usage_counts": []
-        }
+        orphans = {"translations": [], "status": [], "usage_counts": []}
 
         # TAG_TRANSLATIONSの孤立レコード
         for tag_id in all_tag_ids:
@@ -160,25 +162,31 @@ class DatabaseMaintenanceTool:
 
         for status in all_statuses:
             if not status.alias and status.preferred_tag_id != status.tag_id:
-                inconsistencies.append({
-                    "tag_id": status.tag_id,
-                    "format_id": status.format_id,
-                    "alias": status.alias,
-                    "preferred_tag_id": status.preferred_tag_id,
-                    "reason": "alias=Falseなのにpreferred_tag_id != tag_id"
-                })
+                inconsistencies.append(
+                    {
+                        "tag_id": status.tag_id,
+                        "format_id": status.format_id,
+                        "alias": status.alias,
+                        "preferred_tag_id": status.preferred_tag_id,
+                        "reason": "alias=Falseなのにpreferred_tag_id != tag_id",
+                    }
+                )
             if status.alias and status.preferred_tag_id == status.tag_id:
-                inconsistencies.append({
-                    "tag_id": status.tag_id,
-                    "format_id": status.format_id,
-                    "alias": status.alias,
-                    "preferred_tag_id": status.preferred_tag_id,
-                    "reason": "alias=Trueなのにpreferred_tag_id == tag_id"
-                })
+                inconsistencies.append(
+                    {
+                        "tag_id": status.tag_id,
+                        "format_id": status.format_id,
+                        "alias": status.alias,
+                        "preferred_tag_id": status.preferred_tag_id,
+                        "reason": "alias=Trueなのにpreferred_tag_id == tag_id",
+                    }
+                )
 
         return inconsistencies
 
-    def detect_missing_translations(self, required_languages: Optional[Set[str]] = None) -> List[Dict[str, Any]]:
+    def detect_missing_translations(
+        self, required_languages: Optional[Set[str]] = None
+    ) -> List[Dict[str, Any]]:
         """タグ翻訳の多言語カバレッジをチェック
 
         Args:
@@ -202,11 +210,9 @@ class DatabaseMaintenanceTool:
             missing_languages = required_languages - existing_languages
 
             if missing_languages:
-                missing_translations.append({
-                    "tag_id": tag_id,
-                    "tag": tag.tag,
-                    "missing_languages": list(missing_languages)
-                })
+                missing_translations.append(
+                    {"tag_id": tag_id, "tag": tag.tag, "missing_languages": list(missing_languages)}
+                )
 
         return missing_translations
 
@@ -227,14 +233,16 @@ class DatabaseMaintenanceTool:
                     if count < 0 or count > max_threshold:
                         tag = self.tag_repository.get_tag_by_id(tag_id)
                         format_name = self.tag_repository.get_tag_formats()[format_id - 1]
-                        abnormal.append({
-                            "tag_id": tag_id,
-                            "tag": tag.tag if tag else None,
-                            "format_id": format_id,
-                            "format_name": format_name,
-                            "count": count,
-                            "reason": f"使用回数が範囲外です (0~{max_threshold})"
-                        })
+                        abnormal.append(
+                            {
+                                "tag_id": tag_id,
+                                "tag": tag.tag if tag else None,
+                                "format_id": format_id,
+                                "format_name": format_name,
+                                "count": count,
+                                "reason": f"使用回数が範囲外です (0~{max_threshold})",
+                            }
+                        )
         return abnormal
 
     def optimize_indexes(self) -> None:
@@ -299,7 +307,7 @@ class DatabaseMaintenanceTool:
                 format_id=format_id,
                 alias=False,
                 preferred_tag_id=tag_id,
-                type_id=status.type_id
+                type_id=status.type_id,
             )
         elif status.alias and status.preferred_tag_id == status.tag_id:
             # alias=Trueの場合、preferred_tag_idを別のタグに設定する必要がある

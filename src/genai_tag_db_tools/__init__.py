@@ -1,20 +1,20 @@
 """
-genai-tag-db-tools ÑÃ±ü¸
+genai-tag-db-tools ãƒ‘ãƒƒã‚±ãƒ¼ã‚¸
 
-;j¯é¹hÕ¡¯Èêü¢p’Ğ›W~Y
+ã‚¿ã‚°ãƒ‡ãƒ¼ã‚¿ãƒ™ãƒ¼ã‚¹ç®¡ç†ãƒ„ãƒ¼ãƒ«
 """
 
 from .services.tag_search import TagSearcher
 from .utils.cleanup_str import TagCleaner
 
-__all__ = ["TagSearcher", "TagCleaner", "initialize_tag_searcher", "initialize_tag_cleaner"]
+__all__ = ["TagCleaner", "TagSearcher", "initialize_tag_cleaner", "initialize_tag_searcher"]
 
 
 def initialize_tag_searcher() -> TagSearcher:
-    """TagSearchern¤ó¹¿ó¹’WfÔY"""
+    """TagSearcherã®åˆæœŸåŒ–"""
     return TagSearcher()
 
 
 def initialize_tag_cleaner() -> TagCleaner:
-    """TagCleanern¤ó¹¿ó¹’WfÔY"""
+    """TagCleanerã®åˆæœŸåŒ–"""
     return TagCleaner()

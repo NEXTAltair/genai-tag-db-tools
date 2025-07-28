@@ -45,9 +45,7 @@ class TagDataImporter(QObject):
     process_finished = Signal(str)  # 処理完了メッセージ ("インポート完了"など)
     error_occurred = Signal(str)  # エラーメッセージ
 
-    def __init__(
-        self, parent: QObject | None = None, session_factory: Callable[[], Session] | None = None
-    ):
+    def __init__(self, parent: QObject | None = None, session_factory: Callable[[], Session] | None = None):
         super().__init__(parent)
         self.logger = logging.getLogger(self.__class__.__name__)
 

@@ -14,7 +14,6 @@
 """
 
 
-
 class ErrorMessages:
     # --- 共通エラーメッセージ ---
     INVALID_INPUT = "無効な入力が指定されました。"

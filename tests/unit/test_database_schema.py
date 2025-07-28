@@ -1,4 +1,3 @@
-
 import pytest
 from sqlalchemy import StaticPool, create_engine, inspect
 from sqlalchemy.exc import IntegrityError

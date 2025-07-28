@@ -44,12 +44,8 @@ class TagStatus(Base):
     alias: Mapped[bool] = mapped_column(Boolean, nullable=False)
     preferred_tag_id: Mapped[int] = mapped_column(ForeignKey("TAGS.tag_id"))
 
-    created_at: Mapped[datetime | None] = mapped_column(
-        DateTime, server_default=func.now(), nullable=True
-    )
-    updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime, server_default=func.now(), nullable=True
-    )
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
 
     # リレーション TagStatus → Tag (tag_id)
     tag: Mapped[Tag] = relationship(
@@ -107,12 +103,8 @@ class TagTranslation(Base):
     language: Mapped[str] = mapped_column()
     translation: Mapped[str] = mapped_column()
 
-    created_at: Mapped[datetime | None] = mapped_column(
-        DateTime, server_default=func.now(), nullable=True
-    )
-    updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime, server_default=func.now(), nullable=True
-    )
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
 
     tag: Mapped[Tag] = relationship("Tag", back_populates="translations")
 
