@@ -29,52 +29,46 @@ setup:
 # Development targets
 install:
 	@echo "Installing project dependencies..."
-	UV_PROJECT_ENVIRONMENT=.venv_linux uv sync
+	uv sync
 
 install-dev:
 	@echo "Installing development dependencies..."
-	UV_PROJECT_ENVIRONMENT=.venv_linux uv sync --dev
+	uv sync --dev
 
 run-gui:
 	@echo "Running Tag DB GUI..."
-	@if [ "$(OS)" = "Windows_NT" ]; then \
-		echo "Detected Windows environment"; \
-		export UV_PROJECT_ENVIRONMENT=.venv_windows && uv run tag-db; \
-	else \
-		echo "Detected Unix/Linux environment"; \
-		UV_PROJECT_ENVIRONMENT=.venv_linux uv run tag-db; \
-	fi
+	uv run tag-db
 
 # Testing targets
 test:
 	@echo "Running all tests..."
-	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest
+	uv run pytest
 
 test-unit:
 	@echo "Running unit tests..."
-	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m unit
+	uv run pytest -m unit
 
 test-gui:
 	@echo "Running GUI tests..."
-	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m gui
+	uv run pytest -m gui
 
 test-cov:
 	@echo "Running tests with coverage..."
-	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest --cov=src --cov-report=html --cov-report=xml
+	uv run pytest --cov=src --cov-report=html --cov-report=xml
 
 # Code quality targets
 lint:
 	@echo "Running code linting..."
-	UV_PROJECT_ENVIRONMENT=.venv_linux uv run ruff check
+	uv run ruff check
 
 format:
 	@echo "Formatting code..."
-	UV_PROJECT_ENVIRONMENT=.venv_linux uv run ruff format
-	UV_PROJECT_ENVIRONMENT=.venv_linux uv run ruff check --fix
+	uv run ruff format
+	uv run ruff check --fix
 
 typecheck:
 	@echo "Running type checking..."
-	UV_PROJECT_ENVIRONMENT=.venv_linux uv run mypy src/
+	uv run mypy src/
 
 # Cleanup target
 clean:

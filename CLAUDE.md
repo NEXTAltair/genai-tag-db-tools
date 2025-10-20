@@ -12,19 +12,15 @@ NEVER proactively create documentation files (*.md) or README files. Only create
 
 ### Environment Setup
 
-#### Cross-Platform Environment Management
+#### Environment Management
 
-This project supports Windows/Linux environments with independent virtual environments to manage platform-specific dependencies properly.
+This project uses a unified `.venv` directory for all platforms.
 
 ```bash
-# Automatic OS detection setup (recommended)
+# Automatic setup (recommended)
 ./scripts/setup.sh
 
-# Manual environment specification
-UV_PROJECT_ENVIRONMENT=.venv_linux uv sync --dev     # Linux
-$env:UV_PROJECT_ENVIRONMENT=".venv_windows"; uv sync --dev  # Windows
-
-# Traditional single environment
+# Manual dependency sync
 uv sync --dev
 
 # Add new dependencies
@@ -36,16 +32,11 @@ uv add --dev package-name
 
 ### Running the Application
 
-#### Cross-Platform Execution
-
 ```bash
-# Windows Environment
-$env:UV_PROJECT_ENVIRONMENT = ".venv_windows"; uv run tag-db
+# Run the GUI
+uv run tag-db
 
-# Linux Environment  
-UV_PROJECT_ENVIRONMENT=.venv_linux uv run tag-db
-
-# Using Makefile (all platforms)
+# Using Makefile
 make run-gui
 
 # Traditional single environment
@@ -349,22 +340,23 @@ Claude Code should reference these files for development guidance:
 
 **Development Workflow:**
 ```bash
-# Setup using unified script (automatic OS detection)
+# Setup using unified script
 ./scripts/setup.sh
 
-# Linux/Container environment - development and testing
-UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest
+# Run tests
+uv run pytest
 
-# Windows environment - execution and GUI verification
-$env:UV_PROJECT_ENVIRONMENT = ".venv_windows"; uv run tag-db
+# Run the application
+uv run tag-db
 
-# Unified execution using Makefile
-make run-gui  # Automatically selects appropriate environment
+# Using Makefile
+make run-gui
+make test
 ```
 
 **GUI Testing Notes:**
-- Linux environment: Headless execution (pytest-qt + QT_QPA_PLATFORM=offscreen)
-- Windows environment: Native GUI window display
-- Cross-platform test compatibility guaranteed
+- Linux/Container: Headless execution (pytest-qt + QT_QPA_PLATFORM=offscreen)
+- Windows: Native GUI window display
+- Unified `.venv` for all platforms
 
 This documentation provides comprehensive guidance for developing and maintaining the genai-tag-db-tools application while ensuring high performance, reliability, and integration capabilities.
