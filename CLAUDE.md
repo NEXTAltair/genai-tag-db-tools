@@ -333,10 +333,10 @@ Claude Code should reference these files for development guidance:
 
 ### Cross-Platform Development Environment
 
-**Environment Isolation:**
-- Windows environment: `.venv_windows` - Windows-specific dependencies and binaries
-- Linux environment: `.venv_linux` - Linux-specific dependencies and binaries  
-- Independent GUI operation support for both environments
+**Virtual Environment:**
+- The project uses `.venv` directory (managed by devcontainer volume mount)
+- uv automatically detects and uses `.venv` without requiring environment variables
+- Cross-platform compatible with both Windows and Linux
 
 **Development Workflow:**
 ```bash

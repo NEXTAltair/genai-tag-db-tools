@@ -73,6 +73,7 @@ line-ending = "auto"
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true
+exclude = ["tests"]
 
 # pytestの設定オプション
 [tool.pytest.ini_options]

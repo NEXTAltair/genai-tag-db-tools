@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict, Any, Set
+from typing import Any
 
 from genai_tag_db_tools.data.tag_repository import TagRepository
 
@@ -26,7 +26,7 @@ class DatabaseMaintenanceTool:
         """
         self.tag_repository = TagRepository()
 
-    def detect_duplicates_in_tag_status(self) -> List[Dict[str, Any]]:
+    def detect_duplicates_in_tag_status(self) -> list[dict[str, Any]]:
         """TAG_STATUSテーブルの重複レコードを検出し、詳細情報を返す
 
         Returns:
@@ -36,7 +36,7 @@ class DatabaseMaintenanceTool:
         all_statuses = self.tag_repository.list_tag_statuses()
 
         # tag_idとformat_idの組み合わせでグループ化
-        status_groups: Dict[tuple, List] = {}
+        status_groups: dict[tuple, list] = {}
         for status in all_statuses:
             key = (status.tag_id, status.format_id)
             if key not in status_groups:
@@ -72,7 +72,7 @@ class DatabaseMaintenanceTool:
 
         return duplicates
 
-    def detect_usage_counts_for_tags(self) -> List[Dict[str, Any]]:
+    def detect_usage_counts_for_tags(self) -> list[dict[str, Any]]:
         """TAG_USAGE_COUNTSの使用回数を検出し、各タグの使用頻度を返す
 
         Returns:
@@ -97,7 +97,7 @@ class DatabaseMaintenanceTool:
 
         return usage_counts
 
-    def detect_foreign_key_issues(self) -> List[tuple]:
+    def detect_foreign_key_issues(self) -> list[tuple]:
         """外部キーの整合性をチェック
 
         Returns:
@@ -115,7 +115,7 @@ class DatabaseMaintenanceTool:
 
         return missing_tags
 
-    def detect_orphan_records(self) -> Dict[str, List[tuple]]:
+    def detect_orphan_records(self) -> dict[str, list[tuple]]:
         """孤立したレコードを検出（拡張版）
 
         以下のテーブルの孤立レコードを検出:
@@ -147,7 +147,7 @@ class DatabaseMaintenanceTool:
 
         return orphans
 
-    def detect_inconsistent_alias_status(self) -> List[Dict[str, Any]]:
+    def detect_inconsistent_alias_status(self) -> list[dict[str, Any]]:
         """エイリアス整合性が崩れているTagStatusを検出
 
         以下のケースを検出:
@@ -185,8 +185,8 @@ class DatabaseMaintenanceTool:
         return inconsistencies
 
     def detect_missing_translations(
-        self, required_languages: Optional[Set[str]] = None
-    ) -> List[Dict[str, Any]]:
+        self, required_languages: set[str] | None = None
+    ) -> list[dict[str, Any]]:
         """タグ翻訳の多言語カバレッジをチェック
 
         Args:
@@ -216,7 +216,7 @@ class DatabaseMaintenanceTool:
 
         return missing_translations
 
-    def detect_abnormal_usage_counts(self, max_threshold: int = 1000000) -> List[Dict[str, Any]]:
+    def detect_abnormal_usage_counts(self, max_threshold: int = 1000000) -> list[dict[str, Any]]:
         """使用回数が異常に大きい or 負数のタグを検出
 
         Args:
@@ -254,7 +254,7 @@ class DatabaseMaintenanceTool:
         """
         print("インデックスの最適化はSQLiteの低レベル操作のため、直接実行する必要があります")
 
-    def detect_invalid_tag_id(self) -> Optional[int]:
+    def detect_invalid_tag_id(self) -> int | None:
         """invalid_tagのタグIDを取得
 
         Returns:
@@ -266,7 +266,7 @@ class DatabaseMaintenanceTool:
 
         return invalid_tag_id
 
-    def detect_invalid_preferred_tags(self, invalid_tag_id: int) -> List[tuple]:
+    def detect_invalid_preferred_tags(self, invalid_tag_id: int) -> list[tuple]:
         """invalid tagのタグIDをpreferred_tagに記録したレコードを検出
 
         Args:

@@ -170,9 +170,9 @@ genai-tag-db-tools/
 ## Development Environment (Current)
 
 ### Cross-Platform Support
-- **Linux Environment**: `.venv_linux` with UV_PROJECT_ENVIRONMENT
-- **Windows Environment**: `.venv_windows` with cross-platform compatibility
-- **Unified Scripts**: `scripts/setup.sh` with OS detection
+- **Virtual Environment**: Unified `.venv` directory for all platforms
+- **uv Integration**: Automatic `.venv` detection without environment variables
+- **Unified Scripts**: `scripts/setup.sh` for dependency management
 - **Makefile**: Cross-platform development commands
 
 ### Testing Strategy (Implemented)
