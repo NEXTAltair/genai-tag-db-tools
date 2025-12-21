@@ -1,83 +1,69 @@
 from typing import Any
 
-from genai_tag_db_tools.data.tag_repository import TagRepository
+from genai_tag_db_tools.db.repository import TagRepository
 
 
 class DatabaseMaintenanceTool:
-    """データベースのメンテナンス機能を提供するクラス
+    """タグDBの保守チェックをまとめたユーティリティ。
 
-    TAGSテーブルとその関連テーブルに対する以下の機能を提供:
-    - 重複レコードの検出と修正
-    - 使用回数の集計と異常値検出
-    - 外部キー整合性チェック
-    - 孤立レコードの検出
-    - エイリアス整合性チェック
-    - 翻訳カバレッジチェック
-    - インデックスの最適化
-    - invalid tagの検出
+    対象:
+    - 重複レコード
+    - 使用回数の異常値
+    - 外部キー整合性
+    - 孤立レコード
+    - エイリアス整合性
+    - 翻訳カバレッジ
+    - invalid tag の検出
 
-    全ての機能はTagRepositoryを利用して実装されており、DBへの直接アクセスは行いません。
+    すべて TagRepository 経由で実行し、DBへ直接アクセスしない。
     """
 
     def __init__(self, db_path: str):
-        """
-        Args:
-            db_path (str): データベースファイルのパス
+        """Args:
+            db_path (str): DBファイルのパス（将来拡張用）
         """
         self.tag_repository = TagRepository()
 
     def detect_duplicates_in_tag_status(self) -> list[dict[str, Any]]:
-        """TAG_STATUSテーブルの重複レコードを検出し、詳細情報を返す
-
-        Returns:
-            List[Dict[str, Any]]: 重複レコードのリスト（関連するタグ、フォーマット、タイプ、およびpreferred_tag情報を含む）
-        """
-        # 全てのタグステータスを取得
+        """TAG_STATUSの重複を検出して詳細を返す。"""
         all_statuses = self.tag_repository.list_tag_statuses()
 
         # tag_idとformat_idの組み合わせでグループ化
-        status_groups: dict[tuple, list] = {}
+        status_groups: dict[tuple[int, int], list] = {}
         for status in all_statuses:
             key = (status.tag_id, status.format_id)
-            if key not in status_groups:
-                status_groups[key] = []
-            status_groups[key].append(status)
+            status_groups.setdefault(key, []).append(status)
 
-        # 重複があるものだけを抽出
         duplicates = []
         for (tag_id, format_id), statuses in status_groups.items():
-            if len(statuses) > 1:
-                tag = self.tag_repository.get_tag_by_id(tag_id)
-                if not tag:
-                    continue
+            if len(statuses) <= 1:
+                continue
 
-                status = statuses[0]  # 最初のステータスを使用
-                preferred_tag = (
-                    self.tag_repository.get_tag_by_id(status.preferred_tag_id)
-                    if status.preferred_tag_id
-                    else None
-                )
+            tag = self.tag_repository.get_tag_by_id(tag_id)
+            if not tag:
+                continue
 
-                duplicates.append(
-                    {
-                        "tag": tag.tag,
-                        "format": self.tag_repository.get_tag_formats()[
-                            format_id - 1
-                        ],  # format_idは1から始まる
-                        "type": None,  # type_idからtype_nameへの変換は現在未実装
-                        "alias": bool(status.alias),
-                        "preferred_tag": preferred_tag.tag if preferred_tag else None,
-                    }
-                )
+            status = statuses[0]
+            preferred_tag = (
+                self.tag_repository.get_tag_by_id(status.preferred_tag_id)
+                if status.preferred_tag_id
+                else None
+            )
+
+            duplicates.append(
+                {
+                    "tag": tag.tag,
+                    "format": self.tag_repository.get_tag_formats()[format_id - 1],
+                    "type": None,  # type_id -> type_name は未実装
+                    "alias": bool(status.alias),
+                    "preferred_tag": preferred_tag.tag if preferred_tag else None,
+                }
+            )
 
         return duplicates
 
     def detect_usage_counts_for_tags(self) -> list[dict[str, Any]]:
-        """TAG_USAGE_COUNTSの使用回数を検出し、各タグの使用頻度を返す
-
-        Returns:
-            List[Dict[str, Any]]: タグとその使用回数のリスト
-        """
+        """TAG_USAGE_COUNTSの使用回数を取得して返す。"""
         tag_ids = self.tag_repository.get_all_tag_ids()
         format_ids = self.tag_repository.get_tag_format_ids()
 
@@ -90,44 +76,43 @@ class DatabaseMaintenanceTool:
             for format_id in format_ids:
                 count = self.tag_repository.get_usage_count(tag_id, format_id)
                 if count:
-                    format_name = self.tag_repository.get_tag_formats()[
-                        format_id - 1
-                    ]  # format_idは1から始まる
-                    usage_counts.append({"tag": tag.tag, "format_name": format_name, "use_count": count})
+                    format_name = self.tag_repository.get_tag_formats()[format_id - 1]
+                    usage_counts.append(
+                        {
+                            "tag": tag.tag,
+                            "format_name": format_name,
+                            "use_count": count,
+                        }
+                    )
 
         return usage_counts
 
-    def detect_foreign_key_issues(self) -> list[tuple]:
-        """外部キーの整合性をチェック
-
-        Returns:
-            List[tuple]: 外部キー制約違反のレコードリスト
-        """
-        # TAG_STATUSテーブルの全レコードを取得
+    def detect_foreign_key_issues(self) -> list[tuple[int, str | None]]:
+        """外部キーの整合性をチェック。"""
         all_statuses = self.tag_repository.list_tag_statuses()
 
-        # 外部キー違反を検出
         missing_tags = []
         for status in all_statuses:
             tag = self.tag_repository.get_tag_by_id(status.tag_id)
             if not tag:
-                missing_tags.append((status.tag_id, None))  # source_tagは取得できないのでNone
+                missing_tags.append((status.tag_id, None))  # source_tagは未取得
 
         return missing_tags
 
-    def detect_orphan_records(self) -> dict[str, list[tuple]]:
-        """孤立したレコードを検出（拡張版）
+    def detect_orphan_records(self) -> dict[str, list[tuple[int]]]:
+        """孤立レコードを検出する（拡張版）。
 
-        以下のテーブルの孤立レコードを検出:
+        対象:
         - TAG_TRANSLATIONS
         - TAG_STATUS
         - TAG_USAGE_COUNTS
-
-        Returns:
-            Dict[str, List[tuple]]: テーブル名をキーとした孤立レコードのリスト
         """
         all_tag_ids = set(self.tag_repository.get_all_tag_ids())
-        orphans = {"translations": [], "status": [], "usage_counts": []}
+        orphans: dict[str, list[tuple[int]]] = {
+            "translations": [],
+            "status": [],
+            "usage_counts": [],
+        }
 
         # TAG_TRANSLATIONSの孤立レコード
         for tag_id in all_tag_ids:
@@ -142,21 +127,12 @@ class DatabaseMaintenanceTool:
             if status.tag_id not in all_tag_ids:
                 orphans["status"].append((status.tag_id,))
 
-        # TAG_USAGE_COUNTSの孤立レコード（実装予定）
-        # Note: TagRepositoryにget_all_usage_countsのような機能が必要
-
+        # TAG_USAGE_COUNTSの孤立レコード（未実装）
+        # Note: TagRepositoryに全件取得メソッドが必要
         return orphans
 
     def detect_inconsistent_alias_status(self) -> list[dict[str, Any]]:
-        """エイリアス整合性が崩れているTagStatusを検出
-
-        以下のケースを検出:
-        1. alias=Falseなのにpreferred_tag_id != tag_id
-        2. alias=Trueなのにpreferred_tag_id == tag_id
-
-        Returns:
-            List[Dict[str, Any]]: 整合性が崩れているレコードのリスト
-        """
+        """エイリアス整合性が崩れているTagStatusを検出。"""
         inconsistencies = []
         all_statuses = self.tag_repository.list_tag_statuses()
 
@@ -187,14 +163,10 @@ class DatabaseMaintenanceTool:
     def detect_missing_translations(
         self, required_languages: set[str] | None = None
     ) -> list[dict[str, Any]]:
-        """タグ翻訳の多言語カバレッジをチェック
+        """翻訳の多言語カバレッジをチェックする。
 
         Args:
-            required_languages (Optional[Set[str]]): 必須言語のセット。
-                指定がない場合は登録済みの全言語を対象とする。
-
-        Returns:
-            List[Dict[str, Any]]: 翻訳が不足しているタグのリスト
+            required_languages: 対象言語。未指定なら登録済み全言語。
         """
         if required_languages is None:
             required_languages = set(self.tag_repository.get_tag_languages())
@@ -211,97 +183,68 @@ class DatabaseMaintenanceTool:
 
             if missing_languages:
                 missing_translations.append(
-                    {"tag_id": tag_id, "tag": tag.tag, "missing_languages": list(missing_languages)}
+                    {
+                        "tag_id": tag_id,
+                        "tag": tag.tag,
+                        "missing_languages": list(missing_languages),
+                    }
                 )
 
         return missing_translations
 
-    def detect_abnormal_usage_counts(self, max_threshold: int = 1000000) -> list[dict[str, Any]]:
-        """使用回数が異常に大きい or 負数のタグを検出
-
-        Args:
-            max_threshold (int): 使用回数の上限閾値
-
-        Returns:
-            List[Dict[str, Any]]: 異常な使用回数を持つタグのリスト
-        """
+    def detect_abnormal_usage_counts(self, max_threshold: int = 1_000_000) -> list[dict[str, Any]]:
+        """使用回数が異常（負数/閾値超過）のタグを検出。"""
         abnormal = []
         for tag_id in self.tag_repository.get_all_tag_ids():
             for format_id in self.tag_repository.get_tag_format_ids():
                 count = self.tag_repository.get_usage_count(tag_id, format_id)
-                if count is not None:
-                    if count < 0 or count > max_threshold:
-                        tag = self.tag_repository.get_tag_by_id(tag_id)
-                        format_name = self.tag_repository.get_tag_formats()[format_id - 1]
-                        abnormal.append(
-                            {
-                                "tag_id": tag_id,
-                                "tag": tag.tag if tag else None,
-                                "format_id": format_id,
-                                "format_name": format_name,
-                                "count": count,
-                                "reason": f"使用回数が範囲外です (0~{max_threshold})",
-                            }
-                        )
+                if count is not None and (count < 0 or count > max_threshold):
+                    tag = self.tag_repository.get_tag_by_id(tag_id)
+                    format_name = self.tag_repository.get_tag_formats()[format_id - 1]
+                    abnormal.append(
+                        {
+                            "tag_id": tag_id,
+                            "tag": tag.tag if tag else None,
+                            "format_id": format_id,
+                            "format_name": format_name,
+                            "count": count,
+                            "reason": f"使用回数が範囲外 (0~{max_threshold})",
+                        }
+                    )
         return abnormal
 
     def optimize_indexes(self) -> None:
-        """インデックスの再構築や最適化を行う
-
-        Note:
-            SQLite固有の低レベル操作のため、現状は警告メッセージのみ表示。
-            将来的にはTagRepository側でVACUUM/ANALYZE/REINDEXをサポートする可能性あり。
-        """
-        print("インデックスの最適化はSQLiteの低レベル操作のため、直接実行する必要があります")
+        """インデックスの最適化（将来実装）。"""
+        print("インデックス最適化はSQLiteの低レベル操作が必要です。")
 
     def detect_invalid_tag_id(self) -> int | None:
-        """invalid_tagのタグIDを取得
-
-        Returns:
-            Optional[int]: invalid_tagのタグID
-        """
+        """invalid_tagのタグIDを取得。"""
         invalid_tag_id = self.tag_repository.get_tag_id_by_name("invalid tag")
         if invalid_tag_id is None:
             invalid_tag_id = self.tag_repository.get_tag_id_by_name("invalid_tag")
-
         return invalid_tag_id
 
-    def detect_invalid_preferred_tags(self, invalid_tag_id: int) -> list[tuple]:
-        """invalid tagのタグIDをpreferred_tagに記録したレコードを検出
-
-        Args:
-            invalid_tag_id (int): invalid tagのタグID
-
-        Returns:
-            List[tuple[int, str]]: invalid tagをpreferred_tagに設定しているレコードのリスト
-        """
+    def detect_invalid_preferred_tags(self, invalid_tag_id: int) -> list[tuple[int, str]]:
+        """invalid tagをpreferred_tagに設定したレコードを検出。"""
         invalid_preferred_tags = []
-
-        # 全てのタグステータスをチェック
         all_statuses = self.tag_repository.list_tag_statuses()
         for status in all_statuses:
             if status.preferred_tag_id == invalid_tag_id:
                 tag = self.tag_repository.get_tag_by_id(status.tag_id)
                 if tag:
                     invalid_preferred_tags.append((status.tag_id, tag.tag))
-
         return invalid_preferred_tags
 
-    # --- 自動修正機能 ---
-
-    def fix_inconsistent_alias_status(self, status_id: tuple) -> None:
-        """エイリアス整合性の問題を修正
-
-        Args:
-            status_id (tuple): (tag_id, format_id) のタプル
-        """
+    # --- 自動修正 ---
+    def fix_inconsistent_alias_status(self, status_id: tuple[int, int]) -> None:
+        """エイリアス整合性の問題を修正。"""
         tag_id, format_id = status_id
         status = self.tag_repository.get_tag_status(tag_id, format_id)
         if not status:
             return
 
         if not status.alias and status.preferred_tag_id != status.tag_id:
-            # alias=Falseの場合、preferred_tag_idをtag_idに設定
+            # alias=Falseの場合、preferred_tag_idをtag_idに合わせる
             self.tag_repository.update_tag_status(
                 tag_id=tag_id,
                 format_id=format_id,
@@ -310,18 +253,14 @@ class DatabaseMaintenanceTool:
                 type_id=status.type_id,
             )
         elif status.alias and status.preferred_tag_id == status.tag_id:
-            # alias=Trueの場合、preferred_tag_idを別のタグに設定する必要がある
-            # Note: この場合は自動修正せず、手動での対応を推奨
-            print(f"Warning: tag_id={tag_id}のエイリアス設定には手動での確認が必要です")
+            # alias=Trueの場合、preferred_tag_idを別タグにする必要がある
+            # Note: 自動修正せず手動対応を推奨
+            print(f"Warning: tag_id={tag_id}のエイリアス設定は手動確認が必要です")
 
     def fix_duplicate_status(self, tag_id: int, format_id: int) -> None:
-        """重複したタグステータスを修正
+        """重複したタグステータスを修正。
 
-        最も新しいステータスを残し、他を削除
-
-        Args:
-            tag_id (int): タグID
-            format_id (int): フォーマットID
+        最も新しいステータスを残して他を削除。
         """
         statuses = self.tag_repository.list_tag_statuses(tag_id)
         format_statuses = [s for s in statuses if s.format_id == format_id]
@@ -329,13 +268,11 @@ class DatabaseMaintenanceTool:
         if len(format_statuses) <= 1:
             return
 
-        # 最新のステータスを残して他を削除
-        format_statuses[0]  # 本来はタイムスタンプなどで判断
+        # 最新のステータスを残して他を削除（暫定的に先頭を残す）
         for status in format_statuses[1:]:
             self.tag_repository.delete_tag_status(status.tag_id, status.format_id)
 
 
-# 使用例
 if __name__ == "__main__":
     db_tool = DatabaseMaintenanceTool("tags_v3.db")
 
@@ -344,7 +281,7 @@ if __name__ == "__main__":
     if duplicates_status:
         print(f"重複レコードが検出されました: {duplicates_status}")
         for duplicate in duplicates_status:
-            print(f"重複レコード: {duplicate}")
+            print(f"重複コード: {duplicate}")
 
     # 使用回数の異常値検出
     abnormal_counts = db_tool.detect_abnormal_usage_counts()
@@ -361,14 +298,14 @@ if __name__ == "__main__":
             print(f"整合性エラー: {alias}")
 
     # 翻訳カバレッジチェック
-    required_langs = {"en", "ja"}  # 必須言語を指定
+    required_langs = {"en", "ja"}
     missing_translations = db_tool.detect_missing_translations(required_langs)
     if missing_translations:
         print(f"翻訳が不足しているタグが検出されました: {missing_translations}")
         for missing in missing_translations:
             print(f"翻訳不足: {missing}")
 
-    # 外部キーの不整合の検出
+    # 外部キーの不整合検出
     missing_keys = db_tool.detect_foreign_key_issues()
     if missing_keys:
         print(f"外部キーの不整合が検出されました: {missing_keys}")
@@ -380,8 +317,9 @@ if __name__ == "__main__":
 
     # invalid tag の検出
     invalid_tag = db_tool.detect_invalid_tag_id()
-
-    # invalid tag をpreferred_tagに設定しているレコードの検出
     if invalid_tag:
         invalid_preferred_tags = db_tool.detect_invalid_preferred_tags(invalid_tag)
-        print(f"invalid tagをpreferred_tagに設定しているレコード: {invalid_preferred_tags}")
+        print(
+            "invalid tagをpreferred_tagに設定したレコード:"
+            f" {invalid_preferred_tags}"
+        )

@@ -1,4 +1,4 @@
-# genai_tag_db_tools/services/app_services.py
+﻿# genai_tag_db_tools/services/app_services.py
 
 import logging
 from typing import Any
@@ -7,7 +7,7 @@ import polars as pl
 from PySide6.QtCore import QObject, Signal
 from sqlalchemy.orm import Session
 
-from genai_tag_db_tools.data.tag_repository import TagRepository
+from genai_tag_db_tools.db.repository import TagRepository
 from genai_tag_db_tools.services.import_data import ImportConfig, TagDataImporter
 from genai_tag_db_tools.services.tag_search import TagSearcher
 from genai_tag_db_tools.services.tag_statistics import TagStatistics
@@ -15,62 +15,51 @@ from genai_tag_db_tools.services.tag_statistics import TagStatistics
 
 class GuiServiceBase(QObject):
     """
-    PySide6 のシグナルや共通のロガー初期化などを行う基底クラス。
-    進捗通知やエラー通知など、GUIとの連携でよく使う機能をまとめる。
-    """
+    PySide6 縺ｮ繧ｷ繧ｰ繝翫Ν繧・・騾壹・繝ｭ繧ｬ繝ｼ蛻晄悄蛹悶↑縺ｩ繧定｡後≧蝓ｺ蠎輔け繝ｩ繧ｹ縲・    騾ｲ謐鈴夂衍繧・お繝ｩ繝ｼ騾夂衍縺ｪ縺ｩ縲；UI縺ｨ縺ｮ騾｣謳ｺ縺ｧ繧医￥菴ｿ縺・ｩ溯・繧偵∪縺ｨ繧√ｋ縲・    """
 
-    # GUI向けに進捗や完了、エラーを通知するためのシグナルを共通定義
-    progress_updated = Signal(int, str)  # (進捗度, メッセージ)
-    process_finished = Signal(str)  # (完了時のメッセージや処理名)
-    error_occurred = Signal(str)  # (エラー内容)
+    # GUI蜷代￠縺ｫ騾ｲ謐励ｄ螳御ｺ・√お繝ｩ繝ｼ繧帝夂衍縺吶ｋ縺溘ａ縺ｮ繧ｷ繧ｰ繝翫Ν繧貞・騾壼ｮ夂ｾｩ
+    progress_updated = Signal(int, str)  # (騾ｲ謐怜ｺｦ, 繝｡繝・そ繝ｼ繧ｸ)
+    process_finished = Signal(str)  # (螳御ｺ・凾縺ｮ繝｡繝・そ繝ｼ繧ｸ繧・・逅・錐)
+    error_occurred = Signal(str)  # (繧ｨ繝ｩ繝ｼ蜀・ｮｹ)
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
-        # 各サービスクラスで共通して使いたいロガー
+        # 蜷・し繝ｼ繝薙せ繧ｯ繝ｩ繧ｹ縺ｧ蜈ｱ騾壹＠縺ｦ菴ｿ縺・◆縺・Ο繧ｬ繝ｼ
         self.logger = logging.getLogger(self.__class__.__name__)
 
 
 class TagCoreService:
     """
-    タグ検索やフォーマット取得など、DB操作のコアロジックをまとめたクラス。
-    すべてのサービス(Import/Clean/Cleanup/Search/etc.)が共通で使える機能を集約。
-    """
+    繧ｿ繧ｰ讀懃ｴ｢繧・ヵ繧ｩ繝ｼ繝槭ャ繝亥叙蠕励↑縺ｩ縲．B謫堺ｽ懊・繧ｳ繧｢繝ｭ繧ｸ繝・け繧偵∪縺ｨ繧√◆繧ｯ繝ｩ繧ｹ縲・    縺吶∋縺ｦ縺ｮ繧ｵ繝ｼ繝薙せ(Import/Clean/Cleanup/Search/etc.)縺悟・騾壹〒菴ｿ縺医ｋ讖溯・繧帝寔邏・・    """
 
     def __init__(self, searcher: TagSearcher | None = None):
         self.logger = logging.getLogger(self.__class__.__name__)
-        # TagSearcher を内包
-        self._searcher = searcher or TagSearcher()
+        # TagSearcher 繧貞・蛹・        self._searcher = searcher or TagSearcher()
 
     def get_tag_formats(self) -> list[str]:
         """
-        DBからタグフォーマット一覧を取得して返す。
-        """
+        DB縺九ｉ繧ｿ繧ｰ繝輔か繝ｼ繝槭ャ繝井ｸ隕ｧ繧貞叙蠕励＠縺ｦ霑斐☆縲・        """
         return self._searcher.get_tag_formats()
 
     def get_tag_languages(self) -> list[str]:
         """
-        DBから言語一覧を取得して返す。
-        """
+        DB縺九ｉ險隱樔ｸ隕ｧ繧貞叙蠕励＠縺ｦ霑斐☆縲・        """
         return self._searcher.get_tag_languages()
 
     def get_format_id(self, format_name: str) -> int:
         """
-        フォーマット名からフォーマットIDを取得。
-        """
+        繝輔か繝ｼ繝槭ャ繝亥錐縺九ｉ繝輔か繝ｼ繝槭ャ繝・D繧貞叙蠕励・        """
         return self._searcher.tag_repo.get_format_id(format_name)
 
     def convert_tag(self, tag: str, format_id: int) -> str:
         """
-        単一のタグ文字列を指定フォーマットIDに基づき変換。
-        TagSearcher.convert_tag() を内部利用。
-        """
+        蜊倅ｸ縺ｮ繧ｿ繧ｰ譁・ｭ怜・繧呈欠螳壹ヵ繧ｩ繝ｼ繝槭ャ繝・D縺ｫ蝓ｺ縺･縺榊､画鋤縲・        TagSearcher.convert_tag() 繧貞・驛ｨ蛻ｩ逕ｨ縲・        """
         return self._searcher.convert_tag(tag, format_id)
 
 
 class TagSearchService(GuiServiceBase):
     """
-    TagSearcherを内部で利用し、GUI用のメソッド（検索やフォーマット一覧取得など）をまとめる。
-    """
+    TagSearcher繧貞・驛ｨ縺ｧ蛻ｩ逕ｨ縺励；UI逕ｨ縺ｮ繝｡繧ｽ繝・ラ・域､懃ｴ｢繧・ヵ繧ｩ繝ｼ繝槭ャ繝井ｸ隕ｧ蜿門ｾ励↑縺ｩ・峨ｒ縺ｾ縺ｨ繧√ｋ縲・    """
 
     def __init__(self, parent: QObject | None = None, searcher: TagSearcher | None = None):
         super().__init__(parent)
@@ -78,39 +67,35 @@ class TagSearchService(GuiServiceBase):
 
     def get_tag_formats(self) -> list[str]:
         """
-        DB からタグフォーマット一覧を取得。
-        """
+        DB 縺九ｉ繧ｿ繧ｰ繝輔か繝ｼ繝槭ャ繝井ｸ隕ｧ繧貞叙蠕励・        """
         try:
             return self._searcher.get_tag_formats()
         except Exception as e:
-            self.logger.error(f"フォーマット一覧取得中にエラー: {e}")
+            self.logger.error(f"繝輔か繝ｼ繝槭ャ繝井ｸ隕ｧ蜿門ｾ嶺ｸｭ縺ｫ繧ｨ繝ｩ繝ｼ: {e}")
             self.error_occurred.emit(str(e))
             raise
 
     def get_tag_languages(self) -> list[str]:
         """
-        DB から言語一覧を取得。
-        """
+        DB 縺九ｉ險隱樔ｸ隕ｧ繧貞叙蠕励・        """
         try:
             return self._searcher.get_tag_languages()
         except Exception as e:
-            self.logger.error(f"言語一覧取得中にエラー: {e}")
+            self.logger.error(f"險隱樔ｸ隕ｧ蜿門ｾ嶺ｸｭ縺ｫ繧ｨ繝ｩ繝ｼ: {e}")
             self.error_occurred.emit(str(e))
             raise
 
     def get_tag_types(self, format_name: str | None) -> list[str]:
         """
-        指定フォーマットに紐づくタグタイプ一覧を取得。
-
+        謖・ｮ壹ヵ繧ｩ繝ｼ繝槭ャ繝医↓邏舌▼縺上ち繧ｰ繧ｿ繧､繝嶺ｸ隕ｧ繧貞叙蠕励・
         Args:
-            format_name (str): フォーマット名。None の場合は全検索。
-        """
+            format_name (str): 繝輔か繝ｼ繝槭ャ繝亥錐縲・one 縺ｮ蝣ｴ蜷医・蜈ｨ讀懃ｴ｢縲・        """
         try:
             if format_name is None:
                 return self._searcher.get_all_types()
             return self._searcher.get_tag_types(format_name)
         except Exception as e:
-            self.logger.error(f"タグタイプ一覧取得中にエラー: {e}")
+            self.logger.error(f"繧ｿ繧ｰ繧ｿ繧､繝嶺ｸ隕ｧ蜿門ｾ嶺ｸｭ縺ｫ繧ｨ繝ｩ繝ｼ: {e}")
             self.error_occurred.emit(str(e))
             raise
 
@@ -126,9 +111,7 @@ class TagSearchService(GuiServiceBase):
         alias: bool | None = None,
     ) -> pl.DataFrame:
         """
-        タグを検索し、結果を list[dict] 形式で返す想定。
-        partial=True の場合は部分一致、partial=False は完全一致。
-        format_name=None の場合はフォーマット指定なし(全検索)
+        繧ｿ繧ｰ繧呈､懃ｴ｢縺励∫ｵ先棡繧・list[dict] 蠖｢蠑上〒霑斐☆諠ｳ螳壹・        partial=True 縺ｮ蝣ｴ蜷医・驛ｨ蛻・ｸ閾ｴ縲｝artial=False 縺ｯ螳悟・荳閾ｴ縲・        format_name=None 縺ｮ蝣ｴ蜷医・繝輔か繝ｼ繝槭ャ繝域欠螳壹↑縺・蜈ｨ讀懃ｴ｢)
         """
         try:
             return self._searcher.search_tags(
@@ -142,19 +125,16 @@ class TagSearchService(GuiServiceBase):
                 alias=alias,
             )
         except Exception as e:
-            self.logger.error(f"タグ検索中にエラー: {e}")
+            self.logger.error(f"繧ｿ繧ｰ讀懃ｴ｢荳ｭ縺ｫ繧ｨ繝ｩ繝ｼ: {e}")
             self.error_occurred.emit(str(e))
             raise
 
 
 class TagCleanerService(GuiServiceBase):
     """
-    GUIなどで「タグの一括変換」や「フォーマット一覧取得 + 'All'を先頭に追加」など
-    軽量な変換ロジックを行うサービスクラス。
-
-    - DBアクセスやタグ操作は TagCoreService に委譲し、
-    - GUI用のシグナルやロガーは GuiServiceBase の継承で使う。
-    """
+    GUI縺ｪ縺ｩ縺ｧ縲後ち繧ｰ縺ｮ荳諡ｬ螟画鋤縲阪ｄ縲後ヵ繧ｩ繝ｼ繝槭ャ繝井ｸ隕ｧ蜿門ｾ・+ 'All'繧貞・鬆ｭ縺ｫ霑ｽ蜉縲阪↑縺ｩ
+    霆ｽ驥上↑螟画鋤繝ｭ繧ｸ繝・け繧定｡後≧繧ｵ繝ｼ繝薙せ繧ｯ繝ｩ繧ｹ縲・
+    - DB繧｢繧ｯ繧ｻ繧ｹ繧・ち繧ｰ謫堺ｽ懊・ TagCoreService 縺ｫ蟋碑ｭｲ縺励・    - GUI逕ｨ縺ｮ繧ｷ繧ｰ繝翫Ν繧・Ο繧ｬ繝ｼ縺ｯ GuiServiceBase 縺ｮ邯呎価縺ｧ菴ｿ縺・・    """
 
     def __init__(self, parent: QObject | None = None, core: TagCoreService | None = None):
         super().__init__(parent)
@@ -162,21 +142,18 @@ class TagCleanerService(GuiServiceBase):
 
     def get_tag_formats(self) -> list[str]:
         """
-        コアロジックのフォーマット一覧を取得し、先頭に 'All' を追加して返す。
-        """
+        繧ｳ繧｢繝ｭ繧ｸ繝・け縺ｮ繝輔か繝ｼ繝槭ャ繝井ｸ隕ｧ繧貞叙蠕励＠縲∝・鬆ｭ縺ｫ 'All' 繧定ｿｽ蜉縺励※霑斐☆縲・        """
         format_list = ["All"]
         format_list.extend(self._core.get_tag_formats())
         return format_list
 
     def convert_prompt(self, prompt: str, format_name: str) -> str:
         """
-        カンマ区切りの複数タグを DBで検索・変換し、一括で置き換える。
-        例: "1boy, 1girl" + "e621" → DBを参照して各タグを変換 → "male, female" (仮)
+        繧ｫ繝ｳ繝槫玄蛻・ｊ縺ｮ隍・焚繧ｿ繧ｰ繧・DB縺ｧ讀懃ｴ｢繝ｻ螟画鋤縺励∽ｸ諡ｬ縺ｧ鄂ｮ縺肴鋤縺医ｋ縲・        萓・ "1boy, 1girl" + "e621" 竊・DB繧貞盾辣ｧ縺励※蜷・ち繧ｰ繧貞､画鋤 竊・"male, female" (莉ｮ)
         """
         self.logger.info("TagCleanerService: convert_prompt() called")
 
-        # フォーマットIDを取得
-        format_id = self._core.get_format_id(format_name)
+        # 繝輔か繝ｼ繝槭ャ繝・D繧貞叙蠕・        format_id = self._core.get_format_id(format_name)
         if format_id is None:
             self.logger.warning(f"Unknown format: {format_name}")
             return prompt
@@ -187,15 +164,13 @@ class TagCleanerService(GuiServiceBase):
             converted = self._core.convert_tag(tag, format_id)
             converted_list.append(converted)
 
-        # カンマ区切りで結合して返す
+        # 繧ｫ繝ｳ繝槫玄蛻・ｊ縺ｧ邨仙粋縺励※霑斐☆
         return ", ".join(converted_list)
 
 
 class TagImportService(GuiServiceBase):
     """
-    データインポートを担当するサービスクラス。
-    - DBとのやり取りは TagDataImporter (内部), TagCoreService(フォーマット周り) を使う
-    - PySide6 Signals (progress_updated, process_finished, error_occurred) を持つ
+    繝・・繧ｿ繧､繝ｳ繝昴・繝医ｒ諡・ｽ薙☆繧九し繝ｼ繝薙せ繧ｯ繝ｩ繧ｹ縲・    - DB縺ｨ縺ｮ繧・ｊ蜿悶ｊ縺ｯ TagDataImporter (蜀・Κ), TagCoreService(繝輔か繝ｼ繝槭ャ繝亥捉繧・ 繧剃ｽｿ縺・    - PySide6 Signals (progress_updated, process_finished, error_occurred) 繧呈戟縺､
     """
 
     def __init__(
@@ -208,72 +183,62 @@ class TagImportService(GuiServiceBase):
         self._importer = importer or TagDataImporter()
         self._core = core or TagCoreService()
 
-        # TagDataImporter が発行するシグナルを、このクラスのシグナルにリレーする例
-        self._importer.progress_updated.connect(self._on_importer_progress)
+        # TagDataImporter 縺檎匱陦後☆繧九す繧ｰ繝翫Ν繧偵√％縺ｮ繧ｯ繝ｩ繧ｹ縺ｮ繧ｷ繧ｰ繝翫Ν縺ｫ繝ｪ繝ｬ繝ｼ縺吶ｋ萓・        self._importer.progress_updated.connect(self._on_importer_progress)
         self._importer.process_finished.connect(self._on_importer_finished)
         self._importer.error_occurred.connect(self._on_importer_error)
 
     def _on_importer_progress(self, value: int, message: str):
         """
-        TagDataImporter から受け取った進捗を、このサービスの progress_updated で再通知。
-        """
+        TagDataImporter 縺九ｉ蜿励￠蜿悶▲縺滄ｲ謐励ｒ縲√％縺ｮ繧ｵ繝ｼ繝薙せ縺ｮ progress_updated 縺ｧ蜀埼夂衍縲・        """
         self.logger.debug(f"Import progress: {value}% {message}")
         self.progress_updated.emit(value, message)
 
     def _on_importer_finished(self, msg: str):
         """
-        Import完了を再通知。
-        """
+        Import螳御ｺ・ｒ蜀埼夂衍縲・        """
         self.logger.info("Import finished.")
         self.process_finished.emit(msg)
 
     def _on_importer_error(self, err_msg: str):
         """
-        エラー発生を再通知。
-        """
+        繧ｨ繝ｩ繝ｼ逋ｺ逕溘ｒ蜀埼夂衍縲・        """
         self.logger.error(f"Import error: {err_msg}")
         self.error_occurred.emit(err_msg)
 
     @property
     def importer(self) -> TagDataImporter:
         """
-        GUI側が TagDataImporter のシグナルやメソッドに直接アクセスしたい場合に使う。
-        ここではPropertyとして公開。
-        """
+        GUI蛛ｴ縺・TagDataImporter 縺ｮ繧ｷ繧ｰ繝翫Ν繧・Γ繧ｽ繝・ラ縺ｫ逶ｴ謗･繧｢繧ｯ繧ｻ繧ｹ縺励◆縺・ｴ蜷医↓菴ｿ縺・・        縺薙％縺ｧ縺ｯProperty縺ｨ縺励※蜈ｬ髢九・        """
         return self._importer
 
     # ----------------------------------------------------------------------
-    #  インポート関連メソッド
+    #  繧､繝ｳ繝昴・繝磯未騾｣繝｡繧ｽ繝・ラ
     # ----------------------------------------------------------------------
 
     def import_data(self, df: pl.DataFrame, config: ImportConfig) -> None:
         """
-        TagDataImporter を用いてデータフレームをDBにインポートする。
-        """
+        TagDataImporter 繧堤畑縺・※繝・・繧ｿ繝輔Ξ繝ｼ繝繧奪B縺ｫ繧､繝ｳ繝昴・繝医☆繧九・        """
         self.logger.info("TagImportService: import_data() called.")
         self._importer.import_data(df, config)
 
     def cancel_import(self) -> None:
         """
-        インポート処理をキャンセル。
-        """
+        繧､繝ｳ繝昴・繝亥・逅・ｒ繧ｭ繝｣繝ｳ繧ｻ繝ｫ縲・        """
         self.logger.info("TagImportService: cancel_import() called.")
         self._importer.cancel()
 
     # ----------------------------------------------------------------------
-    #  DB情報取得関連 (TagCoreService 経由)
+    #  DB諠・ｱ蜿門ｾ鈴未騾｣ (TagCoreService 邨檎罰)
     # ----------------------------------------------------------------------
 
     def get_tag_formats(self) -> list[str]:
         """
-        DB に登録されているフォーマット一覧を取得。
-        """
+        DB 縺ｫ逋ｻ骭ｲ縺輔ｌ縺ｦ縺・ｋ繝輔か繝ｼ繝槭ャ繝井ｸ隕ｧ繧貞叙蠕励・        """
         return self._core.get_tag_formats()
 
     def get_tag_languages(self) -> list[str]:
         """
-        DB に登録されている言語一覧を取得。
-        """
+        DB 縺ｫ逋ｻ骭ｲ縺輔ｌ縺ｦ縺・ｋ險隱樔ｸ隕ｧ繧貞叙蠕励・        """
         return self._core.get_tag_languages()
 
     def get_format_id(self, format_name: str) -> int:
@@ -282,8 +247,7 @@ class TagImportService(GuiServiceBase):
 
 class TagRegisterService(GuiServiceBase):
     """
-    GUIに進捗やエラーを通知するために、GuiServiceBaseを継承したタグ登録サービス。
-    """
+    GUI縺ｫ騾ｲ謐励ｄ繧ｨ繝ｩ繝ｼ繧帝夂衍縺吶ｋ縺溘ａ縺ｫ縲；uiServiceBase繧堤ｶ呎価縺励◆繧ｿ繧ｰ逋ｻ骭ｲ繧ｵ繝ｼ繝薙せ縲・    """
 
     def __init__(self, parent=None, repository: TagRepository | None = None):
         super().__init__(parent)
@@ -292,8 +256,7 @@ class TagRegisterService(GuiServiceBase):
 
     def register_or_update_tag(self, tag_info: dict) -> int:
         """
-        タグ登録/更新処理を行い、何らかのDBエラーが起きたらシグナルでGUIに通知する。
-        """
+        繧ｿ繧ｰ逋ｻ骭ｲ/譖ｴ譁ｰ蜃ｦ逅・ｒ陦後＞縲∽ｽ輔ｉ縺九・DB繧ｨ繝ｩ繝ｼ縺瑚ｵｷ縺阪◆繧峨す繧ｰ繝翫Ν縺ｧGUI縺ｫ騾夂衍縺吶ｋ縲・        """
         try:
             normalized_tag = tag_info.get("normalized_tag")
             source_tag = tag_info.get("source_tag")
@@ -304,26 +267,24 @@ class TagRegisterService(GuiServiceBase):
             translation = tag_info.get("translation", "")
 
             if not normalized_tag or not source_tag:
-                raise ValueError("タグまたは元タグが空です。")
+                raise ValueError("繧ｿ繧ｰ縺ｾ縺溘・蜈・ち繧ｰ縺檎ｩｺ縺ｧ縺吶・)
 
-            # 1) フォーマットID, タイプID の取得
-            fmt_id = self._repo.get_format_id(format_name)
+            # 1) 繝輔か繝ｼ繝槭ャ繝・D, 繧ｿ繧､繝悠D 縺ｮ蜿門ｾ・            fmt_id = self._repo.get_format_id(format_name)
             type_id = None
             if type_name:
                 type_id = self._repo.get_type_id(type_name)
 
-            # 2) タグを作成 or 既存ID取得
-            tag_id = self._repo.create_tag(source_tag, normalized_tag)
+            # 2) 繧ｿ繧ｰ繧剃ｽ懈・ or 譌｢蟄露D蜿門ｾ・            tag_id = self._repo.create_tag(source_tag, normalized_tag)
 
-            # 3) usage_count (使用回数) 登録
+            # 3) usage_count (菴ｿ逕ｨ蝗樊焚) 逋ｻ骭ｲ
             if usage_count > 0:
                 self._repo.update_usage_count(tag_id, fmt_id, usage_count)
 
-            # 4) 翻訳登録
+            # 4) 鄙ｻ險ｳ逋ｻ骭ｲ
             if language and translation:
                 self._repo.add_or_update_translation(tag_id, language, translation)
 
-            # 5) TagStatus 更新 (alias=Falseで登録例)
+            # 5) TagStatus 譖ｴ譁ｰ (alias=False縺ｧ逋ｻ骭ｲ萓・
             self._repo.update_tag_status(
                 tag_id=tag_id, format_id=fmt_id, alias=False, preferred_tag_id=tag_id, type_id=type_id
             )
@@ -331,16 +292,13 @@ class TagRegisterService(GuiServiceBase):
             return tag_id
 
         except Exception as e:
-            self.logger.error(f"タグ登録中にエラー発生: {e}")
-            # <-- GUIにエラーを通知するシグナルを発行
-            self.error_occurred.emit(str(e))
-            # エラーを再度外に投げたい場合はここで raise してもよい
-            raise
+            self.logger.error(f"繧ｿ繧ｰ逋ｻ骭ｲ荳ｭ縺ｫ繧ｨ繝ｩ繝ｼ逋ｺ逕・ {e}")
+            # <-- GUI縺ｫ繧ｨ繝ｩ繝ｼ繧帝夂衍縺吶ｋ繧ｷ繧ｰ繝翫Ν繧堤匱陦・            self.error_occurred.emit(str(e))
+            # 繧ｨ繝ｩ繝ｼ繧貞・蠎ｦ螟悶↓謚輔￡縺溘＞蝣ｴ蜷医・縺薙％縺ｧ raise 縺励※繧ゅｈ縺・            raise
 
     def get_tag_details(self, tag_id: int) -> pl.DataFrame:
         """
-        登録後のタグ詳細を取得してDataFrame化して返す。
-        (DBエラーが起きる可能性がある場合も同様にシグナルで通知)
+        逋ｻ骭ｲ蠕後・繧ｿ繧ｰ隧ｳ邏ｰ繧貞叙蠕励＠縺ｦDataFrame蛹悶＠縺ｦ霑斐☆縲・        (DB繧ｨ繝ｩ繝ｼ縺瑚ｵｷ縺阪ｋ蜿ｯ閭ｽ諤ｧ縺後≠繧句ｴ蜷医ｂ蜷梧ｧ倥↓繧ｷ繧ｰ繝翫Ν縺ｧ騾夂衍)
         """
         try:
             tag_obj = self._repo.get_tag_by_id(tag_id)
@@ -366,18 +324,16 @@ class TagRegisterService(GuiServiceBase):
             return pl.DataFrame(rows)
 
         except Exception as e:
-            self.logger.error(f"タグ詳細取得中にエラー発生: {e}")
+            self.logger.error(f"繧ｿ繧ｰ隧ｳ邏ｰ蜿門ｾ嶺ｸｭ縺ｫ繧ｨ繝ｩ繝ｼ逋ｺ逕・ {e}")
             self.error_occurred.emit(str(e))
             raise
 
 
 class TagStatisticsService(GuiServiceBase):
     """
-    TagStatistics(ロジッククラス)を内部に持ち、
-    GUI から呼ばれる「統計取得」「計算」等の処理をまとめたサービスクラス。
-
-    - TagStatistics はデータベースにアクセスし Polars DataFrame や dict で統計を返す
-    - GUI層ではシグナルによるエラーハンドリングを利用可能
+    TagStatistics(繝ｭ繧ｸ繝・け繧ｯ繝ｩ繧ｹ)繧貞・驛ｨ縺ｫ謖√■縲・    GUI 縺九ｉ蜻ｼ縺ｰ繧後ｋ縲檎ｵｱ險亥叙蠕励阪瑚ｨ育ｮ励咲ｭ峨・蜃ｦ逅・ｒ縺ｾ縺ｨ繧√◆繧ｵ繝ｼ繝薙せ繧ｯ繝ｩ繧ｹ縲・
+    - TagStatistics 縺ｯ繝・・繧ｿ繝吶・繧ｹ縺ｫ繧｢繧ｯ繧ｻ繧ｹ縺・Polars DataFrame 繧・dict 縺ｧ邨ｱ險医ｒ霑斐☆
+    - GUI螻､縺ｧ縺ｯ繧ｷ繧ｰ繝翫Ν縺ｫ繧医ｋ繧ｨ繝ｩ繝ｼ繝上Φ繝峨Μ繝ｳ繧ｰ繧貞茜逕ｨ蜿ｯ閭ｽ
     """
 
     def __init__(
@@ -387,77 +343,74 @@ class TagStatisticsService(GuiServiceBase):
     ):
         super().__init__(parent)
         self.logger = logging.getLogger(self.__class__.__name__)
-        self._stats = TagStatistics(session=session)  # ← Polarsベースの統計処理
-
+        self._stats = TagStatistics(session=session)  # 竊・Polars繝吶・繧ｹ縺ｮ邨ｱ險亥・逅・
     def get_general_stats(self) -> dict[str, Any]:
         """
-        全体的なサマリ(総タグ数/エイリアス数など)を dict で取得
-        """
+        蜈ｨ菴鍋噪縺ｪ繧ｵ繝槭Μ(邱上ち繧ｰ謨ｰ/繧ｨ繧､繝ｪ繧｢繧ｹ謨ｰ縺ｪ縺ｩ)繧・dict 縺ｧ蜿門ｾ・        """
         try:
             return self._stats.get_general_stats()
         except Exception as e:
-            self.logger.error(f"統計取得中にエラーが発生: {e}")
+            self.logger.error(f"邨ｱ險亥叙蠕嶺ｸｭ縺ｫ繧ｨ繝ｩ繝ｼ縺檎匱逕・ {e}")
             self.error_occurred.emit(str(e))
             raise
 
     def get_usage_stats(self) -> pl.DataFrame:
         """
-        タグ使用回数の DataFrame を取得 (Polars)
+        繧ｿ繧ｰ菴ｿ逕ｨ蝗樊焚縺ｮ DataFrame 繧貞叙蠕・(Polars)
         columns: [tag_id, format_name, usage_count]
         """
         try:
             return self._stats.get_usage_stats()
         except Exception as e:
-            self.logger.error(f"使用回数統計取得中にエラーが発生: {e}")
+            self.logger.error(f"菴ｿ逕ｨ蝗樊焚邨ｱ險亥叙蠕嶺ｸｭ縺ｫ繧ｨ繝ｩ繝ｼ縺檎匱逕・ {e}")
             self.error_occurred.emit(str(e))
             raise
 
     def get_type_distribution(self) -> pl.DataFrame:
         """
-        タイプ(タグカテゴリ)別のタグ数分布
-        columns: [format_name, type_name, tag_count]
+        繧ｿ繧､繝・繧ｿ繧ｰ繧ｫ繝・ざ繝ｪ)蛻･縺ｮ繧ｿ繧ｰ謨ｰ蛻・ｸ・        columns: [format_name, type_name, tag_count]
         """
         try:
             return self._stats.get_type_distribution()
         except Exception as e:
-            self.logger.error(f"タイプ分布統計取得中にエラーが発生: {e}")
+            self.logger.error(f"繧ｿ繧､繝怜・蟶・ｵｱ險亥叙蠕嶺ｸｭ縺ｫ繧ｨ繝ｩ繝ｼ縺檎匱逕・ {e}")
             self.error_occurred.emit(str(e))
             raise
 
     def get_translation_stats(self) -> pl.DataFrame:
         """
-        翻訳情報の統計
-        columns: [tag_id, total_translations, languages (List[str])]
+        鄙ｻ險ｳ諠・ｱ縺ｮ邨ｱ險・        columns: [tag_id, total_translations, languages (List[str])]
         """
         try:
             return self._stats.get_translation_stats()
         except Exception as e:
-            self.logger.error(f"翻訳統計取得中にエラーが発生: {e}")
+            self.logger.error(f"鄙ｻ險ｳ邨ｱ險亥叙蠕嶺ｸｭ縺ｫ繧ｨ繝ｩ繝ｼ縺檎匱逕・ {e}")
             self.error_occurred.emit(str(e))
             raise
 
 
 if __name__ == "__main__":
     """
-    簡易動作テスト:
-      - TagCleanerService で複数タグを変換
-      - TagImportService でデータインポート(ダミー)
+    邁｡譏灘虚菴懊ユ繧ｹ繝・
+      - TagCleanerService 縺ｧ隍・焚繧ｿ繧ｰ繧貞､画鋤
+      - TagImportService 縺ｧ繝・・繧ｿ繧､繝ｳ繝昴・繝・繝繝溘・)
     """
 
-    # 1) タグクリーナーのテスト (Polarsではなく単純な文字列変換)
+    # 1) 繧ｿ繧ｰ繧ｯ繝ｪ繝ｼ繝翫・縺ｮ繝・せ繝・(Polars縺ｧ縺ｯ縺ｪ縺丞腰邏斐↑譁・ｭ怜・螟画鋤)
     cleaner = TagCleanerService()
     all_formats = cleaner.get_tag_formats()
-    print("DBから取得したフォーマット一覧 (+ All):", all_formats)
+    print("DB縺九ｉ蜿門ｾ励＠縺溘ヵ繧ｩ繝ｼ繝槭ャ繝井ｸ隕ｧ (+ All):", all_formats)
 
     sample_text = "1boy, 1girl, 2boys"
-    format_name = "e621"  # 例: DBに登録してあるフォーマット名
+    format_name = "e621"  # 萓・ DB縺ｫ逋ｻ骭ｲ縺励※縺ゅｋ繝輔か繝ｼ繝槭ャ繝亥錐
     result = cleaner.convert_prompt(sample_text, format_name)
-    print(f"[convert_prompt] '{sample_text}' → '{result}' (format='{format_name}')")
+    print(f"[convert_prompt] '{sample_text}' 竊・'{result}' (format='{format_name}')")
 
-    # 2) インポートサービスのテスト (Polars DataFrame を用意)
+    # 2) 繧､繝ｳ繝昴・繝医し繝ｼ繝薙せ縺ｮ繝・せ繝・(Polars DataFrame 繧堤畑諢・
     importer_service = TagImportService()
     dummy_df = pl.DataFrame({"tag": ["1boy", "2girls"], "count": [10, 20]})
     config = ImportConfig(format_id=importer_service.get_format_id("danbooru"), language="en")
 
     importer_service.import_data(dummy_df, config)
     print("Import finished.")
+
