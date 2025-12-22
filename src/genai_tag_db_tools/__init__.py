@@ -1,20 +1,35 @@
-"""
-genai-tag-db-tools パッケージ
+"""genai-tag-db-tools package exports."""
 
-タグデータベース管理ツール
-"""
-
+from .core_api import (
+    build_downloaded_at_utc,
+    ensure_db,
+    ensure_databases,
+    get_statistics,
+    register_tag,
+    search_tags,
+)
 from .services.tag_search import TagSearcher
 from .utils.cleanup_str import TagCleaner
 
-__all__ = ["TagCleaner", "TagSearcher", "initialize_tag_cleaner", "initialize_tag_searcher"]
+__all__ = [
+    "TagCleaner",
+    "TagSearcher",
+    "build_downloaded_at_utc",
+    "ensure_db",
+    "ensure_databases",
+    "get_statistics",
+    "initialize_tag_cleaner",
+    "initialize_tag_searcher",
+    "register_tag",
+    "search_tags",
+]
 
 
 def initialize_tag_searcher() -> TagSearcher:
-    """TagSearcherの初期化"""
+    """Return TagSearcher instance."""
     return TagSearcher()
 
 
 def initialize_tag_cleaner() -> TagCleaner:
-    """TagCleanerの初期化"""
+    """Return TagCleaner instance."""
     return TagCleaner()

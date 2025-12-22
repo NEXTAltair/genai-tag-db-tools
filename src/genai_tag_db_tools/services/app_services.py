@@ -155,6 +155,57 @@ class TagRegisterService(GuiServiceBase):
         super().__init__(parent)
         self._repo = repository if repository else TagRepository()
 
+    def register_tag(self, request: "TagRegisterRequest") -> "TagRegisterResult":
+        """外部向けのタグ登録/更新を行う。"""
+        from genai_tag_db_tools.models import TagRegisterRequest, TagRegisterResult
+
+        if not isinstance(request, TagRegisterRequest):
+            msg = "TagRegisterRequest 以外の入力は受け付けません。"
+            self.logger.error(msg)
+            raise TypeError(msg)
+
+        try:
+            tag = request.tag
+            source_tag = request.source_tag or request.tag
+            fmt_id = self._repo.get_format_id(request.format_name)
+            if fmt_id is None:
+                raise ValueError(f"format_name が無効です: {request.format_name}")
+
+            type_id = self._repo.get_type_id(request.type_name)
+            if type_id is None:
+                raise ValueError(f"type_name が無効です: {request.type_name}")
+
+            existing_id = self._repo.get_tag_id_by_name(tag, partial=False)
+            tag_id = self._repo.create_tag(source_tag, tag)
+            created = existing_id is None
+
+            preferred_tag_id = tag_id
+            if request.alias:
+                if not request.preferred_tag:
+                    raise ValueError("alias=True の場合は preferred_tag が必要です。")
+                preferred_tag_id = self._repo.get_tag_id_by_name(request.preferred_tag, partial=False)
+                if preferred_tag_id is None:
+                    raise ValueError(f"推奨タグが見つかりません: {request.preferred_tag}")
+
+            if request.translations:
+                for tr in request.translations:
+                    self._repo.add_or_update_translation(tag_id, tr.language, tr.translation)
+
+            self._repo.update_tag_status(
+                tag_id=tag_id,
+                format_id=fmt_id,
+                alias=request.alias,
+                preferred_tag_id=preferred_tag_id,
+                type_id=type_id,
+            )
+
+            return TagRegisterResult(created=created)
+
+        except Exception as e:
+            self.logger.error("タグ登録中にエラー発生: %s", e)
+            self.error_occurred.emit(str(e))
+            raise
+
     def register_or_update_tag(self, tag_info: dict) -> int:
         """タグ登録/更新を行う。"""
         try:
@@ -168,6 +219,32 @@ class TagRegisterService(GuiServiceBase):
 
             if not normalized_tag or not source_tag:
                 raise ValueError("タグまたはソースタグが空です。")
+
+            if format_name and type_name:
+                from genai_tag_db_tools.models import TagRegisterRequest, TagTranslationInput
+
+                translations = None
+                if language and translation:
+                    translations = [
+                        TagTranslationInput(language=language, translation=translation)
+                    ]
+
+                self.register_tag(
+                    TagRegisterRequest(
+                        tag=normalized_tag,
+                        source_tag=source_tag,
+                        format_name=format_name,
+                        type_name=type_name,
+                        translations=translations,
+                    )
+                )
+                tag_id = self._repo.get_tag_id_by_name(normalized_tag, partial=False)
+                if tag_id is None:
+                    raise ValueError("登録後にタグIDが見つかりません。")
+                if usage_count > 0:
+                    fmt_id = self._repo.get_format_id(format_name)
+                    self._repo.update_usage_count(tag_id, fmt_id, usage_count)
+                return tag_id
 
             fmt_id = self._repo.get_format_id(format_name)
             type_id = self._repo.get_type_id(type_name) if type_name else None

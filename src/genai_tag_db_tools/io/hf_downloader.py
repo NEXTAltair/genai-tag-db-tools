@@ -5,6 +5,7 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import time
 from pathlib import Path
 from typing import Any
 
@@ -112,15 +113,26 @@ def download_with_fallback(
             logger.info("HFキャッシュを継続利用: %s", cached)
             return cached
 
-    try:
-        resolved = download_hf_dataset_file(spec, dest_dir=dest_dir, token=token)
-    except Exception as exc:
+    resolved: Path | None = None
+    last_exc: Exception | None = None
+    attempts = 3
+    for attempt in range(attempts):
+        try:
+            resolved = download_hf_dataset_file(spec, dest_dir=dest_dir, token=token)
+            break
+        except Exception as exc:
+            last_exc = exc
+            _cleanup_partial_files(dest_dir, spec)
+            if attempt < attempts - 1:
+                time.sleep(1 + attempt)
+
+    if resolved is None:
         if manifest:
             cached = Path(manifest.get("path", ""))
             if cached.exists():
-                logger.warning("HFダウンロード失敗のため既存キャッシュを使用: %s", exc)
+                logger.warning("HFダウンロード失敗のため既存キャッシュを使用: %s", last_exc)
                 return cached
-        raise
+        raise last_exc or RuntimeError("HFダウンロードに失敗しました。")
 
     _save_manifest(
         manifest_path,
@@ -136,6 +148,21 @@ def download_with_fallback(
     return resolved
 
 
+def _cleanup_partial_files(dest_dir: Path, spec: HFDatasetSpec) -> None:
+    """失敗したダウンロードの残骸を削除する。"""
+    candidates = [
+        dest_dir / f"{spec.filename}.incomplete",
+        dest_dir / f"{spec.filename}.partial",
+        dest_dir / f"{spec.filename}.tmp",
+    ]
+    for path in candidates:
+        if path.exists():
+            try:
+                path.unlink()
+            except OSError:
+                logger.warning("一時ファイル削除に失敗: %s", path)
+
+
 def ensure_db_ready(
     spec: HFDatasetSpec, *, dest_dir: Path, token: str | None = None
 ) -> Path:
@@ -146,3 +173,22 @@ def ensure_db_ready(
     set_database_path(db_path)
     init_engine(db_path)
     return db_path
+
+
+def ensure_databases_ready(
+    specs: list[HFDatasetSpec], *, dest_dir: Path, token: str | None = None
+) -> list[Path]:
+    """複数のDBファイルを取得し、base DB一覧として初期化する。"""
+    from genai_tag_db_tools.db.runtime import (
+        init_engine,
+        set_base_database_paths,
+        set_database_path,
+    )
+
+    if not specs:
+        raise ValueError("specs は空にできません。")
+    paths = [download_with_fallback(spec, dest_dir=dest_dir, token=token) for spec in specs]
+    set_base_database_paths(paths)
+    set_database_path(paths[0])
+    init_engine(paths[0])
+    return paths

@@ -2,7 +2,7 @@
 
 import polars as pl
 
-from genai_tag_db_tools.db.repository import TagRepository
+from genai_tag_db_tools.db.repository import TagRepository, get_default_repository
 from genai_tag_db_tools.utils.cleanup_str import TagCleaner
 
 
@@ -11,7 +11,7 @@ class TagRegister:
 
     def __init__(self, repository: TagRepository | None = None):
         self.logger = logging.getLogger(self.__class__.__name__)
-        self._repo = repository if repository else TagRepository()
+        self._repo = repository if repository else get_default_repository()
 
     def normalize_tags(self, df: pl.DataFrame) -> pl.DataFrame:
         """source_tag/tag を正規化して欠損を補完する。"""

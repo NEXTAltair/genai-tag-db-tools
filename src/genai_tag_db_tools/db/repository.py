@@ -3,6 +3,7 @@ from datetime import datetime
 from logging import getLogger
 
 import polars as pl
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import or_
@@ -146,6 +147,52 @@ class TagRepository:
                 session.rollback()
                 msg = ErrorMessages.DB_OPERATION_FAILED.format(error_msg=str(e))
                 raise ValueError(msg) from e
+
+    def get_max_tag_id(self) -> int:
+        """現在の最大tag_idを返す。"""
+        with self.session_factory() as session:
+            max_id = session.query(func.max(Tag.tag_id)).scalar()
+            return int(max_id) if max_id is not None else 0
+
+    def create_tag_with_id(self, tag_id: int, source_tag: str, tag: str) -> int:
+        """指定したtag_idでタグを作成する。既存ならそのまま返す。"""
+        if not tag or not source_tag:
+            msg = ErrorMessages.MISSING_REQUIRED_FIELDS.format(fields="source_tag, tag")
+            self.logger.error(msg)
+            raise ValueError(msg)
+
+        with self.session_factory() as session:
+            existing_by_id = session.query(Tag).filter(Tag.tag_id == tag_id).one_or_none()
+            if existing_by_id:
+                if existing_by_id.tag != tag:
+                    raise ValueError(
+                        f"tag_id={tag_id} は既に '{existing_by_id.tag}' で使用されています。"
+                    )
+                return existing_by_id.tag_id
+
+            existing_by_tag = session.query(Tag).filter(Tag.tag == tag).one_or_none()
+            if existing_by_tag:
+                if existing_by_tag.tag_id != tag_id:
+                    raise ValueError(
+                        f"tag='{tag}' は別のtag_id={existing_by_tag.tag_id}で存在します。"
+                    )
+                return existing_by_tag.tag_id
+
+            try:
+                session.add(Tag(tag_id=tag_id, source_tag=source_tag, tag=tag))
+                session.commit()
+                return tag_id
+            except IntegrityError as e:
+                session.rollback()
+                msg = ErrorMessages.DB_OPERATION_FAILED.format(error_msg=str(e))
+                raise ValueError(msg) from e
+
+    def ensure_tag_with_id(self, tag_id: int, source_tag: str, tag: str) -> int:
+        """tag_idが無ければ作成する。存在すればそのまま返す。"""
+        existing = self.get_tag_by_id(tag_id)
+        if existing:
+            return existing.tag_id
+        return self.create_tag_with_id(tag_id, source_tag, tag)
 
     def _fetch_existing_tags_as_map(self, tag_list: list[str]) -> dict[str, int]:
         """既存タグを {tag: tag_id} で返す。"""
@@ -309,6 +356,18 @@ class TagRepository:
                 .one_or_none()
             )
             return usage_obj.count if usage_obj else None
+
+    def list_usage_counts(
+        self, tag_id: int | None = None, format_id: int | None = None
+    ) -> list[TagUsageCounts]:
+        """TAG_USAGE_COUNTSを一覧取得する。"""
+        with self.session_factory() as session:
+            query = session.query(TagUsageCounts)
+            if tag_id is not None:
+                query = query.filter(TagUsageCounts.tag_id == tag_id)
+            if format_id is not None:
+                query = query.filter(TagUsageCounts.format_id == format_id)
+            return query.all()
 
     def update_usage_count(
         self,
@@ -625,6 +684,12 @@ class TagRepository:
             formats = session.query(TagFormat.format_name).distinct().all()
             return [format[0] for format in formats]
 
+    def get_format_map(self) -> dict[int, str]:
+        """format_id -> format_name を返す。"""
+        with self.session_factory() as session:
+            rows = session.query(TagFormat.format_id, TagFormat.format_name).all()
+            return {format_id: format_name for format_id, format_name in rows}
+
     def get_tag_languages(self) -> list[str]:
         """全languageを取得する。"""
         with self.session_factory() as session:
@@ -642,7 +707,433 @@ class TagRepository:
             )
         return [row[0] for row in rows]
 
+    def get_type_mapping_map(self) -> dict[tuple[int, int], str]:
+        """(format_id, type_id) -> type_name を返す。"""
+        with self.session_factory() as session:
+            rows = (
+                session.query(
+                    TagTypeFormatMapping.format_id,
+                    TagTypeFormatMapping.type_id,
+                    TagTypeName.type_name,
+                )
+                .join(TagTypeName, TagTypeFormatMapping.type_name_id == TagTypeName.type_name_id)
+                .all()
+            )
+            return {(format_id, type_id): type_name for format_id, type_id, type_name in rows}
+
     def get_all_types(self) -> list[str]:
         """全タイプ名を取得する。"""
         with self.session_factory() as session:
             return [type_obj.type_name for type_obj in session.query(TagTypeName).all()]
+
+
+class MergedTagRepository:
+    """base/user DBを統合して提供するリポジトリ。"""
+
+    def __init__(
+        self,
+        base_repo: TagRepository | list[TagRepository],
+        user_repo: TagRepository | None = None,
+    ):
+        self.logger = getLogger(__name__)
+        if isinstance(base_repo, list):
+            if not base_repo:
+                raise ValueError("base_repo は空にできません。")
+            self.base_repos = base_repo
+        else:
+            self.base_repos = [base_repo]
+        self.base_repo = self.base_repos[0]
+        self.user_repo = user_repo
+
+    def _has_user(self) -> bool:
+        return self.user_repo is not None
+
+    def _iter_base_repos(self) -> list[TagRepository]:
+        return list(self.base_repos)
+
+    def _iter_base_repos_low_to_high(self) -> list[TagRepository]:
+        return list(reversed(self.base_repos))
+
+    def _iter_repos(self) -> list[TagRepository]:
+        repos: list[TagRepository] = []
+        if self.user_repo is not None:
+            repos.append(self.user_repo)
+        repos.extend(self.base_repos)
+        return repos
+
+    def get_tag_id_by_name(self, keyword: str, partial: bool = False) -> int | None:
+        if self._has_user():
+            user_id = self.user_repo.get_tag_id_by_name(keyword, partial=partial)
+            if user_id is not None:
+                return user_id
+        for repo in self._iter_base_repos():
+            base_id = repo.get_tag_id_by_name(keyword, partial=partial)
+            if base_id is not None:
+                return base_id
+        return None
+
+    def get_tag_by_id(self, tag_id: int) -> Tag | None:
+        if self._has_user():
+            tag = self.user_repo.get_tag_by_id(tag_id)
+            if tag is not None:
+                return tag
+        for repo in self._iter_base_repos():
+            tag = repo.get_tag_by_id(tag_id)
+            if tag is not None:
+                return tag
+        return None
+
+    def list_tags(self) -> list[Tag]:
+        merged: dict[int, Tag] = {}
+        for repo in self._iter_base_repos_low_to_high():
+            for tag in repo.list_tags():
+                merged[tag.tag_id] = tag
+        if self._has_user():
+            for tag in self.user_repo.list_tags():
+                merged[tag.tag_id] = tag
+        return list(merged.values())
+
+    def get_tag_status(self, tag_id: int, format_id: int) -> TagStatus | None:
+        if self._has_user():
+            status = self.user_repo.get_tag_status(tag_id, format_id)
+            if status is not None:
+                return status
+        for repo in self._iter_base_repos():
+            status = repo.get_tag_status(tag_id, format_id)
+            if status is not None:
+                return status
+        return None
+
+    def list_tag_statuses(self, tag_id: int | None = None) -> list[TagStatus]:
+        merged: dict[tuple[int, int], TagStatus] = {}
+        for repo in self._iter_base_repos_low_to_high():
+            for status in repo.list_tag_statuses(tag_id=tag_id):
+                merged[(status.tag_id, status.format_id)] = status
+        if self._has_user():
+            for status in self.user_repo.list_tag_statuses(tag_id=tag_id):
+                merged[(status.tag_id, status.format_id)] = status
+        return list(merged.values())
+
+    def get_usage_count(self, tag_id: int, format_id: int) -> int | None:
+        if self._has_user():
+            count = self.user_repo.get_usage_count(tag_id, format_id)
+            if count is not None:
+                return count
+        for repo in self._iter_base_repos():
+            count = repo.get_usage_count(tag_id, format_id)
+            if count is not None:
+                return count
+        return None
+
+    def list_usage_counts(
+        self, tag_id: int | None = None, format_id: int | None = None
+    ) -> list[TagUsageCounts]:
+        merged: dict[tuple[int, int], TagUsageCounts] = {}
+        for repo in self._iter_base_repos_low_to_high():
+            for row in repo.list_usage_counts(tag_id=tag_id, format_id=format_id):
+                merged[(row.tag_id, row.format_id)] = row
+        if self._has_user():
+            for row in self.user_repo.list_usage_counts(tag_id=tag_id, format_id=format_id):
+                merged[(row.tag_id, row.format_id)] = row
+        return list(merged.values())
+
+    def get_translations(self, tag_id: int) -> list[TagTranslation]:
+        translations: list[TagTranslation] = []
+        for repo in self._iter_base_repos_low_to_high():
+            translations += repo.get_translations(tag_id)
+        if self._has_user():
+            translations += self.user_repo.get_translations(tag_id)
+
+        seen: set[tuple[str, str]] = set()
+        unique: list[TagTranslation] = []
+        for tr in translations:
+            key = (tr.language, tr.translation)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(tr)
+        return unique
+
+    def search_tag_ids(self, keyword: str, partial: bool = False) -> list[int]:
+        tag_ids: set[int] = set()
+        for repo in self._iter_base_repos():
+            tag_ids |= set(repo.search_tag_ids(keyword, partial=partial))
+        if self._has_user():
+            tag_ids |= set(self.user_repo.search_tag_ids(keyword, partial=partial))
+        return list(tag_ids)
+
+    def search_tags(
+        self,
+        keyword: str,
+        *,
+        partial: bool = False,
+        format_name: str | None = None,
+        type_name: str | None = None,
+        language: str | None = None,
+        min_usage: int | None = None,
+        max_usage: int | None = None,
+        alias: bool | None = None,
+        resolve_preferred: bool = False,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> list[dict]:
+        merged: dict[int, dict] = {}
+        for repo in self._iter_base_repos_low_to_high():
+            rows = repo.search_tags(
+                keyword,
+                partial=partial,
+                format_name=format_name,
+                type_name=type_name,
+                language=language,
+                min_usage=min_usage,
+                max_usage=max_usage,
+                alias=alias,
+                resolve_preferred=resolve_preferred,
+                limit=limit,
+                offset=offset,
+            )
+            for row in rows:
+                merged[row["tag_id"]] = row
+        if self._has_user():
+            user_rows = self.user_repo.search_tags(
+                keyword,
+                partial=partial,
+                format_name=format_name,
+                type_name=type_name,
+                language=language,
+                min_usage=min_usage,
+                max_usage=max_usage,
+                alias=alias,
+                resolve_preferred=resolve_preferred,
+                limit=limit,
+                offset=offset,
+            )
+            for row in user_rows:
+                merged[row["tag_id"]] = row
+        return list(merged.values())
+
+    def get_all_tag_ids(self) -> list[int]:
+        tag_ids: set[int] = set()
+        for repo in self._iter_base_repos():
+            tag_ids |= set(repo.get_all_tag_ids())
+        if self._has_user():
+            tag_ids |= set(self.user_repo.get_all_tag_ids())
+        return list(tag_ids)
+
+    def get_tag_formats(self) -> list[str]:
+        formats: set[str] = set()
+        for repo in self._iter_base_repos():
+            formats |= set(repo.get_tag_formats())
+        if self._has_user():
+            formats |= set(self.user_repo.get_tag_formats())
+        return list(formats)
+
+    def get_format_map(self) -> dict[int, str]:
+        formats: dict[int, str] = {}
+        for repo in self._iter_base_repos_low_to_high():
+            formats.update(repo.get_format_map())
+        if self._has_user():
+            formats.update(self.user_repo.get_format_map())
+        return formats
+
+    def get_tag_languages(self) -> list[str]:
+        languages: set[str] = set()
+        for repo in self._iter_base_repos():
+            languages |= set(repo.get_tag_languages())
+        if self._has_user():
+            languages |= set(self.user_repo.get_tag_languages())
+        return list(languages)
+
+    def get_tag_types(self, format_id: int) -> list[str]:
+        types: set[str] = set()
+        for repo in self._iter_base_repos():
+            types |= set(repo.get_tag_types(format_id))
+        if self._has_user():
+            types |= set(self.user_repo.get_tag_types(format_id))
+        return list(types)
+
+    def get_type_mapping_map(self) -> dict[tuple[int, int], str]:
+        mapping: dict[tuple[int, int], str] = {}
+        for repo in self._iter_base_repos_low_to_high():
+            mapping.update(repo.get_type_mapping_map())
+        if self._has_user():
+            mapping.update(self.user_repo.get_type_mapping_map())
+        return mapping
+
+    def get_all_types(self) -> list[str]:
+        types: set[str] = set()
+        for repo in self._iter_base_repos():
+            types |= set(repo.get_all_types())
+        if self._has_user():
+            types |= set(self.user_repo.get_all_types())
+        return list(types)
+
+    def get_format_id(self, format_name: str) -> int:
+        if self._has_user():
+            fmt_id = self.user_repo.get_format_id(format_name)
+            if fmt_id:
+                return fmt_id
+        for repo in self._iter_base_repos():
+            fmt_id = repo.get_format_id(format_name)
+            if fmt_id:
+                return fmt_id
+        raise ValueError(f"format_name が見つかりません: {format_name}")
+
+    def get_format_name(self, format_id: int) -> str | None:
+        if self._has_user():
+            name = self.user_repo.get_format_name(format_id)
+            if name:
+                return name
+        for repo in self._iter_base_repos():
+            name = repo.get_format_name(format_id)
+            if name:
+                return name
+        return None
+
+    def update_tag_status(
+        self,
+        tag_id: int,
+        format_id: int,
+        alias: bool,
+        preferred_tag_id: int,
+        type_id: int | None = None,
+        *,
+        deprecated: bool | None = None,
+        deprecated_at: datetime | None = None,
+        source_created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+    ) -> None:
+        if not self._has_user():
+            target = self.base_repo
+            for repo in self._iter_base_repos():
+                if repo.get_tag_by_id(tag_id) is not None:
+                    target = repo
+                    break
+            target.update_tag_status(
+                tag_id,
+                format_id,
+                alias,
+                preferred_tag_id,
+                type_id,
+                deprecated=deprecated,
+                deprecated_at=deprecated_at,
+                source_created_at=source_created_at,
+                updated_at=updated_at,
+            )
+            return
+
+        tag_obj = self.user_repo.get_tag_by_id(tag_id)
+        if tag_obj is None:
+            base_tag = None
+            for repo in self._iter_base_repos():
+                base_tag = repo.get_tag_by_id(tag_id)
+                if base_tag is not None:
+                    break
+            if base_tag is None:
+                raise ValueError(f"存在しないタグID: {tag_id}")
+            self.user_repo.ensure_tag_with_id(
+                tag_id, base_tag.source_tag, base_tag.tag
+            )
+
+        self.user_repo.update_tag_status(
+            tag_id,
+            format_id,
+            alias,
+            preferred_tag_id,
+            type_id,
+            deprecated=deprecated,
+            deprecated_at=deprecated_at,
+            source_created_at=source_created_at,
+            updated_at=updated_at,
+        )
+
+    def update_usage_count(
+        self,
+        tag_id: int,
+        format_id: int,
+        count: int,
+        *,
+        observed_at: datetime | None = None,
+    ) -> None:
+        if not self._has_user():
+            target = self.base_repo
+            for repo in self._iter_base_repos():
+                if repo.get_tag_by_id(tag_id) is not None:
+                    target = repo
+                    break
+            target.update_usage_count(tag_id, format_id, count, observed_at=observed_at)
+            return
+
+        tag_obj = self.user_repo.get_tag_by_id(tag_id)
+        if tag_obj is None:
+            base_tag = None
+            for repo in self._iter_base_repos():
+                base_tag = repo.get_tag_by_id(tag_id)
+                if base_tag is not None:
+                    break
+            if base_tag is None:
+                raise ValueError(f"存在しないタグID: {tag_id}")
+            self.user_repo.ensure_tag_with_id(
+                tag_id, base_tag.source_tag, base_tag.tag
+            )
+
+        self.user_repo.update_usage_count(tag_id, format_id, count, observed_at=observed_at)
+
+    def add_or_update_translation(self, tag_id: int, language: str, translation: str) -> None:
+        if not self._has_user():
+            self.base_repo.add_or_update_translation(tag_id, language, translation)
+            return
+
+        tag_obj = self.user_repo.get_tag_by_id(tag_id)
+        if tag_obj is None:
+            base_tag = None
+            for repo in self._iter_base_repos():
+                base_tag = repo.get_tag_by_id(tag_id)
+                if base_tag is not None:
+                    break
+            if base_tag is None:
+                raise ValueError(f"存在しないタグID: {tag_id}")
+            self.user_repo.ensure_tag_with_id(
+                tag_id, base_tag.source_tag, base_tag.tag
+            )
+
+        self.user_repo.add_or_update_translation(tag_id, language, translation)
+
+    def create_tag(self, source_tag: str, tag: str) -> int:
+        existing_id = self.get_tag_id_by_name(tag, partial=False)
+        if existing_id is not None:
+            return existing_id
+
+        max_id = 0
+        for repo in self._iter_base_repos():
+            max_id = max(max_id, repo.get_max_tag_id())
+        if self._has_user():
+            max_id = max(max_id, self.user_repo.get_max_tag_id())
+        new_id = max_id + 1
+
+        if not self._has_user():
+            return self.base_repo.create_tag_with_id(new_id, source_tag, tag)
+
+        return self.user_repo.create_tag_with_id(new_id, source_tag, tag)
+
+    def bulk_insert_tags(self, df: pl.DataFrame) -> None:
+        if "tag" not in df.columns or "source_tag" not in df.columns:
+            return
+        for row in df.select(["source_tag", "tag"]).iter_rows(named=True):
+            self.create_tag(row["source_tag"], row["tag"])
+
+
+def get_default_repository() -> TagRepository | MergedTagRepository:
+    from genai_tag_db_tools.db.runtime import (
+        get_base_session_factories,
+        get_user_session_factory_optional,
+    )
+
+    base_factories = get_base_session_factories()
+    base_repos = [TagRepository(factory) for factory in base_factories]
+    user_factory = get_user_session_factory_optional()
+    if user_factory is None:
+        if len(base_repos) == 1:
+            return base_repos[0]
+        return MergedTagRepository(base_repos)
+    return MergedTagRepository(base_repos, TagRepository(user_factory))

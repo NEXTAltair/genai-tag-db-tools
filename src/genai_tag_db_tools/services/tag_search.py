@@ -2,7 +2,7 @@
 
 import polars as pl
 
-from genai_tag_db_tools.db.repository import TagRepository
+from genai_tag_db_tools.db.repository import TagRepository, get_default_repository
 
 
 class TagSearcher:
@@ -10,7 +10,7 @@ class TagSearcher:
 
     def __init__(self, repository: TagRepository | None = None):
         self.logger = logging.getLogger(__name__)
-        self.tag_repo = repository or TagRepository()
+        self.tag_repo = repository or get_default_repository()
 
     def search_tags(
         self,

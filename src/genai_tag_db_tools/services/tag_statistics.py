@@ -1,44 +1,39 @@
 ﻿from typing import Any
 
 import polars as pl
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from genai_tag_db_tools.db.repository import TagRepository
-from genai_tag_db_tools.db.schema import (
-    Tag,
-    TagFormat,
-    TagStatus,
-    TagTypeFormatMapping,
-    TagTypeName,
-    TagUsageCounts,
-)
+from genai_tag_db_tools.db.repository import TagRepository, get_default_repository
 
 
 class TagStatistics:
     """タグDBの統計情報をまとめて取得する。"""
 
-    def __init__(self, session: Session | None = None):
+    def __init__(
+        self,
+        session: Session | None = None,
+        repository: TagRepository | None = None,
+    ):
+        if repository is not None:
+            self.repo = repository
+            return
         if session is not None:
 
             def session_factory():
                 return session
-        else:
-            session_factory = None
 
-        self.repo = TagRepository(session_factory=session_factory)
+            self.repo = TagRepository(session_factory=session_factory)
+            return
+        self.repo = get_default_repository()
 
     def get_general_stats(self) -> dict[str, Any]:
         """全体サマリを返す。"""
-        with self.repo.session_factory() as session:
-            total_tags = session.query(Tag.tag_id).count()
-            alias_tags = (
-                session.query(TagStatus.tag_id)
-                .filter(TagStatus.alias == True)  # noqa: E712
-                .distinct()
-                .count()
-            )
-            non_alias_tags = total_tags - alias_tags
+        tags = self.repo.list_tags()
+        total_tags = len(tags)
+        statuses = self.repo.list_tag_statuses()
+        alias_tag_ids = {status.tag_id for status in statuses if status.alias}
+        alias_tags = len(alias_tag_ids)
+        non_alias_tags = total_tags - alias_tags
 
         return {
             "total_tags": total_tags,
@@ -48,59 +43,52 @@ class TagStatistics:
 
     def get_usage_stats(self) -> pl.DataFrame:
         """使用回数をformat別に返す。"""
-        with self.repo.session_factory() as session:
-            rows = (
-                session.query(TagUsageCounts.tag_id, TagFormat.format_name, TagUsageCounts.count)
-                .join(TagFormat, TagUsageCounts.format_id == TagFormat.format_id)
-                .join(
-                    TagStatus,
-                    (TagUsageCounts.tag_id == TagStatus.tag_id)
-                    & (TagUsageCounts.format_id == TagStatus.format_id),
-                )
-                .filter(TagStatus.alias == False, TagStatus.deprecated == False)  # noqa: E712
-                .all()
-            )
-
-        if not rows:
+        usage_rows = self.repo.list_usage_counts()
+        if not usage_rows:
             return pl.DataFrame([])
 
-        return pl.DataFrame(
-            [
+        format_map = self.repo.get_format_map()
+        status_map = {
+            (status.tag_id, status.format_id): status
+            for status in self.repo.list_tag_statuses()
+        }
+        filtered_rows = []
+        for usage in usage_rows:
+            status = status_map.get((usage.tag_id, usage.format_id))
+            if status is None:
+                continue
+            if status.alias or status.deprecated:
+                continue
+            format_name = format_map.get(usage.format_id, f"format:{usage.format_id}")
+            filtered_rows.append(
                 {
-                    "tag_id": tag_id,
+                    "tag_id": usage.tag_id,
                     "format_name": format_name,
-                    "usage_count": count,
+                    "usage_count": usage.count,
                 }
-                for tag_id, format_name, count in rows
-            ]
-        )
+            )
+
+        return pl.DataFrame(filtered_rows)
 
     def get_type_distribution(self) -> pl.DataFrame:
         """format別のtype分布を返す。"""
-        with self.repo.session_factory() as session:
-            rows = (
-                session.query(
-                    TagFormat.format_name,
-                    TagTypeName.type_name,
-                    func.count(TagStatus.tag_id).label("tag_count"),
-                )
-                .select_from(TagStatus)
-                .join(TagFormat, TagStatus.format_id == TagFormat.format_id)
-                .join(
-                    TagTypeFormatMapping,
-                    (TagStatus.format_id == TagTypeFormatMapping.format_id)
-                    & (TagStatus.type_id == TagTypeFormatMapping.type_id),
-                )
-                .join(TagTypeName, TagTypeFormatMapping.type_name_id == TagTypeName.type_name_id)
-                .filter(TagStatus.alias == False, TagStatus.deprecated == False)  # noqa: E712
-                .group_by(TagFormat.format_name, TagTypeName.type_name)
-                .all()
+        format_map = self.repo.get_format_map()
+        type_map = self.repo.get_type_mapping_map()
+        counts: dict[tuple[str, str], int] = {}
+        for status in self.repo.list_tag_statuses():
+            if status.alias or status.deprecated:
+                continue
+            format_name = format_map.get(status.format_id, f"format:{status.format_id}")
+            type_name = type_map.get(
+                (status.format_id, status.type_id), f"type:{status.type_id}"
             )
+            key = (format_name, type_name)
+            counts[key] = counts.get(key, 0) + 1
 
         return pl.DataFrame(
             [
                 {"format_name": format_name, "type_name": type_name, "tag_count": tag_count}
-                for format_name, type_name, tag_count in rows
+                for (format_name, type_name), tag_count in counts.items()
             ]
         )
 
@@ -112,7 +100,11 @@ class TagStatistics:
             translations = self.repo.get_translations(t_id)
             lang_set = {tr.language for tr in translations}
             rows.append(
-                {"tag_id": t_id, "total_translations": len(translations), "languages": list(lang_set)}
+                {
+                    "tag_id": t_id,
+                    "total_translations": len(translations),
+                    "languages": sorted(lang_set),
+                }
             )
         return pl.DataFrame(rows)
 

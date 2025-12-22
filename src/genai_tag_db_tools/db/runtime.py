@@ -9,14 +9,28 @@ from genai_tag_db_tools.db.schema import Base
 logger = logging.getLogger(__name__)
 
 _db_path: Path | None = None
+_base_db_paths: list[Path] | None = None
 _engine = None
 _SessionLocal = None
+_user_db_path: Path | None = None
+_user_engine = None
+_UserSessionLocal = None
 
 
 def set_database_path(path: Path) -> None:
     """グローバルのDBパスを設定する。"""
-    global _db_path
+    global _db_path, _base_db_paths
     _db_path = path
+    _base_db_paths = [path]
+
+
+def set_base_database_paths(paths: list[Path]) -> None:
+    """複数ベースDBパスを設定する（優先順に並べる）。"""
+    global _db_path, _base_db_paths
+    if not paths:
+        raise ValueError("paths は空にできません。")
+    _base_db_paths = list(paths)
+    _db_path = paths[0]
 
 
 def get_database_path() -> Path:
@@ -24,6 +38,13 @@ def get_database_path() -> Path:
     if _db_path is None:
         raise RuntimeError("DBパスが未設定です。set_database_path() を先に呼んでください。")
     return _db_path
+
+
+def get_base_database_paths() -> list[Path]:
+    """ベースDBパス一覧を返す。未設定なら単一DBを返す。"""
+    if _base_db_paths is not None:
+        return list(_base_db_paths)
+    return [get_database_path()]
 
 
 def enable_foreign_keys(dbapi_connection, connection_record) -> None:
@@ -68,13 +89,43 @@ def get_session_factory():
     return _SessionLocal
 
 
+def get_base_session_factories() -> list[sessionmaker]:
+    """ベースDBのセッションファクトリ一覧を返す（優先順）。"""
+    factories: list[sessionmaker] = []
+    for path in get_base_database_paths():
+        if not path.exists():
+            raise FileNotFoundError(f"DBファイルが見つかりません: {path}")
+        factories.append(create_session_factory(path))
+    return factories
+
+
 def init_user_db(cache_dir: Path) -> Path:
     """ユーザーDBを初期化する。存在しなければ空DBを作成する。"""
+    global _user_db_path, _user_engine, _UserSessionLocal
     user_db_path = cache_dir / "user_db" / "user_tags.sqlite"
-    if user_db_path.exists():
-        return user_db_path
-
     user_db_path.parent.mkdir(parents=True, exist_ok=True)
-    engine = _create_engine(user_db_path)
-    Base.metadata.create_all(engine)
+
+    _user_db_path = user_db_path
+    _user_engine = _create_engine(user_db_path)
+    Base.metadata.create_all(_user_engine)
+    _UserSessionLocal = sessionmaker(
+        bind=_user_engine, autoflush=False, autocommit=False
+    )
     return user_db_path
+
+
+def get_user_session_factory():
+    """ユーザーDBのSession factoryを返す。"""
+    if _UserSessionLocal is None:
+        raise RuntimeError("ユーザーDBが未初期化です。init_user_db() を先に呼んでください。")
+    return _UserSessionLocal
+
+
+def get_user_session_factory_optional():
+    """ユーザーDB未初期化ならNoneを返す。"""
+    return _UserSessionLocal
+
+
+def get_user_db_path() -> Path | None:
+    """ユーザーDBパスを返す。未初期化ならNone。"""
+    return _user_db_path
