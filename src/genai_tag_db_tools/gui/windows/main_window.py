@@ -6,7 +6,6 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 
 from genai_tag_db_tools.gui.designer.MainWindow_ui import Ui_MainWindow
 from genai_tag_db_tools.gui.widgets.tag_cleaner import TagCleanerWidget
-from genai_tag_db_tools.gui.widgets.tag_import import TagDataImportDialog
 from genai_tag_db_tools.gui.widgets.tag_register import TagRegisterWidget
 from genai_tag_db_tools.gui.widgets.tag_search import TagSearchWidget
 from genai_tag_db_tools.gui.widgets.tag_statistics import TagStatisticsWidget
@@ -46,7 +45,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         try:
             from genai_tag_db_tools.services.app_services import (
                 TagCleanerService,
-                TagImportService,
                 TagRegisterService,
                 TagSearchService,
                 TagStatisticsService,
@@ -55,7 +53,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             self.tag_search_service = TagSearchService()
             self.tag_cleaner_service = TagCleanerService()
             self.tag_register_service = TagRegisterService()
-            self.tag_import_service = TagImportService()
             self.tag_statistics_service = TagStatisticsService()
             self.logger.info("Services initialized successfully")
 
@@ -101,14 +98,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     def _connect_signals(self):
         """シグナルの接続"""
         try:
-            # メニューアクション
-            self.actionimport.triggered.connect(self.on_actionimport_triggered)
-
             # 各サービスのエラーシグナルをステータスバーに接続
             self.tag_search_service.error_occurred.connect(self.on_service_error)
             self.tag_cleaner_service.error_occurred.connect(self.on_service_error)
             self.tag_register_service.error_occurred.connect(self.on_service_error)
-            self.tag_import_service.error_occurred.connect(self.on_service_error)
             self.tag_statistics_service.error_occurred.connect(self.on_service_error)
 
             self.logger.info("Signals connected successfully")
@@ -117,32 +110,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             self.logger.error(f"Error connecting signals: {e}", exc_info=True)
             raise
 
-    @Slot()
-    def on_actionimport_triggered(self):
-        """
-        メニューやツールバー上の 'Import' アクションが押された時の処理
-        """
-        # ファイル選択ダイアログを表示して、CSVファイルを選択
-        from PySide6.QtWidgets import QFileDialog
-
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "CSVファイルを選択", "", "CSV files (*.csv);;All files (*.*)"
-        )
-
-        if not file_path:
-            return
-
-        # CSVファイルを読み込み
-        import polars as pl
-
-        try:
-            df = pl.read_csv(file_path)
-            # インポートダイアログを表示
-            import_dialog = TagDataImportDialog(source_df=df, service=self.tag_import_service, parent=self)
-            import_dialog.exec_()
-        except Exception as e:
-            self.logger.error(f"Error during import: {e}", exc_info=True)
-            self.on_service_error(str(e))
 
     @Slot(str)
     def on_service_error(self, error_message: str):

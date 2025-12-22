@@ -27,6 +27,7 @@ dependencies = [
     "numpy>=1.24.0", # 数値計算ライブラリ
     "alembic>=1.13.1", # データベースマイグレーションツール
     "sqlalchemy>=2.0.0", # データベースORM
+    "huggingface_hub>=0.25.0", # HFデータセット/モデルのダウンロード
 ]
 
 # 開発時のみ必要な追加パッケージ
@@ -88,6 +89,7 @@ markers = [
     "integration: Integration tests",
     "gui: GUI tests",
     "slow: Tests that take more time",
+    "db_tools: Database tools tests",
 ]
 
 

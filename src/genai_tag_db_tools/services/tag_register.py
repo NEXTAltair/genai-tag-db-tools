@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 
 import polars as pl
 
@@ -7,14 +7,14 @@ from genai_tag_db_tools.utils.cleanup_str import TagCleaner
 
 
 class TagRegister:
-    """タグの登録・更新をまとめるサービス。"""
+    """タグの登録・更新を行うサービス。"""
 
     def __init__(self, repository: TagRepository | None = None):
         self.logger = logging.getLogger(self.__class__.__name__)
         self._repo = repository if repository else TagRepository()
 
     def normalize_tags(self, df: pl.DataFrame) -> pl.DataFrame:
-        """source_tag/tag を補完・正規化する。"""
+        """source_tag/tag を正規化して欠損を補完する。"""
         if "source_tag" not in df.columns or "tag" not in df.columns:
             return df
 
@@ -34,7 +34,7 @@ class TagRegister:
         return df
 
     def insert_tags_and_attach_id(self, df: pl.DataFrame) -> pl.DataFrame:
-        """タグを一括登録し、tag_idを付与して返す。"""
+        """タグを一括登録し、tag_id を付与する。"""
         if "tag" not in df.columns:
             return df
 

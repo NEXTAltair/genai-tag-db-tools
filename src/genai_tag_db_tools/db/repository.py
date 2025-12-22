@@ -1,4 +1,4 @@
-from collections.abc import Callable
+﻿from collections.abc import Callable
 from datetime import datetime
 from logging import getLogger
 
@@ -27,9 +27,9 @@ class TagRepository:
         if session_factory is not None:
             self.session_factory = session_factory
         else:
-            from genai_tag_db_tools.db.runtime import SessionLocal
+            from genai_tag_db_tools.db.runtime import get_session_factory
 
-            self.session_factory = SessionLocal
+            self.session_factory = get_session_factory()
 
     # --- TAG CRUD ---
     def create_tag(self, source_tag: str, tag: str) -> int:
@@ -61,7 +61,7 @@ class TagRepository:
         return tag_id
 
     def get_tag_id_by_name(self, keyword: str, partial: bool = False) -> int | None:
-        """タグ名でtag_idを検索する（*はワイルドカードとして扱う）。"""
+        """タグ名でtag_idを検索する。'*' はワイルドカードとして扱う。"""
         if "*" in keyword:
             keyword = keyword.replace("*", "%")
 
@@ -97,7 +97,7 @@ class TagRepository:
     def update_tag(self, tag_id: int, *, source_tag: str | None = None, tag: str | None = None) -> None:
         """tag_idを指定してタグ情報を更新する。"""
         with self.session_factory() as session:
-            tag_obj = session.query(Tag).get(tag_id)
+            tag_obj = session.get(Tag, tag_id)
             if not tag_obj:
                 raise ValueError(f"存在しないタグID {tag_id} の更新を試みました")
             if source_tag is not None:
@@ -109,7 +109,7 @@ class TagRepository:
     def delete_tag(self, tag_id: int) -> None:
         """tag_idを指定してタグを削除する（注意）。"""
         with self.session_factory() as session:
-            tag_obj = session.query(Tag).get(tag_id)
+            tag_obj = session.get(Tag, tag_id)
             if not tag_obj:
                 msg = ErrorMessages.INVALID_TAG_ID_DELETION_ATTEMPT.format(tag_id=tag_id)
                 self.logger.error(msg)
@@ -123,7 +123,7 @@ class TagRepository:
             return session.query(Tag).all()
 
     def bulk_insert_tags(self, df: pl.DataFrame) -> None:
-        """(source_tag, tag) を一括登録する。既存タグはスキップ。"""
+        """(source_tag, tag) を一括登録する。既存タグはスキップする。"""
         required_cols = {"source_tag", "tag"}
         if not required_cols.issubset(set(df.columns)):
             missing = required_cols - set(df.columns)
@@ -133,13 +133,19 @@ class TagRepository:
         existing_tag_map = self._fetch_existing_tags_as_map(unique_tag_list)
 
         new_df = df.filter(~pl.col("tag").is_in(list(existing_tag_map.keys())))
+        new_df = new_df.unique(subset=["tag"], keep="first")
         if new_df.is_empty():
             return
 
         records = new_df.select(["source_tag", "tag"]).to_dicts()
         with self.session_factory() as session:
-            session.bulk_insert_mappings(Tag, records)
-            session.commit()
+            try:
+                session.bulk_insert_mappings(Tag, records)
+                session.commit()
+            except IntegrityError as e:
+                session.rollback()
+                msg = ErrorMessages.DB_OPERATION_FAILED.format(error_msg=str(e))
+                raise ValueError(msg) from e
 
     def _fetch_existing_tags_as_map(self, tag_list: list[str]) -> dict[str, int]:
         """既存タグを {tag: tag_id} で返す。"""
@@ -153,6 +159,12 @@ class TagRepository:
         with self.session_factory() as session:
             format_obj = session.query(TagFormat).filter(TagFormat.format_name == format_name).one_or_none()
             return format_obj.format_id if format_obj else 0
+
+    def get_format_name(self, format_id: int) -> str | None:
+        """format_id から format_name を取得する。"""
+        with self.session_factory() as session:
+            format_obj = session.query(TagFormat).filter(TagFormat.format_id == format_id).one_or_none()
+            return format_obj.format_name if format_obj else None
 
     # --- TAG_TYPE_FORMAT_MAPPING ---
     def get_type_name_by_format_type_id(self, format_id: int, type_id: int) -> str | None:
@@ -203,7 +215,7 @@ class TagRepository:
         """TagStatusをINSERT/UPDATEする。"""
         if not alias and preferred_tag_id != tag_id:
             msg = ErrorMessages.DB_OPERATION_FAILED.format(
-                error_msg="alias=Falseの場合、preferred_tag_idはtag_idと一致が必要です"
+                error_msg="alias=Falseの場合、preferred_tag_idはtag_idと一致が必須です。",
             )
             raise ValueError(msg)
 
@@ -214,9 +226,7 @@ class TagRepository:
                 .one_or_none()
             )
 
-            effective_type_id = (
-                type_id if type_id is not None else (status_obj.type_id if status_obj else 0)
-            )
+            effective_type_id = type_id if type_id is not None else (status_obj.type_id if status_obj else 0)
 
             if type_id is not None:
                 mapping = (
@@ -230,7 +240,7 @@ class TagRepository:
                 if not mapping:
                     msg = ErrorMessages.DB_OPERATION_FAILED.format(
                         error_msg=(
-                            f"format_id={format_id}, type_id={type_id} が "
+                            f"format_id={format_id}, type_id={type_id} は "
                             "TAG_TYPE_FORMAT_MAPPING に存在しません"
                         )
                     )
@@ -526,6 +536,13 @@ class TagRepository:
                         .one_or_none()
                     )
                     if status_obj:
+                        if status_obj.alias is None:
+                            self.logger.warning(
+                                "[search_tags] alias=NULL detected (tag_id=%s, format_id=%s).",
+                                t_id,
+                                format_id,
+                            )
+                            continue
                         is_alias = status_obj.alias
                         preferred_tag_id = status_obj.preferred_tag_id
                         type_mapping = session.query(TagTypeFormatMapping).filter(
@@ -542,24 +559,22 @@ class TagRepository:
                     )
                     usage_count = usage_obj.count if usage_obj else 0
 
+                resolved_tag_id = t_id
                 if resolve_preferred and format_id and preferred_tag_id != t_id:
                     preferred_obj = session.query(Tag).filter(Tag.tag_id == preferred_tag_id).one_or_none()
                     if preferred_obj:
                         tag_obj = preferred_obj
+                        resolved_tag_id = preferred_tag_id
 
-                trans_dict: dict[str, str] = {}
-                translations = (
-                    session.query(TagTranslation)
-                    .filter(TagTranslation.tag_id == t_id)
-                    .all()
-                )
+                trans_dict: dict[str, list[str]] = {}
+                translations = session.query(TagTranslation).filter(TagTranslation.tag_id == resolved_tag_id).all()
                 for tr in translations:
                     if tr.language and tr.translation:
-                        trans_dict[tr.language] = tr.translation
+                        trans_dict.setdefault(tr.language, []).append(tr.translation)
 
                 rows.append(
                     {
-                        "tag_id": tag_obj.tag_id,
+                        "tag_id": resolved_tag_id,
                         "tag": tag_obj.tag,
                         "source_tag": tag_obj.source_tag,
                         "usage_count": usage_count,
@@ -576,7 +591,6 @@ class TagRepository:
 
             return rows
 
-    # Legacy search helpers kept for reference only (disabled).
     _LEGACY_SEARCH_HELPERS = """
     def search_tag_ids_by_usage_count_range(self, min_count=None, max_count=None, format_id=None):
         ...

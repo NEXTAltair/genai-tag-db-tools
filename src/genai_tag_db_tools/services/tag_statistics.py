@@ -1,4 +1,4 @@
-from typing import Any
+﻿from typing import Any
 
 import polars as pl
 from sqlalchemy import func
@@ -52,6 +52,12 @@ class TagStatistics:
             rows = (
                 session.query(TagUsageCounts.tag_id, TagFormat.format_name, TagUsageCounts.count)
                 .join(TagFormat, TagUsageCounts.format_id == TagFormat.format_id)
+                .join(
+                    TagStatus,
+                    (TagUsageCounts.tag_id == TagStatus.tag_id)
+                    & (TagUsageCounts.format_id == TagStatus.format_id),
+                )
+                .filter(TagStatus.alias == False, TagStatus.deprecated == False)  # noqa: E712
                 .all()
             )
 
@@ -86,6 +92,7 @@ class TagStatistics:
                     & (TagStatus.type_id == TagTypeFormatMapping.type_id),
                 )
                 .join(TagTypeName, TagTypeFormatMapping.type_name_id == TagTypeName.type_name_id)
+                .filter(TagStatus.alias == False, TagStatus.deprecated == False)  # noqa: E712
                 .group_by(TagFormat.format_name, TagTypeName.type_name)
                 .all()
             )
@@ -110,7 +117,7 @@ class TagStatistics:
         return pl.DataFrame(rows)
 
 
-def main() -> None:
+if __name__ == "__main__":
     stats = TagStatistics()
 
     general = stats.get_general_stats()
@@ -132,7 +139,3 @@ def main() -> None:
     trans_df = stats.get_translation_stats()
     print("[翻訳統計データフレーム]")
     print(trans_df)
-
-
-if __name__ == "__main__":
-    main()
