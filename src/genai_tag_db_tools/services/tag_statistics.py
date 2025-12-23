@@ -1,4 +1,4 @@
-﻿from typing import Any
+from typing import Any
 
 import polars as pl
 from sqlalchemy.orm import Session
@@ -48,10 +48,7 @@ class TagStatistics:
             return pl.DataFrame([])
 
         format_map = self.repo.get_format_map()
-        status_map = {
-            (status.tag_id, status.format_id): status
-            for status in self.repo.list_tag_statuses()
-        }
+        status_map = {(status.tag_id, status.format_id): status for status in self.repo.list_tag_statuses()}
         filtered_rows = []
         for usage in usage_rows:
             status = status_map.get((usage.tag_id, usage.format_id))
@@ -79,9 +76,7 @@ class TagStatistics:
             if status.alias or status.deprecated:
                 continue
             format_name = format_map.get(status.format_id, f"format:{status.format_id}")
-            type_name = type_map.get(
-                (status.format_id, status.type_id), f"type:{status.type_id}"
-            )
+            type_name = type_map.get((status.format_id, status.type_id), f"type:{status.type_id}")
             key = (format_name, type_name)
             counts[key] = counts.get(key, 0) + 1
 

@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 from pathlib import Path
 
 from sqlalchemy import StaticPool, create_engine, event
@@ -7,6 +7,20 @@ from sqlalchemy.orm import sessionmaker
 from genai_tag_db_tools.db.schema import Base
 
 logger = logging.getLogger(__name__)
+
+
+def _get_default_database_path() -> Path:
+    """デフォルトのデータベースパスを返す。"""
+    from genai_tag_db_tools.io.hf_downloader import default_cache_dir
+
+    cache_dir = default_cache_dir()
+    # デフォルトのファイル名(models.pyの例から)
+    default_filename = "genai-image-tag-db-cc4.sqlite"
+
+    # Hugging Face Hubのデフォルト保存先(local_dir使用時)
+    # local_dir配下に直接ファイルが保存される
+    return cache_dir / default_filename
+
 
 _db_path: Path | None = None
 _base_db_paths: list[Path] | None = None
@@ -34,9 +48,11 @@ def set_base_database_paths(paths: list[Path]) -> None:
 
 
 def get_database_path() -> Path:
-    """設定済みのDBパスを返す。未設定なら例外。"""
+    """設定済みのDBパスを返す。未設定ならデフォルト値を使用。"""
     if _db_path is None:
-        raise RuntimeError("DBパスが未設定です。set_database_path() を先に呼んでください。")
+        default_path = _get_default_database_path()
+        logger.info("DBパスが未設定のため、デフォルト値を使用: %s", default_path)
+        return default_path
     return _db_path
 
 
@@ -108,9 +124,7 @@ def init_user_db(cache_dir: Path) -> Path:
     _user_db_path = user_db_path
     _user_engine = _create_engine(user_db_path)
     Base.metadata.create_all(_user_engine)
-    _UserSessionLocal = sessionmaker(
-        bind=_user_engine, autoflush=False, autocommit=False
-    )
+    _UserSessionLocal = sessionmaker(bind=_user_engine, autoflush=False, autocommit=False)
     return user_db_path
 
 

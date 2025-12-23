@@ -101,9 +101,7 @@ def test_update_deprecated_tags_registers_aliases():
 
     repo = DummyRepo()
     register = TagRegister(repository=repo)
-    df = pl.DataFrame(
-        {"tag_id": [10], "deprecated_tags": ["old_tag, old_tag2,  "]}
-    )
+    df = pl.DataFrame({"tag_id": [10], "deprecated_tags": ["old_tag, old_tag2,  "]})
 
     register.update_deprecated_tags(df, format_id=3)
 

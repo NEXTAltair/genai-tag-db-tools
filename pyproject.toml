@@ -83,7 +83,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = ["-v", "-s", "-ra", "--tb=short", "--showlocals", "--cov=src", "--cov-report=xml"]
+addopts = ["-v", "-s", "-ra", "--tb=short", "--showlocals"]
 markers = [
     "unit: Unit tests",
     "integration: Integration tests",

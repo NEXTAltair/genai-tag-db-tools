@@ -17,7 +17,6 @@ from genai_tag_db_tools.db.schema import (
 )
 from genai_tag_db_tools.services.tag_statistics import TagStatistics
 
-
 pytestmark = pytest.mark.db_tools
 
 
@@ -35,15 +34,11 @@ def session_factory() -> Callable[[], Session]:
 def _seed_format_and_type(session: Session, *, format_id: int = 1, type_id: int = 0) -> None:
     session.add(TagFormat(format_id=format_id, format_name="test"))
     session.add(TagTypeName(type_name_id=type_id, type_name="general"))
-    session.add(
-        TagTypeFormatMapping(format_id=format_id, type_id=type_id, type_name_id=type_id)
-    )
+    session.add(TagTypeFormatMapping(format_id=format_id, type_id=type_id, type_name_id=type_id))
     session.commit()
 
 
-def _seed_sample_data(
-    repo: TagRepository, session_factory: Callable[[], Session]
-) -> dict[str, int]:
+def _seed_sample_data(repo: TagRepository, session_factory: Callable[[], Session]) -> dict[str, int]:
     tag_a = repo.create_tag("alpha", "alpha")
     tag_b = repo.create_tag("beta", "beta")
     tag_c = repo.create_tag("gamma", "gamma")

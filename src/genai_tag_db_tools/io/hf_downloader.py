@@ -1,11 +1,11 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import logging
 import os
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -66,9 +66,7 @@ def _fetch_remote_etag(spec: HFDatasetSpec, token: str | None) -> str | None:
     return info.etag
 
 
-def download_hf_dataset_file(
-    spec: HFDatasetSpec, *, dest_dir: Path, token: str | None = None
-) -> Path:
+def download_hf_dataset_file(spec: HFDatasetSpec, *, dest_dir: Path, token: str | None = None) -> Path:
     """HF Datasetから指定ファイルをダウンロードする。"""
     if dest_dir is None:
         raise ValueError("dest_dir は必須です。保存先を指定してください。")
@@ -89,9 +87,7 @@ def download_hf_dataset_file(
     return resolved
 
 
-def download_with_fallback(
-    spec: HFDatasetSpec, *, dest_dir: Path, token: str | None = None
-) -> Path:
+def download_with_fallback(spec: HFDatasetSpec, *, dest_dir: Path, token: str | None = None) -> Path:
     """リモートの更新確認とフォールバックを含めてダウンロードする。"""
     if dest_dir is None:
         raise ValueError("dest_dir は必須です。保存先を指定してください。")
@@ -142,7 +138,7 @@ def download_with_fallback(
             "revision": spec.revision,
             "etag": remote_etag,
             "path": str(resolved),
-            "downloaded_at": datetime.now(timezone.utc).isoformat(),
+            "downloaded_at": datetime.now(UTC).isoformat(),
         },
     )
     return resolved
@@ -163,9 +159,7 @@ def _cleanup_partial_files(dest_dir: Path, spec: HFDatasetSpec) -> None:
                 logger.warning("一時ファイル削除に失敗: %s", path)
 
 
-def ensure_db_ready(
-    spec: HFDatasetSpec, *, dest_dir: Path, token: str | None = None
-) -> Path:
+def ensure_db_ready(spec: HFDatasetSpec, *, dest_dir: Path, token: str | None = None) -> Path:
     """DBファイルを取得し、runtime を初期化する。"""
     from genai_tag_db_tools.db.runtime import init_engine, set_database_path
 

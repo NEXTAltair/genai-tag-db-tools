@@ -1,4 +1,4 @@
-﻿# genai_tag_db_tools.db.schema
+# genai_tag_db_tools.db.schema
 from __future__ import annotations
 
 from datetime import datetime
@@ -171,4 +171,3 @@ class DatabaseMetadata(Base):
 
     key: Mapped[str] = mapped_column(primary_key=True)
     value: Mapped[str] = mapped_column()
-

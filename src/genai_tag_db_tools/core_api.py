@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from genai_tag_db_tools.db.repository import MergedTagRepository
+from genai_tag_db_tools.db.repository import MergedTagReader
 from genai_tag_db_tools.io import hf_downloader
 from genai_tag_db_tools.models import (
     DbCacheConfig,
@@ -60,7 +60,7 @@ def _to_cache_dir(cache: DbCacheConfig) -> Path:
 
 
 def build_downloaded_at_utc() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def ensure_db(request: EnsureDbRequest) -> EnsureDbResult:
@@ -69,9 +69,7 @@ def ensure_db(request: EnsureDbRequest) -> EnsureDbResult:
     manifest_path = hf_downloader._manifest_path(dest_dir, spec)
     before = _manifest_signature(hf_downloader._load_manifest(manifest_path))
 
-    db_path = hf_downloader.ensure_db_ready(
-        spec, dest_dir=dest_dir, token=request.cache.token
-    )
+    db_path = hf_downloader.ensure_db_ready(spec, dest_dir=dest_dir, token=request.cache.token)
 
     after = _manifest_signature(hf_downloader._load_manifest(manifest_path))
     downloaded = after is not None and after != before
@@ -101,9 +99,7 @@ def ensure_databases(requests: list[EnsureDbRequest]) -> list[EnsureDbResult]:
         for spec in specs
     }
 
-    paths = hf_downloader.ensure_databases_ready(
-        specs, dest_dir=dest_dir, token=token
-    )
+    paths = hf_downloader.ensure_databases_ready(specs, dest_dir=dest_dir, token=token)
 
     results: list[EnsureDbResult] = []
     for spec, path in zip(specs, paths, strict=True):
@@ -122,9 +118,7 @@ def ensure_databases(requests: list[EnsureDbRequest]) -> list[EnsureDbResult]:
     return results
 
 
-def _filter_rows(
-    rows: list[dict[str, Any]], request: TagSearchRequest
-) -> list[dict[str, Any]]:
+def _filter_rows(rows: list[dict[str, Any]], request: TagSearchRequest) -> list[dict[str, Any]]:
     filtered: list[dict[str, Any]] = []
     format_names = set(request.format_names or [])
     type_names = set(request.type_names or [])
@@ -142,19 +136,11 @@ def _filter_rows(
     return filtered
 
 
-def search_tags(
-    repo: MergedTagRepository, request: TagSearchRequest
-) -> TagSearchResult:
+def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchResult:
     format_name = (
-        request.format_names[0]
-        if request.format_names and len(request.format_names) == 1
-        else None
+        request.format_names[0] if request.format_names and len(request.format_names) == 1 else None
     )
-    type_name = (
-        request.type_names[0]
-        if request.type_names and len(request.type_names) == 1
-        else None
-    )
+    type_name = request.type_names[0] if request.type_names and len(request.type_names) == 1 else None
 
     rows = repo.search_tags(
         request.query,
@@ -179,13 +165,11 @@ def search_tags(
     return TagSearchResult(items=items, total=len(items))
 
 
-def register_tag(
-    service: TagRegisterService, request: TagRegisterRequest
-) -> TagRegisterResult:
+def register_tag(service: TagRegisterService, request: TagRegisterRequest) -> TagRegisterResult:
     return service.register_tag(request)
 
 
-def get_statistics(repo: MergedTagRepository) -> "TagStatisticsResult":
+def get_statistics(repo: MergedTagReader) -> TagStatisticsResult:
     from genai_tag_db_tools.models import TagStatisticsResult
 
     tag_statuses = repo.list_tag_statuses()

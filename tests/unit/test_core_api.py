@@ -53,13 +53,9 @@ def test_ensure_db_marks_downloaded_when_manifest_changes(monkeypatch, tmp_path)
     db_path.write_bytes(payload)
 
     request = _build_request(tmp_path, "org/db", "db.sqlite")
-    spec = hf_downloader.HFDatasetSpec(
-        repo_id="org/db", filename="db.sqlite", revision=None
-    )
+    spec = hf_downloader.HFDatasetSpec(repo_id="org/db", filename="db.sqlite", revision=None)
     manifest_path = hf_downloader._manifest_path(tmp_path, spec)
-    hf_downloader._save_manifest(
-        manifest_path, {"etag": "old", "path": str(db_path)}
-    )
+    hf_downloader._save_manifest(manifest_path, {"etag": "old", "path": str(db_path)})
 
     def fake_ensure_db_ready(spec, *, dest_dir, token=None):
         hf_downloader._save_manifest(
@@ -82,13 +78,9 @@ def test_ensure_db_marks_not_downloaded_when_manifest_same(monkeypatch, tmp_path
     db_path.write_bytes(payload)
 
     request = _build_request(tmp_path, "org/db", "db.sqlite")
-    spec = hf_downloader.HFDatasetSpec(
-        repo_id="org/db", filename="db.sqlite", revision=None
-    )
+    spec = hf_downloader.HFDatasetSpec(repo_id="org/db", filename="db.sqlite", revision=None)
     manifest_path = hf_downloader._manifest_path(tmp_path, spec)
-    hf_downloader._save_manifest(
-        manifest_path, {"etag": "same", "path": str(db_path)}
-    )
+    hf_downloader._save_manifest(manifest_path, {"etag": "same", "path": str(db_path)})
 
     def fake_ensure_db_ready(spec, *, dest_dir, token=None):
         hf_downloader._save_manifest(
@@ -145,9 +137,7 @@ def test_ensure_databases_reports_downloaded_per_spec(monkeypatch, tmp_path):
         )
         return [db_a, db_b]
 
-    monkeypatch.setattr(
-        hf_downloader, "ensure_databases_ready", fake_ensure_databases_ready
-    )
+    monkeypatch.setattr(hf_downloader, "ensure_databases_ready", fake_ensure_databases_ready)
 
     results = core_api.ensure_databases([req_a, req_b])
     assert [r.downloaded for r in results] == [False, True]
@@ -222,4 +212,3 @@ def test_register_tag_delegates():
     result = core_api.register_tag(service, request)
     assert service.called_with == request
     assert result.created is True
-

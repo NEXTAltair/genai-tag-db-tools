@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(touch:*)",
+      "Bash(ruff check:*)",
+      "Bash(mypy:*)",
+      "Bash(rg:*)"
+    ],
+    "deny": []
+  }
+}

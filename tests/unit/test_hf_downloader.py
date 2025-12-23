@@ -11,6 +11,7 @@ from genai_tag_db_tools.io.hf_downloader import (
     download_with_fallback,
     ensure_db_ready,
 )
+
 pytestmark = pytest.mark.db_tools
 
 
@@ -25,9 +26,7 @@ def test_download_requires_dest_dir():
         download_hf_dataset_file(spec, dest_dir=None)
 
 
-def test_download_with_fallback_uses_cached_when_etag_matches(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_download_with_fallback_uses_cached_when_etag_matches(monkeypatch, tmp_path: Path) -> None:
     spec = HFDatasetSpec(repo_id="dummy/repo", filename="db.sqlite")
     cached = tmp_path / "db.sqlite"
     cached.write_text("")
@@ -36,9 +35,7 @@ def test_download_with_fallback_uses_cached_when_etag_matches(
     manifest_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = manifest_dir / "dummy__repo__db.sqlite.json"
     manifest_path.write_text(
-        '{"etag": "abc123", "path": "'
-        + str(cached).replace("\\", "/")
-        + '"}',
+        '{"etag": "abc123", "path": "' + str(cached).replace("\\", "/") + '"}',
         encoding="utf-8",
     )
 
@@ -59,9 +56,7 @@ def test_download_with_fallback_uses_cached_when_etag_matches(
     assert result == cached
 
 
-def test_download_with_fallback_uses_cached_when_offline(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_download_with_fallback_uses_cached_when_offline(monkeypatch, tmp_path: Path) -> None:
     spec = HFDatasetSpec(repo_id="dummy/repo", filename="db.sqlite")
     cached = tmp_path / "db.sqlite"
     cached.write_text("")
@@ -91,9 +86,7 @@ def test_download_with_fallback_uses_cached_when_offline(
     assert result == cached
 
 
-def test_download_with_fallback_falls_back_on_download_error(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_download_with_fallback_falls_back_on_download_error(monkeypatch, tmp_path: Path) -> None:
     spec = HFDatasetSpec(repo_id="dummy/repo", filename="db.sqlite")
     cached = tmp_path / "db.sqlite"
     cached.write_text("")
@@ -123,9 +116,7 @@ def test_download_with_fallback_falls_back_on_download_error(
     assert result == cached
 
 
-def test_download_with_fallback_updates_manifest_on_success(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_download_with_fallback_updates_manifest_on_success(monkeypatch, tmp_path: Path) -> None:
     spec = HFDatasetSpec(repo_id="dummy/repo", filename="db.sqlite")
     resolved = tmp_path / "fresh.sqlite"
     resolved.write_text("")
@@ -161,9 +152,7 @@ def test_ensure_db_ready_sets_runtime(monkeypatch, tmp_path: Path):
     def fake_download(*_args, **_kwargs):
         return fake_db
 
-    monkeypatch.setattr(
-        "genai_tag_db_tools.io.hf_downloader.download_with_fallback", fake_download
-    )
+    monkeypatch.setattr("genai_tag_db_tools.io.hf_downloader.download_with_fallback", fake_download)
 
     spec = HFDatasetSpec(repo_id="dummy", filename="db.sqlite")
     result = ensure_db_ready(spec, dest_dir=tmp_path)

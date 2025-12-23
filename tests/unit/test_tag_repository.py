@@ -11,7 +11,6 @@ from sqlalchemy.pool import StaticPool
 from genai_tag_db_tools.db.repository import TagRepository
 from genai_tag_db_tools.db.schema import Base, Tag
 
-
 pytestmark = pytest.mark.db_tools
 
 

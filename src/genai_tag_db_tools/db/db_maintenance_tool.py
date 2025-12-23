@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 from typing import Any
 
 from genai_tag_db_tools.db.repository import TagRepository

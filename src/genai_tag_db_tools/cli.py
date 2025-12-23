@@ -1,11 +1,11 @@
 import argparse
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from genai_tag_db_tools.core_api import (
-    ensure_db,
     ensure_databases,
+    ensure_db,
     get_statistics,
     register_tag,
     search_tags,
@@ -58,9 +58,7 @@ def _dump(obj: object) -> None:
     if hasattr(obj, "model_dump"):
         payload = obj.model_dump()
     elif isinstance(obj, list):
-        payload = [
-            item.model_dump() if hasattr(item, "model_dump") else item for item in obj
-        ]
+        payload = [item.model_dump() if hasattr(item, "model_dump") else item for item in obj]
     else:
         payload = obj
 
@@ -128,10 +126,7 @@ def cmd_register(args: argparse.Namespace) -> None:
         raise ValueError("--user-db-dir is required for register")
 
     _set_db_paths(args.base_db, args.user_db_dir)
-    translations = [
-        TagTranslationInput(language=lang, translation=text)
-        for lang, text in args.translation
-    ]
+    translations = [TagTranslationInput(language=lang, translation=text) for lang, text in args.translation]
     request = TagRegisterRequest(
         tag=args.tag,
         source_tag=args.source_tag,
@@ -179,9 +174,7 @@ def main() -> None:
     ensure_parser.add_argument("--max-cache-bytes", type=int)
     ensure_parser.set_defaults(func=cmd_ensure_db)
 
-    ensure_many_parser = subparsers.add_parser(
-        "ensure-dbs", help="Download multiple DBs."
-    )
+    ensure_many_parser = subparsers.add_parser("ensure-dbs", help="Download multiple DBs.")
     ensure_many_parser.add_argument(
         "--source",
         action="append",

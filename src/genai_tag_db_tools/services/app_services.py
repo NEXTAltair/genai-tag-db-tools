@@ -1,4 +1,4 @@
-﻿# genai_tag_db_tools/services/app_services.py
+# genai_tag_db_tools/services/app_services.py
 
 import logging
 from typing import Any
@@ -225,9 +225,7 @@ class TagRegisterService(GuiServiceBase):
 
                 translations = None
                 if language and translation:
-                    translations = [
-                        TagTranslationInput(language=language, translation=translation)
-                    ]
+                    translations = [TagTranslationInput(language=language, translation=translation)]
 
                 self.register_tag(
                     TagRegisterRequest(

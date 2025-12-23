@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
@@ -14,9 +14,7 @@ class DbSourceRef(BaseModel):
 
     repo_id: str = Field(..., examples=["NEXTAltair/genai-image-tag-db-CC4"])
     filename: str = Field(..., examples=["genai-image-tag-db-cc4.sqlite"])
-    revision: str | None = Field(
-        default=None, description="ブランチ/タグ/コミット（未指定なら既定）"
-    )
+    revision: str | None = Field(default=None, description="ブランチ/タグ/コミット（未指定なら既定）")
 
 
 class DbCacheConfig(BaseModel):
@@ -72,12 +70,8 @@ class TagSearchRequest(BaseModel):
     """
 
     query: str = Field(..., description="検索クエリ")
-    format_names: list[str] | None = Field(
-        default=None, description="対象フォーマット名の絞り込み"
-    )
-    type_names: list[str] | None = Field(
-        default=None, description="対象タイプ名の絞り込み"
-    )
+    format_names: list[str] | None = Field(default=None, description="対象フォーマット名の絞り込み")
+    type_names: list[str] | None = Field(default=None, description="対象タイプ名の絞り込み")
     resolve_preferred: bool = Field(default=True, description="推奨タグへ正規化して返す")
     include_aliases: bool = Field(default=True, description="エイリアスを含める")
     include_deprecated: bool = Field(default=False, description="非推奨タグを含める")
@@ -163,12 +157,8 @@ class TagRegisterRequest(BaseModel):
     format_name: str = Field(..., description="フォーマット名")
     type_name: str = Field(..., description="タイプ名")
     alias: bool = Field(default=False, description="エイリアスかどうか")
-    preferred_tag: str | None = Field(
-        default=None, description="推奨タグ（alias時のみ）"
-    )
-    translations: list[TagTranslationInput] | None = Field(
-        default=None, description="翻訳の追加"
-    )
+    preferred_tag: str | None = Field(default=None, description="推奨タグ（alias時のみ）")
+    translations: list[TagTranslationInput] | None = Field(default=None, description="翻訳の追加")
 
 
 class TagRegisterResult(BaseModel):

@@ -192,9 +192,7 @@ def test_detect_invalid_tag_id(monkeypatch: pytest.MonkeyPatch):
 def test_detect_invalid_preferred_tags(monkeypatch: pytest.MonkeyPatch):
     class DummyRepo:
         def list_tag_statuses(self):
-            return [
-                SimpleNamespace(tag_id=1, format_id=1, preferred_tag_id=99, alias=True)
-            ]
+            return [SimpleNamespace(tag_id=1, format_id=1, preferred_tag_id=99, alias=True)]
 
         def get_tag_by_id(self, tag_id):
             return SimpleNamespace(tag="broken")

@@ -12,7 +12,6 @@ from genai_tag_db_tools.db.repository import TagRepository
 from genai_tag_db_tools.db.schema import Base, TagFormat, TagTypeFormatMapping, TagTypeName
 from genai_tag_db_tools.services.tag_search import TagSearcher
 
-
 pytestmark = pytest.mark.db_tools
 
 
@@ -30,9 +29,7 @@ def session_factory() -> Callable[[], Session]:
 def _seed_format_and_type(session: Session, *, format_id: int = 1, type_id: int = 0) -> None:
     session.add(TagFormat(format_id=format_id, format_name="test"))
     session.add(TagTypeName(type_name_id=type_id, type_name="general"))
-    session.add(
-        TagTypeFormatMapping(format_id=format_id, type_id=type_id, type_name_id=type_id)
-    )
+    session.add(TagTypeFormatMapping(format_id=format_id, type_id=type_id, type_name_id=type_id))
     session.commit()
 
 
@@ -103,7 +100,7 @@ def test_get_formats_languages_types(session_factory: Callable[[], Session]) -> 
 
 
 def test_search_tags_resolve_preferred_replaces_tag_and_translations(
-    session_factory: Callable[[], Session]
+    session_factory: Callable[[], Session],
 ) -> None:
     repo = TagRepository(session_factory)
     searcher = TagSearcher(repo)
