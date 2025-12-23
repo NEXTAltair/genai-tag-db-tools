@@ -24,10 +24,12 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
         super().__init__(parent)
         self.setupUi(self)
 
-        self.search_service = search_service or TagSearchService()
-        self.register_service = register_service or TagRegisterService()
-        self.register_service.error_occurred.connect(self.on_service_error)
-        self.initialize_ui()
+        self.search_service = search_service
+        self.register_service = register_service
+        if self.register_service is not None:
+            self.register_service.error_occurred.connect(self.on_service_error)
+        if self.search_service is not None and self.register_service is not None:
+            self.initialize_ui()
 
     def set_services(self, search_service: TagSearchService, register_service: TagRegisterService) -> None:
         self.search_service = search_service

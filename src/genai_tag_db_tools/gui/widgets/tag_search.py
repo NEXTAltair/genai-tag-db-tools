@@ -32,7 +32,7 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         self.setupUi(self)
 
         self.logger = logging.getLogger(self.__class__.__name__)
-        self._service = service if service is not None else TagSearchService()
+        self._service = service
 
         self.customSlider = LogScaleRangeSlider()
         layout = QVBoxLayout(self.usageCountSlider)
@@ -44,7 +44,8 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         self._setup_results_view()
 
         self._connect_signals()
-        self.initialize_ui()
+        if self._service is not None:
+            self.initialize_ui()
 
     def set_service(self, service: TagSearchService) -> None:
         self._service = service

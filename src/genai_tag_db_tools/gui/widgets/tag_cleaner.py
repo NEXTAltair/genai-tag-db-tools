@@ -11,9 +11,11 @@ class TagCleanerWidget(QWidget, Ui_TagCleanerWidget):
     def __init__(self, parent=None, service: TagCleanerService | None = None):
         super().__init__(parent)
         self.setupUi(self)
-        self._cleaner_service = None
+        self._cleaner_service = service
         if service is not None:
-            self.set_service(service)
+            formats = self._cleaner_service.get_tag_formats()
+            self.comboBoxFormat.clear()
+            self.comboBoxFormat.addItems(formats)
 
     def set_service(self, cleaner_service: TagCleanerService) -> None:
         self._cleaner_service = cleaner_service

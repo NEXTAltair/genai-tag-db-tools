@@ -33,14 +33,16 @@ class TagStatisticsWidget(QWidget, Ui_TagStatisticsWidget):
         super().__init__(parent)
         self.setupUi(self)
 
-        self.service = service or TagStatisticsService()
+        self.service = service
         self.view_state: TagStatisticsView | None = None
 
         self.setup_chart_layouts()
-        self.initialize_signals()
+        if self.service is not None:
+            self.initialize_signals()
 
     def set_service(self, service: TagStatisticsService) -> None:
         self.service = service
+        self.initialize_signals()
 
     def initialize_signals(self) -> None:
         self.service.error_occurred.connect(self.on_error_occurred)
