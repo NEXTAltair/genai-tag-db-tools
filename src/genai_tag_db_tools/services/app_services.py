@@ -1,7 +1,7 @@
 # genai_tag_db_tools/services/app_services.py
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
 from PySide6.QtCore import QObject, Signal
@@ -10,6 +10,10 @@ from sqlalchemy.orm import Session
 from genai_tag_db_tools.db.repository import TagRepository
 from genai_tag_db_tools.services.tag_search import TagSearcher
 from genai_tag_db_tools.services.tag_statistics import TagStatistics
+
+if TYPE_CHECKING:
+    from genai_tag_db_tools.db.repository import MergedTagReader
+    from genai_tag_db_tools.models import TagRegisterRequest, TagRegisterResult
 
 
 class GuiServiceBase(QObject):
@@ -51,9 +55,27 @@ class TagCoreService:
 class TagSearchService(GuiServiceBase):
     """GUI向け検索サービス（TagSearcher を利用）。"""
 
-    def __init__(self, parent: QObject | None = None, searcher: TagSearcher | None = None):
+    def __init__(
+        self,
+        parent: QObject | None = None,
+        searcher: TagSearcher | None = None,
+        merged_reader: "MergedTagReader | None" = None,
+    ):
         super().__init__(parent)
         self._searcher = searcher or TagSearcher()
+        # Store merged_reader, will be lazy-initialized on first use if None
+        self._merged_reader = merged_reader
+        self._merged_reader_initialized = merged_reader is not None
+
+    def _get_merged_reader(self) -> "MergedTagReader":
+        """Lazy-initialize MergedTagReader if not provided."""
+        if not self._merged_reader_initialized:
+            from genai_tag_db_tools.db.repository import MergedTagReader, get_default_repository
+
+            base_repo = get_default_repository()
+            self._merged_reader = MergedTagReader(base_repo=base_repo, user_repo=None)
+            self._merged_reader_initialized = True
+        return self._merged_reader
 
     def get_tag_formats(self) -> list[str]:
         """タグフォーマット一覧を取得する。"""
@@ -94,19 +116,81 @@ class TagSearchService(GuiServiceBase):
         min_usage: int | None = None,
         max_usage: int | None = None,
         alias: bool | None = None,
+        limit: int = 1000,
+        offset: int = 0,
     ) -> pl.DataFrame:
-        """タグ検索を行い、Polars DataFrameで返す。"""
+        """タグ検索を行い、Polars DataFrameで返す (core_api統合版)。
+
+        Args:
+            keyword: 検索キーワード
+            partial: 部分一致検索フラグ
+            format_name: フォーマット名フィルタ
+            type_name: タイプ名フィルタ
+            language: 言語フィルタ（core_api未対応、WARNING出力）
+            min_usage: 最小使用回数フィルタ（core_api未対応、WARNING出力）
+            max_usage: 最大使用回数フィルタ（core_api未対応、WARNING出力）
+            alias: エイリアス含む検索フラグ
+            limit: 取得上限数（デフォルト1000）
+            offset: 取得開始位置（デフォルト0）
+
+        Returns:
+            検索結果の Polars DataFrame
+        """
         try:
-            return self._searcher.search_tags(
-                keyword=keyword,
-                partial=partial,
-                format_name=format_name,
-                type_name=type_name,
-                language=language,
-                min_usage=min_usage,
-                max_usage=max_usage,
-                alias=alias,
-            )
+            # First try core_api integration if MergedTagReader is available
+            try:
+                from pydantic import ValidationError
+
+                from genai_tag_db_tools import core_api
+                from genai_tag_db_tools.gui.converters import search_result_to_dataframe
+                from genai_tag_db_tools.models import TagSearchRequest
+
+                # Build TagSearchRequest with proper format/type filtering
+                format_names = [format_name] if format_name else None
+                type_names = [type_name] if type_name else None
+
+                request = TagSearchRequest(
+                    query=keyword,
+                    format_names=format_names,
+                    type_names=type_names,
+                    resolve_preferred=True,
+                    include_aliases=alias if alias is not None else True,
+                    include_deprecated=False,
+                    limit=limit,
+                    offset=offset,
+                )
+
+                # Call core_api with MergedTagReader (lazy init if needed)
+                result = core_api.search_tags(self._get_merged_reader(), request)
+
+                # Convert to DataFrame for GUI display
+                df = search_result_to_dataframe(result)
+
+                # Apply additional filters (language, usage) not supported by core_api yet
+                if language:
+                    # TODO: Implement language filtering when core_api supports it
+                    self.logger.warning("Language filtering not yet supported in core_api integration")
+
+                if min_usage is not None or max_usage is not None:
+                    # TODO: Implement usage filtering when core_api supports it
+                    self.logger.warning("Usage count filtering not yet supported in core_api integration")
+
+                return df
+
+            except (ValidationError, FileNotFoundError) as e:
+                # Fall back to legacy TagSearcher if core_api fails
+                self.logger.warning("core_api search failed, falling back to legacy: %s", e)
+                return self._searcher.search_tags(
+                    keyword=keyword,
+                    partial=partial,
+                    format_name=format_name,
+                    type_name=type_name,
+                    language=language,
+                    min_usage=min_usage,
+                    max_usage=max_usage,
+                    alias=alias,
+                )
+
         except Exception as e:
             self.logger.error("タグ検索中にエラー: %s", e)
             self.error_occurred.emit(str(e))
@@ -308,14 +392,40 @@ class TagStatisticsService(GuiServiceBase):
         self,
         parent: QObject | None = None,
         session: Session | None = None,
+        merged_reader: "MergedTagReader | None" = None,
     ):
         super().__init__(parent)
         self._stats = TagStatistics(session=session)
+        # Store merged_reader, will be lazy-initialized on first use if None
+        self._merged_reader = merged_reader
+        self._merged_reader_initialized = merged_reader is not None
+
+    def _get_merged_reader(self) -> "MergedTagReader":
+        """Lazy-initialize MergedTagReader if not provided."""
+        if not self._merged_reader_initialized:
+            from genai_tag_db_tools.db.repository import MergedTagReader, get_default_repository
+
+            base_repo = get_default_repository()
+            self._merged_reader = MergedTagReader(base_repo=base_repo, user_repo=None)
+            self._merged_reader_initialized = True
+        return self._merged_reader
 
     def get_general_stats(self) -> dict[str, Any]:
-        """全体サマリを取得する。"""
+        """全体サマリを取得する (core_api統合版)。"""
         try:
-            return self._stats.get_general_stats()
+            # First try core_api integration
+            try:
+                from genai_tag_db_tools import core_api
+                from genai_tag_db_tools.gui.converters import statistics_result_to_dict
+
+                # Use core_api.get_statistics() with MergedTagReader
+                result = core_api.get_statistics(self._get_merged_reader())
+                return statistics_result_to_dict(result)
+            except FileNotFoundError as e:
+                # Fall back to legacy TagStatistics if core_api fails
+                self.logger.warning("core_api statistics failed, falling back to legacy: %s", e)
+                return self._stats.get_general_stats()
+
         except Exception as e:
             self.logger.error("統計取得中にエラーが発生: %s", e)
             self.error_occurred.emit(str(e))
