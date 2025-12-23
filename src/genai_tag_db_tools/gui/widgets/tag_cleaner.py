@@ -1,32 +1,33 @@
 # genai_tag_db_tools/widgets/tag_cleaner.py
+
 from PySide6.QtCore import Slot
 from PySide6.QtWidgets import QWidget
 
 from genai_tag_db_tools.gui.designer.TagCleanerWidget_ui import Ui_TagCleanerWidget
-
-# まとめたサービスモジュールから必要なクラスをインポート
 from genai_tag_db_tools.services.app_services import TagCleanerService
 
 
 class TagCleanerWidget(QWidget, Ui_TagCleanerWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, service: TagCleanerService | None = None):
         super().__init__(parent)
         self.setupUi(self)
         self._cleaner_service = None
+        if service is not None:
+            self.set_service(service)
 
-    def initialize(self, cleaner_service: TagCleanerService):
-        """
-        サービスクラスを外部から受け取り、UIの初期化を行う。
-        """
+    def set_service(self, cleaner_service: TagCleanerService) -> None:
         self._cleaner_service = cleaner_service
         formats = self._cleaner_service.get_tag_formats()
         self.comboBoxFormat.clear()
         self.comboBoxFormat.addItems(formats)
 
+    def initialize(self, cleaner_service: TagCleanerService) -> None:
+        self.set_service(cleaner_service)
+
     @Slot()
-    def on_pushButtonConvert_clicked(self):
+    def on_pushButtonConvert_clicked(self) -> None:
         if not self._cleaner_service:
-            self.plainTextEditResult.setPlainText("「エラー: サービスが設定されていません」")
+            self.plainTextEditResult.setPlainText("Error: service is not initialized.")
             return
 
         plain_text = self.plainTextEditPrompt.toPlainText()
@@ -42,8 +43,6 @@ if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)
-    widget = TagCleanerWidget()
-    service = TagCleanerService()
-    widget.initialize(service)
+    widget = TagCleanerWidget(service=TagCleanerService())
     widget.show()
     sys.exit(app.exec())
