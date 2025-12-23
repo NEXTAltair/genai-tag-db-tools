@@ -24,7 +24,7 @@ class TestSearchResultToDataFrame:
 
         assert isinstance(df, pl.DataFrame)
         assert df.is_empty()
-        assert set(df.columns) == {"tag", "source_tag", "format_name", "type_name", "alias"}
+        assert set(df.columns) == {"tag", "source_tag", "format_name", "type_name", "alias", "usage_count"}
 
     def test_single_item(self):
         """Single item should be converted correctly."""

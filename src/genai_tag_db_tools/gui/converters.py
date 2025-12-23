@@ -19,7 +19,7 @@ def search_result_to_dataframe(result: TagSearchResult) -> pl.DataFrame:
         result: Search result from core_api.search_tags()
 
     Returns:
-        DataFrame with columns: tag, source_tag, format_name, type_name, alias
+        DataFrame with columns: tag, source_tag, format_name, type_name, alias, usage_count
     """
     if not result.items:
         return pl.DataFrame(
@@ -29,6 +29,7 @@ def search_result_to_dataframe(result: TagSearchResult) -> pl.DataFrame:
                 "format_name": pl.Utf8,
                 "type_name": pl.Utf8,
                 "alias": pl.Boolean,
+                "usage_count": pl.Int64,
             }
         )
 
@@ -39,6 +40,7 @@ def search_result_to_dataframe(result: TagSearchResult) -> pl.DataFrame:
             "format_name": item.format_name,
             "type_name": item.type_name,
             "alias": item.alias,
+            "usage_count": item.usage_count,
         }
         for item in result.items
     ]

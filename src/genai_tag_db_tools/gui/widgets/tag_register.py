@@ -26,15 +26,12 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
 
         self.search_service = search_service
         self.register_service = register_service
-        if self.register_service is not None:
-            self.register_service.error_occurred.connect(self.on_service_error)
         if self.search_service is not None and self.register_service is not None:
             self.initialize_ui()
 
     def set_services(self, search_service: TagSearchService, register_service: TagRegisterService) -> None:
         self.search_service = search_service
         self.register_service = register_service
-        self.register_service.error_occurred.connect(self.on_service_error)
         self.initialize_ui()
 
     def initialize(self) -> None:
@@ -84,10 +81,6 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
         clipboard = QApplication.clipboard()
         text = clipboard.text()
         self.lineEditTag.setText(text)
-
-    @Slot(str)
-    def on_service_error(self, error_msg: str) -> None:
-        QMessageBox.critical(self, "Register Error", f"DB error: {error_msg}")
 
     def render_tag_details(self, tag_id: int) -> None:
         details_df = self.register_service.get_tag_details(tag_id)

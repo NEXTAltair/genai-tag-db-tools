@@ -20,12 +20,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     core_api.pyを通じてタグデータベース機能を提供します。
     """
 
-    def __init__(self, cache_dir: Path | None = None, user_db_path: Path | None = None):
+    def __init__(self, cache_dir: Path | None = None):
         """初期化。
 
         Args:
             cache_dir: データベースキャッシュディレクトリ
-            user_db_path: ユーザーデータベースのパス
         """
         super().__init__()
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -38,13 +37,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             # データベース初期化サービスを作成
             self.db_init_service = DbInitializationService(
                 cache_dir=cache_dir,
-                user_db_path=user_db_path,
                 parent=self,
             )
             self._connect_db_init_signals()
 
             # 進捗ダイアログを表示
-            self.progress_dialog = QProgressDialog("Initializing database...", "Cancel", 0, 100, self)
+            self.progress_dialog = QProgressDialog("Initializing database...", "", 0, 100, self)
+            self.progress_dialog.setCancelButton(None)
             self.progress_dialog.setWindowTitle("Database Initialization")
             self.progress_dialog.setModal(True)
             self.progress_dialog.setMinimumDuration(0)
@@ -96,7 +95,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             try:
                 self._initialize_services()
                 self._initialize_widgets()
-                self._connect_signals()
                 self.logger.info("MainWindow initialization completed successfully")
             except Exception as e:
                 self.logger.error("Error initializing services: %s", e, exc_info=True)
@@ -110,11 +108,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             QMessageBox.critical(
                 self,
                 "Database Initialization Failed",
-                f"Failed to initialize database: {message}\n\nThe application may not function correctly.",
+                f"Failed to initialize database: {message}",
             )
-            # 初期化失敗時もウィンドウは表示するが、機能は制限される
-            self.setWindowTitle("Tag Database Tools - Offline")
-            self.statusbar.showMessage("Database initialization failed - Limited functionality", 10000)
+            self.setWindowTitle("Tag Database Tools")
+            self.statusbar.showMessage(message, 10000)
 
     @Slot(str)
     def _on_db_init_error(self, error: str) -> None:
@@ -152,28 +149,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             self.tagStatistics.set_service(self.tag_statistics_service)
 
         self.logger.info("All widgets initialized successfully")
-
-    def _connect_signals(self) -> None:
-        """サービスのエラーシグナルを接続する。"""
-        self._bind_service_errors(
-            self.tag_search_service,
-            self.tag_cleaner_service,
-            self.tag_register_service,
-            self.tag_statistics_service,
-        )
-        self.logger.info("Signals connected successfully")
-
-    def _bind_service_errors(self, *services) -> None:
-        """サービスのエラーシグナルをバインドする。"""
-        for service in services:
-            service.error_occurred.connect(self.on_service_error)
-
-    @Slot(str)
-    def on_service_error(self, error_message: str) -> None:
-        """サービスエラーを処理する。"""
-        self.logger.error("Service error: %s", error_message)
-        self.statusbar.showMessage(f"Error: {error_message}", 5000)
-
 
 if __name__ == "__main__":
     from pathlib import Path

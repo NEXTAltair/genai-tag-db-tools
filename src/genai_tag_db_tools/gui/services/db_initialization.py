@@ -62,17 +62,17 @@ class DbInitWorker(QRunnable):
     def __init__(
         self,
         requests: list[EnsureDbRequest],
-        user_db_path: Path | None = None,
+        cache_dir: Path,
     ):
         """初期化。
 
         Args:
             requests: データベース準備リクエストのリスト
-            user_db_path: ユーザーデータベースのパス（オプション）
+            cache_dir: キャッシュディレクトリのパス（user_db など関連ファイルを配置）
         """
         super().__init__()
         self.requests = requests
-        self.user_db_path = user_db_path
+        self.cache_dir = cache_dir
         self.signals = self.Signals()
 
     def run(self) -> None:
@@ -93,15 +93,7 @@ class DbInitWorker(QRunnable):
             runtime.init_engine(base_paths[0])
 
             self.signals.progress.emit("Initializing user database...", 70)
-
-            # ユーザーDB初期化
-            if self.user_db_path:
-                runtime.init_user_engine(self.user_db_path)
-            else:
-                # デフォルトのユーザーDBパスを使用
-                default_user_path = Path.home() / ".genai_tag_db" / "user_tags.db"
-                default_user_path.parent.mkdir(parents=True, exist_ok=True)
-                runtime.init_user_engine(default_user_path)
+            runtime.init_user_db(self.cache_dir)
 
             self.signals.progress.emit("Database initialization complete", 100)
 
@@ -125,14 +117,18 @@ class DbInitWorker(QRunnable):
             logger.warning(error_msg)
             # オフライン時はキャッシュを使用
             try:
-                base_paths = [Path(req.cache.cache_dir) / req.source.filename for req in self.requests]
+                base_paths = [
+                    Path(req.cache.cache_dir) / "base_dbs" / req.source.filename
+                    for req in self.requests
+                ]
                 if all(p.exists() for p in base_paths):
                     runtime.set_base_database_paths(base_paths)
                     runtime.init_engine(base_paths[0])
-                    self.signals.complete.emit(True, "Using cached databases (offline mode)")
+                    runtime.init_user_db(self.cache_dir)
+                    self.signals.complete.emit(True, "Using cached databases")
                 else:
-                    self.signals.error.emit("No cached databases available")
-                    self.signals.complete.emit(False, "Offline and no cache available")
+                    self.signals.error.emit("No cached base databases available")
+                    self.signals.complete.emit(False, "Base databases unavailable")
             except Exception as fallback_error:
                 logger.error("Fallback to cache failed: %s", fallback_error)
                 self.signals.error.emit(str(fallback_error))
@@ -159,19 +155,16 @@ class DbInitializationService(QObject):
     def __init__(
         self,
         cache_dir: Path | None = None,
-        user_db_path: Path | None = None,
         parent: QObject | None = None,
     ):
         """初期化。
 
         Args:
             cache_dir: キャッシュディレクトリ（Noneの場合はデフォルト）
-            user_db_path: ユーザーデータベースパス（Noneの場合はデフォルト）
             parent: 親QObject
         """
         super().__init__(parent)
         self.cache_dir = cache_dir or self._default_cache_dir()
-        self.user_db_path = user_db_path
         self.thread_pool = QThreadPool.globalInstance()
         logger.info("DbInitializationService initialized with cache_dir=%s", self.cache_dir)
 
@@ -202,7 +195,7 @@ class DbInitializationService(QObject):
 
         requests = [EnsureDbRequest(source=source, cache=cache_config) for source in sources]
 
-        worker = DbInitWorker(requests, self.user_db_path)
+        worker = DbInitWorker(requests, self.cache_dir)
         worker.signals.progress.connect(self._on_worker_progress)
         worker.signals.complete.connect(self._on_worker_complete)
         worker.signals.error.connect(self._on_worker_error)
@@ -216,6 +209,14 @@ class DbInitializationService(QObject):
             DbSourceRef(
                 repo_id="NEXTAltair/genai-image-tag-db-CC4",
                 filename="genai-image-tag-db-cc4.sqlite",
+            ),
+            DbSourceRef(
+                repo_id="NEXTAltair/genai-image-tag-db-mit",
+                filename="genai-image-tag-db-mit.sqlite",
+            ),
+            DbSourceRef(
+                repo_id="NEXTAltair/genai-image-tag-db",
+                filename="genai-image-tag-db-cc0.sqlite",
             ),
         ]
 

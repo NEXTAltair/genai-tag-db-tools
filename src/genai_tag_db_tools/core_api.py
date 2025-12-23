@@ -124,6 +124,7 @@ def _filter_rows(rows: list[dict[str, Any]], request: TagSearchRequest) -> list[
     type_names = set(request.type_names or [])
 
     for row in rows:
+        usage_count = row.get("usage_count") or 0
         if not request.include_aliases and row.get("alias") is True:
             continue
         if not request.include_deprecated and row.get("deprecated") is True:
@@ -131,6 +132,10 @@ def _filter_rows(rows: list[dict[str, Any]], request: TagSearchRequest) -> list[
         if format_names and row.get("format_name") not in format_names:
             continue
         if type_names and row.get("type_name") not in type_names:
+            continue
+        if request.min_usage is not None and usage_count < request.min_usage:
+            continue
+        if request.max_usage is not None and usage_count > request.max_usage:
             continue
         filtered.append(row)
     return filtered
@@ -159,6 +164,7 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
             format_name=row.get("format_name"),
             type_name=row.get("type_name"),
             alias=row.get("alias"),
+            usage_count=row.get("usage_count"),
         )
         for row in rows
     ]

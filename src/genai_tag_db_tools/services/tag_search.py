@@ -23,6 +23,8 @@ class TagSearcher:
         max_usage: int | None = None,
         alias: bool | None = None,
         resolve_preferred: bool = False,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> pl.DataFrame:
         """キーワード条件でタグを検索してDataFrameを返す。"""
         self.logger.info(
@@ -47,6 +49,8 @@ class TagSearcher:
             max_usage=max_usage,
             alias=alias,
             resolve_preferred=resolve_preferred,
+            limit=limit,
+            offset=offset,
         )
 
         if not rows:

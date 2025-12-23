@@ -4,6 +4,7 @@
 from unittest.mock import MagicMock, patch
 
 import polars as pl
+import pytest
 from pydantic import ValidationError
 
 from genai_tag_db_tools.models import TagRecordPublic, TagSearchResult, TagStatisticsResult
@@ -34,26 +35,25 @@ class TestTagSearchServiceCoreApiIntegration:
             assert "Language filtering not yet supported" in mock_warning.call_args[0][0]
             assert isinstance(result, pl.DataFrame)
 
-    def test_search_tags_with_usage_filter_logs_warning(self, qtbot):
-        """Usage count filter should log warning when not supported by core_api."""
+    def test_search_tags_with_usage_filter_passed(self, qtbot):
+        """Usage count filter should be passed to core_api."""
         mock_searcher = MagicMock()
         service = TagSearchService(searcher=mock_searcher)
 
         with (
             patch.object(service, "_get_merged_reader"),
             patch("genai_tag_db_tools.core_api") as mock_core_api,
-            patch.object(service.logger, "warning") as mock_warning,
         ):
-            # Setup mock返却値
+            # Setup mock???
             mock_core_api.search_tags.return_value = TagSearchResult(items=[], total=0)
 
-            # usage filter付きで検索
+            # usage filter?????
             result = service.search_tags(keyword="test", min_usage=10, max_usage=100)
 
-            # WARNING ログが出力されることを確認
-            mock_warning.assert_called()
-            warning_calls = [call[0][0] for call in mock_warning.call_args_list]
-            assert any("Usage count filtering not yet supported" in msg for msg in warning_calls)
+            call_args = mock_core_api.search_tags.call_args
+            request = call_args[0][1]
+            assert request.min_usage == 10
+            assert request.max_usage == 100
             assert isinstance(result, pl.DataFrame)
 
     def test_search_tags_with_core_api_success(self, qtbot):
@@ -108,19 +108,15 @@ class TestTagSearchServiceCoreApiIntegration:
             assert request.offset == 50
             assert isinstance(result, pl.DataFrame)
 
-    def test_search_tags_validation_error_fallback(self, qtbot):
-        """ValidationError should trigger fallback to legacy searcher."""
-        mock_searcher = MagicMock()
-        mock_searcher.search_tags.return_value = pl.DataFrame({"tag": ["test"]})
-
-        service = TagSearchService(searcher=mock_searcher)
+    def test_search_tags_validation_error_raises(self, qtbot):
+        """ValidationError should propagate."""
+        service = TagSearchService(searcher=MagicMock())
 
         with (
             patch.object(service, "_get_merged_reader"),
             patch("genai_tag_db_tools.core_api") as mock_core_api,
-            patch.object(service.logger, "warning") as mock_warning,
         ):
-            # core_api が ValidationError を発生させる
+            # core_api ?EValidationError ??????
             # Create a real ValidationError by validating invalid data
             from genai_tag_db_tools.models import TagSearchRequest
 
@@ -131,38 +127,22 @@ class TestTagSearchServiceCoreApiIntegration:
 
             mock_core_api.search_tags.side_effect = validation_error
 
-            # 検索実行
-            result = service.search_tags(keyword="test")
+            with pytest.raises(ValidationError):
+                service.search_tags(keyword="test")
 
-            # fallback が呼ばれることを確認
-            mock_searcher.search_tags.assert_called_once()
-            mock_warning.assert_called()
-            assert "core_api search failed, falling back to legacy" in mock_warning.call_args[0][0]
-            assert isinstance(result, pl.DataFrame)
-
-    def test_search_tags_file_not_found_fallback(self, qtbot):
-        """FileNotFoundError should trigger fallback to legacy searcher."""
-        mock_searcher = MagicMock()
-        mock_searcher.search_tags.return_value = pl.DataFrame({"tag": ["test"]})
-
-        service = TagSearchService(searcher=mock_searcher)
+    def test_search_tags_file_not_found_raises(self, qtbot):
+        """FileNotFoundError should propagate."""
+        service = TagSearchService(searcher=MagicMock())
 
         with (
             patch.object(service, "_get_merged_reader"),
             patch("genai_tag_db_tools.core_api") as mock_core_api,
-            patch.object(service.logger, "warning") as mock_warning,
         ):
-            # core_api が FileNotFoundError を発生させる
+            # core_api ?EFileNotFoundError ??????
             mock_core_api.search_tags.side_effect = FileNotFoundError("DB file not found")
 
-            # 検索実行
-            result = service.search_tags(keyword="test")
-
-            # fallback が呼ばれることを確認
-            mock_searcher.search_tags.assert_called_once()
-            mock_warning.assert_called()
-            assert "core_api search failed, falling back to legacy" in mock_warning.call_args[0][0]
-            assert isinstance(result, pl.DataFrame)
+            with pytest.raises(FileNotFoundError):
+                service.search_tags(keyword="test")
 
 
 class TestTagStatisticsServiceCoreApiIntegration:

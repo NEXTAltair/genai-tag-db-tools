@@ -75,6 +75,8 @@ class TagSearchRequest(BaseModel):
     resolve_preferred: bool = Field(default=True, description="推奨タグへ正規化して返す")
     include_aliases: bool = Field(default=True, description="エイリアスを含める")
     include_deprecated: bool = Field(default=False, description="非推奨タグを含める")
+    min_usage: int | None = Field(default=None, description="??????")
+    max_usage: int | None = Field(default=None, description="??????")
     limit: int = Field(default=50, description="取得件数")
     offset: int = Field(default=0, description="取得オフセット")
 
@@ -113,6 +115,7 @@ class TagRecordPublic(BaseModel):
     format_name: str | None = Field(default=None, description="フォーマット名")
     type_name: str | None = Field(default=None, description="タイプ名")
     alias: bool | None = Field(default=None, description="エイリアスかどうか")
+    usage_count: int | None = Field(default=None, description="????")
 
 
 class TagSearchResult(BaseModel):

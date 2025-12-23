@@ -85,6 +85,10 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
 
     def _build_query(self) -> TagSearchQuery:
         min_usage, max_usage = self.customSlider.get_range()
+        if min_usage == 0:
+            min_usage = None
+        if max_usage >= 100_000:
+            max_usage = None
         return TagSearchQuery(
             keyword=self.lineEditKeyword.text().strip(),
             partial=self.radioButtonPartial.isChecked(),

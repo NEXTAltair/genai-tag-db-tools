@@ -53,6 +53,8 @@ def _save_manifest(path: Path, data: dict[str, Any]) -> None:
 
 def _fetch_remote_etag(spec: HFDatasetSpec, token: str | None) -> str | None:
     api = HfApi(token=token)
+    if not hasattr(api, "file_metadata"):
+        return None
     try:
         info = api.file_metadata(
             repo_id=spec.repo_id,

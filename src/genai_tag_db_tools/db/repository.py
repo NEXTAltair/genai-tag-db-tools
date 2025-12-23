@@ -536,6 +536,14 @@ class TagRepository:
                 if max_usage is not None:
                     usage_query = usage_query.filter(TagUsageCounts.count <= max_usage)
                 usage_tag_ids = {row[0] for row in usage_query.all()}
+
+                if (min_usage is None or min_usage <= 0) and (max_usage is None or max_usage >= 0):
+                    usage_all_query = session.query(TagUsageCounts.tag_id)
+                    if format_id:
+                        usage_all_query = usage_all_query.filter(TagUsageCounts.format_id == format_id)
+                    usage_all_tag_ids = {row[0] for row in usage_all_query.all()}
+                    usage_tag_ids |= tag_ids - usage_all_tag_ids
+
                 tag_ids &= usage_tag_ids
                 if not tag_ids:
                     return []
@@ -587,6 +595,7 @@ class TagRepository:
                 is_alias = False
                 resolved_type_name = ""
                 preferred_tag_id = t_id
+                deprecated = False
 
                 if format_id:
                     status_obj = (
@@ -604,6 +613,7 @@ class TagRepository:
                             continue
                         is_alias = status_obj.alias
                         preferred_tag_id = status_obj.preferred_tag_id
+                        deprecated = bool(status_obj.deprecated)
                         type_mapping = (
                             session.query(TagTypeFormatMapping)
                             .filter(
@@ -644,6 +654,7 @@ class TagRepository:
                         "source_tag": tag_obj.source_tag,
                         "usage_count": usage_count,
                         "alias": is_alias,
+                        "deprecated": deprecated,
                         "type_name": resolved_type_name,
                         "translations": trans_dict,
                     }

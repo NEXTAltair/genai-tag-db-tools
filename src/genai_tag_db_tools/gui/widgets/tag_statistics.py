@@ -37,19 +37,8 @@ class TagStatisticsWidget(QWidget, Ui_TagStatisticsWidget):
         self.view_state: TagStatisticsView | None = None
 
         self.setup_chart_layouts()
-        if self.service is not None:
-            self.initialize_signals()
-
     def set_service(self, service: TagStatisticsService) -> None:
         self.service = service
-        self.initialize_signals()
-
-    def initialize_signals(self) -> None:
-        self.service.error_occurred.connect(self.on_error_occurred)
-
-    @Slot(str)
-    def on_error_occurred(self, msg: str) -> None:
-        print(f"[TagStatisticsWidget] ERROR: {msg}")
 
     @Slot()
     def on_statsGenerateButton_clicked(self) -> None:
