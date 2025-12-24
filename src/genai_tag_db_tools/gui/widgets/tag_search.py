@@ -4,7 +4,7 @@ import logging
 
 import polars as pl
 from pydantic import ValidationError
-from PySide6.QtCore import QItemSelectionModel, Signal, Slot, Qt
+from PySide6.QtCore import QItemSelectionModel, Qt, Signal, Slot
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -227,18 +227,20 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         if self._result_format_combo is None:
             return
         format_name = normalize_choice(self._result_format_combo.currentText())
+        format_key = format_name.strip().lower() if format_name else None
 
         rows = []
         for row in self._raw_df.iter_rows(named=True):
             format_statuses = row.get("format_statuses") or {}
             normalized_statuses = {
-                str(key).lower(): value for key, value in format_statuses.items()
+                str(key).strip().lower(): value for key, value in format_statuses.items()
             }
-            format_key = format_name.lower() if format_name else None
             if format_key and format_key not in normalized_statuses:
                 continue
 
             status = normalized_statuses.get(format_key) if format_key else None
+            if format_key and not isinstance(status, dict):
+                continue
             resolved_type_name = status.get("type_name") if status else None
             usage_count = status.get("usage_count") if status else None
             alias = status.get("alias") if status else None
@@ -309,7 +311,7 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         row_data = self._results_model.get_row(row)
         translations = row_data.get("translations") or {}
         language = self._current_translation_language()
-        values = translations.get(language, [])
+        values = translations.get(language, []) or []
 
         if self._translation_label is not None:
             self._translation_label.setText(self.tr(f"Translation ({language})"))

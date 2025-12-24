@@ -585,9 +585,20 @@ class TagRepository:
                 if not tag_ids:
                     return []
 
-            status_rows = (
+            initial_status_rows = (
                 session.query(TagStatus)
                 .filter(TagStatus.tag_id.in_(tag_ids))
+                .all()
+            )
+            preferred_ids = {
+                row.preferred_tag_id
+                for row in initial_status_rows
+                if row.preferred_tag_id is not None
+            }
+            status_tag_ids = set(tag_ids) | preferred_ids
+            status_rows = (
+                session.query(TagStatus)
+                .filter(TagStatus.tag_id.in_(status_tag_ids))
                 .all()
             )
             format_ids = {row.format_id for row in status_rows}
@@ -606,13 +617,31 @@ class TagRepository:
             usage_by_key = {
                 (usage.tag_id, usage.format_id): usage.count
                 for usage in session.query(TagUsageCounts)
-                .filter(TagUsageCounts.tag_id.in_(tag_ids))
+                .filter(TagUsageCounts.tag_id.in_(status_tag_ids))
                 .all()
             }
 
+            # N+1クエリ問題修正: ループ前に全データを一括取得
+            tags_by_id = {
+                t.tag_id: t
+                for t in session.query(Tag).filter(Tag.tag_id.in_(status_tag_ids)).all()
+            }
+            all_translations = (
+                session.query(TagTranslation)
+                .filter(TagTranslation.tag_id.in_(status_tag_ids))
+                .all()
+            )
+            trans_by_tag_id: dict[int, list[TagTranslation]] = {}
+            for tr in all_translations:
+                trans_by_tag_id.setdefault(tr.tag_id, []).append(tr)
+
+            status_by_tag_format: dict[tuple[int, int], TagStatus] = {}
+            for status in status_rows:
+                status_by_tag_format[(status.tag_id, status.format_id)] = status
+
             rows: list[dict] = []
             for t_id in sorted(tag_ids):
-                tag_obj = session.query(Tag).filter(Tag.tag_id == t_id).one_or_none()
+                tag_obj = tags_by_id.get(t_id)
                 if not tag_obj:
                     continue
 
@@ -624,11 +653,7 @@ class TagRepository:
                 deprecated = False
 
                 if format_id:
-                    status_obj = (
-                        session.query(TagStatus)
-                        .filter(TagStatus.tag_id == t_id, TagStatus.format_id == format_id)
-                        .one_or_none()
-                    )
+                    status_obj = status_by_tag_format.get((t_id, format_id))
                     if status_obj:
                         if status_obj.alias is None:
                             self.logger.warning(
@@ -640,36 +665,20 @@ class TagRepository:
                         is_alias = status_obj.alias
                         preferred_tag_id = status_obj.preferred_tag_id
                         deprecated = bool(status_obj.deprecated)
-                        type_mapping = (
-                            session.query(TagTypeFormatMapping)
-                            .filter(
-                                TagTypeFormatMapping.format_id == format_id,
-                                TagTypeFormatMapping.type_id == status_obj.type_id,
-                            )
-                            .one_or_none()
-                        )
-                        if type_mapping and type_mapping.type_name:
-                            resolved_type_name = type_mapping.type_name.type_name
+                        resolved_type_name = type_name_by_key.get((format_id, status_obj.type_id), "")
                     resolved_type_id = status_obj.type_id if status_obj else None
 
-                    usage_obj = (
-                        session.query(TagUsageCounts)
-                        .filter(TagUsageCounts.tag_id == t_id, TagUsageCounts.format_id == format_id)
-                        .one_or_none()
-                    )
-                    usage_count = usage_obj.count if usage_obj else 0
+                    usage_count = usage_by_key.get((t_id, format_id), 0)
 
                 resolved_tag_id = t_id
                 if resolve_preferred and format_id and preferred_tag_id != t_id:
-                    preferred_obj = session.query(Tag).filter(Tag.tag_id == preferred_tag_id).one_or_none()
+                    preferred_obj = tags_by_id.get(preferred_tag_id)
                     if preferred_obj:
                         tag_obj = preferred_obj
                         resolved_tag_id = preferred_tag_id
 
                 trans_dict: dict[str, list[str]] = {}
-                translations = (
-                    session.query(TagTranslation).filter(TagTranslation.tag_id == resolved_tag_id).all()
-                )
+                translations = trans_by_tag_id.get(resolved_tag_id, [])
                 for tr in translations:
                     if tr.language and tr.translation:
                         trans_dict.setdefault(tr.language, []).append(tr.translation)
