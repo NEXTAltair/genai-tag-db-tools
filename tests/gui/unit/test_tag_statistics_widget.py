@@ -161,3 +161,80 @@ def test_tag_statistics_widget_update_top_tags(qtbot, tag_statistics_widget):
 
     # Top tags list should have items
     assert tag_statistics_widget.listWidgetTopTags.count() > 0
+
+
+@pytest.mark.db_tools
+def test_tag_statistics_widget_clear_layout(qtbot, tag_statistics_widget):
+    """clear_layout() でレイアウト内のウィジェットを削除する"""
+    from PySide6.QtWidgets import QLabel
+
+    # Add widgets to layout
+    test_widget1 = QLabel("Test 1")
+    test_widget2 = QLabel("Test 2")
+    tag_statistics_widget.chartLayoutDistribution.addWidget(test_widget1)
+    tag_statistics_widget.chartLayoutDistribution.addWidget(test_widget2)
+
+    assert tag_statistics_widget.chartLayoutDistribution.count() == 2
+
+    # Clear layout
+    tag_statistics_widget.clear_layout(tag_statistics_widget.chartLayoutDistribution)
+
+    # Layout should be empty
+    assert tag_statistics_widget.chartLayoutDistribution.count() == 0
+
+
+@pytest.mark.db_tools
+def test_tag_statistics_widget_clear_layout_none(qtbot, tag_statistics_widget):
+    """clear_layout(None) は安全に処理される"""
+    # Should not raise exception
+    tag_statistics_widget.clear_layout(None)
+
+
+@pytest.mark.db_tools
+def test_tag_statistics_widget_update_statistics_with_none(qtbot, tag_statistics_widget):
+    """update_statistics(None) は何もしない"""
+    # Should not raise exception
+    tag_statistics_widget.update_statistics(None)
+
+
+@pytest.mark.db_tools
+def test_tag_statistics_widget_update_charts_with_none_data(qtbot, tag_statistics_widget):
+    """チャートメソッドは None データを安全に処理する"""
+    # Should not raise exceptions
+    tag_statistics_widget.update_distribution_chart(None)
+    tag_statistics_widget.update_usage_chart(None)
+    tag_statistics_widget.update_language_chart(None)
+
+
+@pytest.mark.db_tools
+def test_tag_statistics_widget_update_trends_chart(qtbot, tag_statistics_widget):
+    """update_trends_chart() で未実装メッセージを表示する"""
+    tag_statistics_widget.update_trends_chart()
+
+    # Should show "not implemented" message
+    if hasattr(tag_statistics_widget, "labelTrends"):
+        assert "not implemented" in tag_statistics_widget.labelTrends.text()
+
+
+@pytest.mark.db_tools
+def test_tag_statistics_widget_setup_chart_layouts(qtbot):
+    """setup_chart_layouts() で必要なレイアウトを作成する"""
+    widget = TagStatisticsWidget()
+    qtbot.addWidget(widget)
+
+    # All chart layouts should exist
+    assert hasattr(widget, "chartLayoutDistribution")
+    assert hasattr(widget, "chartLayoutUsage")
+    assert hasattr(widget, "chartLayoutLanguage")
+    assert hasattr(widget, "labelTrends")
+
+
+@pytest.mark.db_tools
+def test_tag_statistics_widget_service_none_initialization(qtbot):
+    """サービスが None でも Widget を作成できる"""
+    widget = TagStatisticsWidget(parent=None, service=None)
+    qtbot.addWidget(widget)
+
+    assert widget.service is None
+    assert widget.view_state is None
+    assert widget._initialized is False
