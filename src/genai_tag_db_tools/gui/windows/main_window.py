@@ -3,14 +3,22 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Slot
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QProgressDialog
 
+from genai_tag_db_tools.db import runtime
 from genai_tag_db_tools.gui.designer.MainWindow_ui import Ui_MainWindow
 from genai_tag_db_tools.gui.services.db_initialization import DbInitializationService
 from genai_tag_db_tools.gui.widgets.tag_cleaner import TagCleanerWidget
 from genai_tag_db_tools.gui.widgets.tag_register import TagRegisterWidget
 from genai_tag_db_tools.gui.widgets.tag_search import TagSearchWidget
 from genai_tag_db_tools.gui.widgets.tag_statistics import TagStatisticsWidget
+from genai_tag_db_tools.services.app_services import (
+    TagCleanerService,
+    TagRegisterService,
+    TagSearchService,
+    TagStatisticsService,
+)
 
 
 class MainWindow(QMainWindow, Ui_MainWindow):
@@ -121,13 +129,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def _initialize_services(self) -> None:
         """サービスを初期化する(DB初期化完了後に呼ばれる)。"""
-        from genai_tag_db_tools.services.app_services import (
-            TagCleanerService,
-            TagRegisterService,
-            TagSearchService,
-            TagStatisticsService,
-        )
-
         self.tag_search_service = TagSearchService()
         self.tag_cleaner_service = TagCleanerService()
         self.tag_register_service = TagRegisterService()
@@ -149,6 +150,34 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             self.tagStatistics.set_service(self.tag_statistics_service)
 
         self.logger.info("All widgets initialized successfully")
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """アプリ終了時のクリーンアップ処理。
+
+        Args:
+            event: Close event
+        """
+        self.logger.info("Closing application and cleaning up resources")
+
+        # サービスのクローズ
+        if hasattr(self, "tag_search_service") and self.tag_search_service:
+            self.tag_search_service.close()
+        if hasattr(self, "tag_register_service") and self.tag_register_service:
+            self.tag_register_service.close()
+        if hasattr(self, "tag_statistics_service") and self.tag_statistics_service:
+            self.tag_statistics_service.close()
+        if hasattr(self, "tag_cleaner_service") and self.tag_cleaner_service:
+            self.tag_cleaner_service.close()
+
+        # DB エンジンのクローズ
+        try:
+            runtime.close_all()
+            self.logger.info("Database engines closed")
+        except Exception as e:
+            self.logger.warning("Error closing database engines: %s", e)
+
+        super().closeEvent(event)
+
 
 if __name__ == "__main__":
     from pathlib import Path

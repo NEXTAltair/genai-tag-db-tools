@@ -118,8 +118,7 @@ class DbInitWorker(QRunnable):
             # オフライン時はキャッシュを使用
             try:
                 base_paths = [
-                    Path(req.cache.cache_dir) / "base_dbs" / req.source.filename
-                    for req in self.requests
+                    Path(req.cache.cache_dir) / "base_dbs" / req.source.filename for req in self.requests
                 ]
                 if all(p.exists() for p in base_paths):
                     runtime.set_base_database_paths(base_paths)

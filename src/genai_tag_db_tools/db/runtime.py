@@ -143,3 +143,18 @@ def get_user_session_factory_optional():
 def get_user_db_path() -> Path | None:
     """ユーザーDBパスを返す。未初期化ならNone。"""
     return _user_db_path
+
+
+def close_all() -> None:
+    """Dispose active engines and reset session factories."""
+    global _engine, _SessionLocal, _user_engine, _UserSessionLocal
+
+    if _engine is not None:
+        _engine.dispose()
+        _engine = None
+    if _user_engine is not None:
+        _user_engine.dispose()
+        _user_engine = None
+
+    _SessionLocal = None
+    _UserSessionLocal = None

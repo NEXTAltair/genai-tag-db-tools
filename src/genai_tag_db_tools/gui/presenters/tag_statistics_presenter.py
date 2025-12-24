@@ -102,7 +102,7 @@ def _build_language_chart(translation_df: pl.DataFrame) -> BarChartData | None:
         return None
 
     exploded = translation_df.explode("languages")
-    freq = exploded.group_by("languages").agg([pl.count().alias("count")])
+    freq = exploded.group_by("languages").agg([pl.len().alias("count")])
     freq = freq.sort("count", descending=True)
     if freq.is_empty():
         return None

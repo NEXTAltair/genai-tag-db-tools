@@ -2,7 +2,9 @@
 
 import logging
 
+from pydantic import ValidationError
 from PySide6.QtCore import Signal, Slot
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
@@ -27,12 +29,13 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
 
     error_occurred = Signal(str)
 
-    def __init__(self, service: TagSearchService | None = None, parent=None):
+    def __init__(self, service: TagSearchService | None = None, parent: QWidget | None = None):
         super().__init__(parent)
         self.setupUi(self)
 
         self.logger = logging.getLogger(self.__class__.__name__)
         self._service = service
+        self._initialized = False
 
         self.customSlider = LogScaleRangeSlider()
         layout = QVBoxLayout(self.usageCountSlider)
@@ -44,12 +47,18 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         self._setup_results_view()
 
         self._connect_signals()
-        if self._service is not None:
-            self.initialize_ui()
 
     def set_service(self, service: TagSearchService) -> None:
+        """Set service instance (initialization deferred to showEvent)."""
         self._service = service
-        self.initialize_ui()
+        self._initialized = False
+
+    def showEvent(self, event: QShowEvent) -> None:
+        """Initialize UI when widget is first shown."""
+        if self._service and not self._initialized:
+            self.initialize_ui()
+            self._initialized = True
+        super().showEvent(event)
 
     def _connect_signals(self) -> None:
         self.radioButtonExact.setChecked(False)
@@ -116,9 +125,17 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
             )
             self._results_model.set_dataframe(df)
 
+        except ValidationError as e:
+            self.logger.error("Invalid search parameters: %s", e)
+            self.error_occurred.emit(f"検索パラメータが不正です: {e}")
+            QMessageBox.critical(self, self.tr("Search Error"), f"Invalid parameters: {e}")
+        except FileNotFoundError as e:
+            self.logger.warning("Database not found, using cache: %s", e)
+            self.error_occurred.emit(f"データベースが見つかりません: {e}")
+            QMessageBox.warning(self, self.tr("Database Not Found"), str(e))
         except Exception as e:
-            self.logger.error("Error in on_search_button_clicked: %s", e)
-            self.error_occurred.emit(str(e))
+            self.logger.exception("Unexpected error during search")
+            self.error_occurred.emit(f"予期しないエラー: {e}")
             QMessageBox.critical(self, self.tr("Search Error"), str(e))
 
     def update_type_combo_box(self) -> None:
@@ -135,7 +152,7 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
 
     @Slot()
     def on_pushButtonSaveSearch_clicked(self) -> None:
-        print("[on_pushButtonSaveSearch_clicked] TODO: save search")
+        self.logger.info("Save search functionality not yet implemented")
 
 
 if __name__ == "__main__":

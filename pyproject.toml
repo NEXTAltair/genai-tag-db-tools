@@ -25,6 +25,7 @@ dependencies = [
     "superqt>=0.6.7", # PySide6の拡張機能（QRangeSlider）
     "polars>=1.9.0", # 高性能データフレームライブラリ（基本機能のみ）
     "numpy>=1.24.0", # 数値計算ライブラリ
+    "pydantic>=2.7.0", # データバリデーション/モデル定義
     "alembic>=1.13.1", # データベースマイグレーションツール
     "sqlalchemy>=2.0.0", # データベースORM
     "huggingface_hub>=0.25.0", # HFデータセット/モデルのダウンロード

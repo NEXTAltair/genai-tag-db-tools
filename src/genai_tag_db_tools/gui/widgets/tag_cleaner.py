@@ -1,6 +1,7 @@
 # genai_tag_db_tools/widgets/tag_cleaner.py
 
 from PySide6.QtCore import Slot
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import QWidget
 
 from genai_tag_db_tools.gui.designer.TagCleanerWidget_ui import Ui_TagCleanerWidget
@@ -8,17 +9,26 @@ from genai_tag_db_tools.services.app_services import TagCleanerService
 
 
 class TagCleanerWidget(QWidget, Ui_TagCleanerWidget):
-    def __init__(self, parent=None, service: TagCleanerService | None = None):
+    def __init__(self, parent: QWidget | None = None, service: TagCleanerService | None = None):
         super().__init__(parent)
         self.setupUi(self)
         self._cleaner_service = service
-        if service is not None:
-            formats = self._cleaner_service.get_tag_formats()
-            self.comboBoxFormat.clear()
-            self.comboBoxFormat.addItems(formats)
+        self._initialized = False
 
     def set_service(self, cleaner_service: TagCleanerService) -> None:
+        """Set service instance (initialization deferred to showEvent)."""
         self._cleaner_service = cleaner_service
+        self._initialized = False
+
+    def showEvent(self, event: QShowEvent) -> None:
+        """Initialize UI when widget is first shown."""
+        if self._cleaner_service and not self._initialized:
+            self._initialize_ui()
+            self._initialized = True
+        super().showEvent(event)
+
+    def _initialize_ui(self) -> None:
+        """Initialize UI elements with service data."""
         formats = self._cleaner_service.get_tag_formats()
         self.comboBoxFormat.clear()
         self.comboBoxFormat.addItems(formats)

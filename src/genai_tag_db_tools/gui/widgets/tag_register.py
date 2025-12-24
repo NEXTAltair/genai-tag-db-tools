@@ -1,6 +1,8 @@
 # genai_tag_db_tools/gui/widgets/tag_register.py
 
+from pydantic import ValidationError
 from PySide6.QtCore import Slot
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 
 from genai_tag_db_tools.gui.designer.TagRegisterWidget_ui import Ui_TagRegisterWidget
@@ -17,7 +19,7 @@ from genai_tag_db_tools.services.app_services import (
 class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
     def __init__(
         self,
-        parent=None,
+        parent: QWidget | None = None,
         search_service: TagSearchService | None = None,
         register_service: TagRegisterService | None = None,
     ):
@@ -26,13 +28,20 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
 
         self.search_service = search_service
         self.register_service = register_service
-        if self.search_service is not None and self.register_service is not None:
-            self.initialize_ui()
+        self._initialized = False
 
     def set_services(self, search_service: TagSearchService, register_service: TagRegisterService) -> None:
+        """Set service instances (initialization deferred to showEvent)."""
         self.search_service = search_service
         self.register_service = register_service
-        self.initialize_ui()
+        self._initialized = False
+
+    def showEvent(self, event: QShowEvent) -> None:
+        """Initialize UI when widget is first shown."""
+        if self.search_service and self.register_service and not self._initialized:
+            self.initialize_ui()
+            self._initialized = True
+        super().showEvent(event)
 
     def initialize(self) -> None:
         self.initialize_ui()
@@ -72,9 +81,15 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
             self.render_tag_details(tag_id)
             self.clear_fields()
 
+        except ValidationError as e:
+            QMessageBox.warning(self, "Validation Error", f"Invalid tag data: {e}")
+            self.textEditOutput.append(f"Validation Error: {e!s}")
+        except ValueError as e:
+            QMessageBox.warning(self, "Value Error", str(e))
+            self.textEditOutput.append(f"Value Error: {e!s}")
         except Exception as e:
-            QMessageBox.warning(self, "Error", str(e))
-            self.textEditOutput.append(f"Error: {e!s}")
+            QMessageBox.critical(self, "Error", str(e))
+            self.textEditOutput.append(f"Unexpected Error: {e!s}")
 
     @Slot()
     def on_pushButtonImport_clicked(self) -> None:

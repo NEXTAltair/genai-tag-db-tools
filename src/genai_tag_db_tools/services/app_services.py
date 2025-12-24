@@ -27,6 +27,16 @@ class GuiServiceBase(QObject):
         super().__init__(parent)
         self.logger = logging.getLogger(self.__class__.__name__)
 
+    def close(self) -> None:
+        """リソース解放（サブクラスでオーバーライド可能）。"""
+        self.logger.info("Closing %s", self.__class__.__name__)
+        # Signal の切断
+        try:
+            self.disconnect()
+        except TypeError:
+            # No connections to disconnect
+            pass
+
 
 class TagCoreService:
     """DBのコア検索/変換機能をまとめた軽量サービス。"""
