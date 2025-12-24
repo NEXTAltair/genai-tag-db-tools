@@ -20,24 +20,14 @@ class TestSearchResultToDataFrame:
 
         assert isinstance(df, pl.DataFrame)
         assert len(df) == 0
-        assert list(df.columns) == [
-            "tag",
-            "source_tag",
-            "format_name",
-            "type_name",
-            "alias",
-            "usage_count",
-        ]
+        assert list(df.columns) == ["tag", "translations", "format_statuses"]
 
     def test_single_item_conversion(self):
         """Single search result item should convert correctly."""
         tag_record = TagRecordPublic(
             tag="cat",
-            source_tag="cat",
-            format_name="danbooru",
-            type_name="general",
-            alias=False,
-            usage_count=100,
+            translations={"ja": ["猫"], "en": ["cat"]},
+            format_statuses={"danbooru": {"type": "general", "usage_count": 100}},
         )
         result = TagSearchResult(items=[tag_record], total=1)
 
@@ -46,30 +36,21 @@ class TestSearchResultToDataFrame:
         assert len(df) == 1
         row = df.row(0, named=True)
         assert row["tag"] == "cat"
-        assert row["source_tag"] == "cat"
-        assert row["format_name"] == "danbooru"
-        assert row["type_name"] == "general"
-        assert row["alias"] is False
-        assert row["usage_count"] == 100
+        assert row["translations"] == {"ja": ["猫"], "en": ["cat"]}
+        assert row["format_statuses"] == {"danbooru": {"type": "general", "usage_count": 100}}
 
     def test_multiple_items_conversion(self):
         """Multiple search result items should convert correctly."""
         items = [
             TagRecordPublic(
                 tag="cat",
-                source_tag="cat",
-                format_name="danbooru",
-                type_name="general",
-                alias=False,
-                usage_count=100,
+                translations={"ja": ["猫"]},
+                format_statuses={"danbooru": {"type": "general"}},
             ),
             TagRecordPublic(
                 tag="dog",
-                source_tag="inu",
-                format_name="e621",
-                type_name="species",
-                alias=True,
-                usage_count=50,
+                translations={"ja": ["犬"]},
+                format_statuses={"e621": {"type": "species"}},
             ),
         ]
         result = TagSearchResult(items=items, total=2)
@@ -78,8 +59,17 @@ class TestSearchResultToDataFrame:
 
         assert len(df) == 2
         assert df["tag"].to_list() == ["cat", "dog"]
-        assert df["alias"].to_list() == [False, True]
-        assert df["usage_count"].to_list() == [100, 50]
+
+    def test_none_values_converted_to_empty_dict(self):
+        """None translations and format_statuses should convert to empty dict."""
+        tag_record = TagRecordPublic(tag="test", translations=None, format_statuses=None)
+        result = TagSearchResult(items=[tag_record], total=1)
+
+        df = search_result_to_dataframe(result)
+
+        row = df.row(0, named=True)
+        assert row["translations"] == {}
+        assert row["format_statuses"] == {}
 
 
 class TestStatisticsResultToDict:

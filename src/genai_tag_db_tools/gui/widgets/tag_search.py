@@ -2,13 +2,20 @@
 
 import logging
 
+import polars as pl
 from pydantic import ValidationError
-from PySide6.QtCore import Signal, Slot
+from PySide6.QtCore import QItemSelectionModel, Signal, Slot, Qt
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
+    QHBoxLayout,
     QHeaderView,
+    QLabel,
+    QListWidget,
     QMessageBox,
+    QSizePolicy,
+    QSplitter,
     QTableView,
     QVBoxLayout,
     QWidget,
@@ -36,6 +43,7 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         self.logger = logging.getLogger(self.__class__.__name__)
         self._service = service
         self._initialized = False
+        self._raw_df = None
 
         self.customSlider = LogScaleRangeSlider()
         layout = QVBoxLayout(self.usageCountSlider)
@@ -44,6 +52,11 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
 
         self._results_model = DataFrameTableModel()
         self._results_view = None
+        self._results_splitter = None
+        self._translation_label = None
+        self._translation_list = None
+        self._result_format_label = None
+        self._result_format_combo = None
         self._setup_results_view()
 
         self._connect_signals()
@@ -64,6 +77,9 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         self.radioButtonExact.setChecked(False)
         self.radioButtonPartial.setChecked(True)
         self.comboBoxFormat.currentIndexChanged.connect(self.update_type_combo_box)
+        self.comboBoxLanguage.currentIndexChanged.connect(self._refresh_translation_from_selection)
+        if self._result_format_combo is not None:
+            self._result_format_combo.currentIndexChanged.connect(self._apply_display_filters)
 
     def _setup_results_view(self) -> None:
         self._results_view = QTableView(self.tabList)
@@ -74,9 +90,56 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         self._results_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self._results_view.verticalHeader().setVisible(False)
 
-        self.verticalLayout.replaceWidget(self.tableWidgetResults, self._results_view)
+        self._results_splitter = QSplitter(self.tabList)
+        self._results_splitter.setOrientation(Qt.Orientation.Horizontal)
+
+        detail_panel = QWidget(self._results_splitter)
+        detail_layout = QVBoxLayout(detail_panel)
+        detail_layout.setContentsMargins(0, 0, 0, 0)
+
+        self._translation_label = QLabel(self.tr("Translation (ja)"), detail_panel)
+        self._translation_list = QListWidget(detail_panel)
+        self._translation_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+
+        detail_layout.addWidget(self._translation_label)
+        detail_layout.addWidget(self._translation_list)
+        detail_layout.addStretch(1)
+
+        self._results_splitter.addWidget(self._results_view)
+        self._results_splitter.addWidget(detail_panel)
+        self._results_splitter.setStretchFactor(0, 3)
+        self._results_splitter.setStretchFactor(1, 1)
+
+        self._setup_results_filter_bar()
+        self.verticalLayout.replaceWidget(self.tableWidgetResults, self._results_splitter)
         self.tableWidgetResults.setParent(None)
         self.tableWidgetResults.deleteLater()
+
+        selection_model = self._results_view.selectionModel()
+        if selection_model:
+            selection_model.selectionChanged.connect(self._on_results_selection_changed)
+
+    def _setup_results_filter_bar(self) -> None:
+        filter_bar = QWidget(self.tabList)
+        layout = QHBoxLayout(filter_bar)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        self._result_format_label = QLabel(self.tr("結果フォーマット:"), filter_bar)
+        self._result_format_combo = QComboBox(filter_bar)
+        self._result_format_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToContents
+        )
+        self._result_format_combo.setMinimumWidth(140)
+
+        layout.addWidget(self._result_format_label)
+        layout.addWidget(self._result_format_combo)
+        layout.addStretch(1)
+
+        filter_bar.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        filter_bar.setFixedHeight(self._result_format_combo.sizeHint().height() + 6)
+        self.verticalLayout.insertWidget(0, filter_bar)
 
     def initialize_ui(self) -> None:
         self.comboBoxFormat.clear()
@@ -86,11 +149,18 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
 
         self.comboBoxLanguage.clear()
         self.comboBoxLanguage.addItem(self.tr("All"))
-        for lang in self._service.get_tag_languages():
+        languages = self._service.get_tag_languages()
+        for lang in languages:
             self.comboBoxLanguage.addItem(lang)
 
         self.comboBoxType.clear()
         self.comboBoxType.addItem(self.tr("All"))
+
+        if self._result_format_combo is not None:
+            self._result_format_combo.clear()
+            self._result_format_combo.addItem(self.tr("All"))
+            for fmt in self._service.get_tag_formats():
+                self._result_format_combo.addItem(fmt)
 
     def _build_query(self) -> TagSearchQuery:
         min_usage, max_usage = self.customSlider.get_range()
@@ -116,14 +186,15 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
             df = self._service.search_tags(
                 keyword=query.keyword,
                 partial=query.partial,
-                format_name=query.format_name,
+                format_name=None,
                 type_name=query.type_name,
                 language=query.language,
                 min_usage=query.min_usage,
                 max_usage=query.max_usage,
                 alias=query.alias,
             )
-            self._results_model.set_dataframe(df)
+            self._raw_df = df
+            self._apply_display_filters()
 
         except ValidationError as e:
             self.logger.error("Invalid search parameters: %s", e)
@@ -149,6 +220,103 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         self.comboBoxType.addItem(self.tr("All"))
         for tag_type in tag_types:
             self.comboBoxType.addItem(tag_type)
+
+    def _apply_display_filters(self, *args) -> None:
+        if self._raw_df is None:
+            return
+        if self._result_format_combo is None:
+            return
+        format_name = normalize_choice(self._result_format_combo.currentText())
+
+        rows = []
+        for row in self._raw_df.iter_rows(named=True):
+            format_statuses = row.get("format_statuses") or {}
+            normalized_statuses = {
+                str(key).lower(): value for key, value in format_statuses.items()
+            }
+            format_key = format_name.lower() if format_name else None
+            if format_key and format_key not in normalized_statuses:
+                continue
+
+            status = normalized_statuses.get(format_key) if format_key else None
+            resolved_type_name = status.get("type_name") if status else None
+            usage_count = status.get("usage_count") if status else None
+            alias = status.get("alias") if status else None
+            deprecated = status.get("deprecated") if status else None
+
+            rows.append(
+                {
+                    "tag": row.get("tag", ""),
+                    "type_name": resolved_type_name,
+                    "usage_count": usage_count,
+                    "alias": alias,
+                    "deprecated": deprecated,
+                    "translations": row.get("translations") or {},
+                }
+            )
+
+        df = pl.DataFrame(rows)
+        self._results_model.set_dataframe(
+            df,
+            display_columns=["tag", "type_name", "usage_count", "alias", "deprecated"],
+        )
+        self._select_first_row()
+
+    def _current_translation_language(self) -> str:
+        selected = normalize_choice(self.comboBoxLanguage.currentText())
+        return selected or "ja"
+
+    def _select_first_row(self) -> None:
+        if self._results_model.rowCount(None) == 0:
+            self._clear_translation_details()
+            return
+        index = self._results_model.index(0, 0)
+        self._results_view.setCurrentIndex(index)
+        self._results_view.selectionModel().select(
+            index,
+            QItemSelectionModel.SelectionFlag.ClearAndSelect
+            | QItemSelectionModel.SelectionFlag.Rows,
+        )
+        self._update_translation_details(0)
+
+    def _on_results_selection_changed(self, selected=None, deselected=None) -> None:
+        if not self._results_view or not self._results_view.selectionModel():
+            return
+        rows = self._results_view.selectionModel().selectedRows()
+        if not rows:
+            self._clear_translation_details()
+            return
+        self._update_translation_details(rows[0].row())
+
+    def _refresh_translation_from_selection(self, *args) -> None:
+        if not self._results_view or not self._results_view.selectionModel():
+            return
+        rows = self._results_view.selectionModel().selectedRows()
+        if not rows:
+            self._clear_translation_details()
+            return
+        self._update_translation_details(rows[0].row())
+
+    def _clear_translation_details(self) -> None:
+        if self._translation_label is not None:
+            self._translation_label.setText(self.tr("Translation"))
+        if self._translation_list is not None:
+            self._translation_list.clear()
+
+    def _update_translation_details(self, row: int) -> None:
+        if not self._results_model:
+            return
+        row_data = self._results_model.get_row(row)
+        translations = row_data.get("translations") or {}
+        language = self._current_translation_language()
+        values = translations.get(language, [])
+
+        if self._translation_label is not None:
+            self._translation_label.setText(self.tr(f"Translation ({language})"))
+        if self._translation_list is not None:
+            self._translation_list.clear()
+            for value in values:
+                self._translation_list.addItem(str(value))
 
     @Slot()
     def on_pushButtonSaveSearch_clicked(self) -> None:

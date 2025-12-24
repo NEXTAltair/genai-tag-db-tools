@@ -162,9 +162,13 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
             tag=row.get("tag", ""),
             source_tag=row.get("source_tag"),
             format_name=row.get("format_name"),
+            type_id=row.get("type_id"),
             type_name=row.get("type_name"),
             alias=row.get("alias"),
+            deprecated=row.get("deprecated"),
             usage_count=row.get("usage_count"),
+            translations=row.get("translations"),
+            format_statuses=row.get("format_statuses"),
         )
         for row in rows
     ]

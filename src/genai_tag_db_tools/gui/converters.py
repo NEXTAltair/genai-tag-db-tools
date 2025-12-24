@@ -12,35 +12,33 @@ import polars as pl
 from genai_tag_db_tools.models import TagSearchResult, TagStatisticsResult
 
 
-def search_result_to_dataframe(result: TagSearchResult) -> pl.DataFrame:
+def search_result_to_dataframe(
+    result: TagSearchResult,
+    *,
+    show_usage_count: bool = True,
+) -> pl.DataFrame:
     """Convert TagSearchResult to Polars DataFrame for GUI display.
 
     Args:
         result: Search result from core_api.search_tags()
 
     Returns:
-        DataFrame with columns: tag, source_tag, format_name, type_name, alias, usage_count
+        DataFrame with columns: tag, translations, format_statuses
     """
     if not result.items:
         return pl.DataFrame(
             schema={
                 "tag": pl.Utf8,
-                "source_tag": pl.Utf8,
-                "format_name": pl.Utf8,
-                "type_name": pl.Utf8,
-                "alias": pl.Boolean,
-                "usage_count": pl.Int64,
+                "translations": pl.Object,
+                "format_statuses": pl.Object,
             }
         )
 
     rows = [
         {
             "tag": item.tag,
-            "source_tag": item.source_tag,
-            "format_name": item.format_name,
-            "type_name": item.type_name,
-            "alias": item.alias,
-            "usage_count": item.usage_count,
+            "translations": item.translations or {},
+            "format_statuses": item.format_statuses or {},
         }
         for item in result.items
     ]

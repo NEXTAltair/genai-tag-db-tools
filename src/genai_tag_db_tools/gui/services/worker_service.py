@@ -44,11 +44,15 @@ class TagSearchWorker(QRunnable):
             self.signals.progress.emit(10, "検索開始...")
 
             # Perform search through service layer
+            # Note: partial matching is handled by TagSearchRequest.resolve_preferred internally
             df = self.service.search_tags(
                 keyword=self.request.query,
-                partial=True,  # Default to partial search
+                partial=False,  # Core API handles exact/fuzzy matching via resolve_preferred
                 format_name=self.request.format_names[0] if self.request.format_names else None,
                 type_name=self.request.type_names[0] if self.request.type_names else None,
+                alias=self.request.include_aliases,
+                min_usage=self.request.min_usage,
+                max_usage=self.request.max_usage,
                 limit=self.request.limit,
                 offset=self.request.offset,
             )
@@ -99,11 +103,13 @@ class WorkerService(QObject):
         worker = TagSearchWorker(service, request)
 
         # Connect signals
-        worker.signals.finished.connect(on_success, Qt.ConnectionType.QueuedConnection)
-        worker.signals.error.connect(on_error, Qt.ConnectionType.QueuedConnection)
+        # Use AutoConnection - Qt will automatically choose DirectConnection or QueuedConnection
+        # based on whether the signal and slot are in the same thread
+        worker.signals.finished.connect(on_success)
+        worker.signals.error.connect(on_error)
 
         if on_progress:
-            worker.signals.progress.connect(on_progress, Qt.ConnectionType.QueuedConnection)
+            worker.signals.progress.connect(on_progress)
 
         # Start async execution
         self.thread_pool.start(worker)

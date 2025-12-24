@@ -25,7 +25,21 @@ class MockTagSearchService(TagSearchService):
         self.mock_get_tag_types = MagicMock(return_value=["character", "general"])
         self.mock_search_tags = MagicMock(
             return_value=pl.DataFrame(
-                [{"tag_id": 1, "tag": "cat", "type": "general", "usage_count": 50}]
+                [
+                    {
+                        "tag": "cat",
+                        "translations": {"ja": ["猫"]},
+                        "format_statuses": {
+                            "danbooru": {
+                                "alias": False,
+                                "deprecated": False,
+                                "usage_count": 50,
+                                "type_id": 0,
+                                "type_name": "general",
+                            }
+                        },
+                    }
+                ]
             )
         )
 

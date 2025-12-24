@@ -585,6 +585,31 @@ class TagRepository:
                 if not tag_ids:
                     return []
 
+            status_rows = (
+                session.query(TagStatus)
+                .filter(TagStatus.tag_id.in_(tag_ids))
+                .all()
+            )
+            format_ids = {row.format_id for row in status_rows}
+            format_name_by_id = {
+                fmt.format_id: fmt.format_name
+                for fmt in session.query(TagFormat).filter(TagFormat.format_id.in_(format_ids)).all()
+            }
+            type_name_by_key = {
+                (mapping.format_id, mapping.type_id): (
+                    mapping.type_name.type_name if mapping.type_name else ""
+                )
+                for mapping in session.query(TagTypeFormatMapping)
+                .filter(TagTypeFormatMapping.format_id.in_(format_ids))
+                .all()
+            }
+            usage_by_key = {
+                (usage.tag_id, usage.format_id): usage.count
+                for usage in session.query(TagUsageCounts)
+                .filter(TagUsageCounts.tag_id.in_(tag_ids))
+                .all()
+            }
+
             rows: list[dict] = []
             for t_id in sorted(tag_ids):
                 tag_obj = session.query(Tag).filter(Tag.tag_id == t_id).one_or_none()
@@ -594,6 +619,7 @@ class TagRepository:
                 usage_count = 0
                 is_alias = False
                 resolved_type_name = ""
+                resolved_type_id = None
                 preferred_tag_id = t_id
                 deprecated = False
 
@@ -624,6 +650,7 @@ class TagRepository:
                         )
                         if type_mapping and type_mapping.type_name:
                             resolved_type_name = type_mapping.type_name.type_name
+                    resolved_type_id = status_obj.type_id if status_obj else None
 
                     usage_obj = (
                         session.query(TagUsageCounts)
@@ -647,6 +674,21 @@ class TagRepository:
                     if tr.language and tr.translation:
                         trans_dict.setdefault(tr.language, []).append(tr.translation)
 
+                format_statuses: dict[str, dict[str, object]] = {}
+                for status in status_rows:
+                    if status.tag_id != resolved_tag_id:
+                        continue
+                    fmt_name = format_name_by_id.get(status.format_id)
+                    if not fmt_name:
+                        continue
+                    format_statuses[fmt_name] = {
+                        "alias": status.alias,
+                        "deprecated": bool(status.deprecated),
+                        "usage_count": usage_by_key.get((status.tag_id, status.format_id), 0),
+                        "type_id": status.type_id,
+                        "type_name": type_name_by_key.get((status.format_id, status.type_id), ""),
+                    }
+
                 rows.append(
                     {
                         "tag_id": resolved_tag_id,
@@ -655,8 +697,10 @@ class TagRepository:
                         "usage_count": usage_count,
                         "alias": is_alias,
                         "deprecated": deprecated,
+                        "type_id": resolved_type_id,
                         "type_name": resolved_type_name,
                         "translations": trans_dict,
+                        "format_statuses": format_statuses,
                     }
                 )
 
