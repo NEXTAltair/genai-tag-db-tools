@@ -54,7 +54,7 @@ class TestDbInitWorker:
         db_path = temp_cache_dir / "test.sqlite"
         db_path.touch()
         mock_ensure_databases.return_value = [
-            EnsureDbResult(db_path=str(db_path), downloaded=True, from_cache=False)
+            EnsureDbResult(db_path=str(db_path), downloaded=True, sha256="test_hash")
         ]
 
         worker = DbInitWorker(requests=[sample_ensure_request], cache_dir=temp_cache_dir)
@@ -170,8 +170,6 @@ class TestDbInitializationService:
     def test_service_initialization_default_cache(self, qtbot):
         """Service should initialize with default cache directory."""
         service = DbInitializationService()
-        qtbot.addWidget(service)
-
         assert service.cache_dir is not None
         assert isinstance(service.cache_dir, Path)
         assert service.thread_pool is not None
@@ -179,15 +177,11 @@ class TestDbInitializationService:
     def test_service_initialization_custom_cache(self, qtbot, temp_cache_dir):
         """Service should initialize with custom cache directory."""
         service = DbInitializationService(cache_dir=temp_cache_dir)
-        qtbot.addWidget(service)
-
         assert service.cache_dir == temp_cache_dir
 
     def test_default_sources(self, qtbot):
         """_default_sources should return list of database sources."""
         service = DbInitializationService()
-        qtbot.addWidget(service)
-
         sources = service._default_sources()
 
         assert isinstance(sources, list)
@@ -204,12 +198,10 @@ class TestDbInitializationService:
         db_path = temp_cache_dir / "test.sqlite"
         db_path.touch()
         mock_ensure_databases.return_value = [
-            EnsureDbResult(db_path=str(db_path), downloaded=False, from_cache=True)
+            EnsureDbResult(db_path=str(db_path), downloaded=False, sha256="test_hash")
         ]
 
         service = DbInitializationService(cache_dir=temp_cache_dir)
-        qtbot.addWidget(service)
-
         # Track signal emissions
         progress_signals = []
         complete_signals = []
@@ -232,8 +224,6 @@ class TestDbInitializationService:
     def test_initialize_databases_with_token(self, qtbot, temp_cache_dir, sample_db_source):
         """initialize_databases should pass token to cache config."""
         service = DbInitializationService(cache_dir=temp_cache_dir)
-        qtbot.addWidget(service)
-
         # We can't easily test the token is used without mocking more internals,
         # but we can verify the method accepts it
         service.initialize_databases(sources=[sample_db_source], token="test_token")
@@ -244,8 +234,6 @@ class TestDbInitializationService:
     def test_on_worker_progress(self, qtbot, temp_cache_dir):
         """_on_worker_progress should emit progress_updated signal."""
         service = DbInitializationService(cache_dir=temp_cache_dir)
-        qtbot.addWidget(service)
-
         progress_signals = []
         service.progress_updated.connect(lambda msg, pct: progress_signals.append((msg, pct)))
 
@@ -258,8 +246,6 @@ class TestDbInitializationService:
     def test_on_worker_complete_success(self, qtbot, temp_cache_dir):
         """_on_worker_complete should emit initialization_complete signal."""
         service = DbInitializationService(cache_dir=temp_cache_dir)
-        qtbot.addWidget(service)
-
         complete_signals = []
         service.initialization_complete.connect(lambda success, msg: complete_signals.append((success, msg)))
 
@@ -272,8 +258,6 @@ class TestDbInitializationService:
     def test_on_worker_complete_failure(self, qtbot, temp_cache_dir):
         """_on_worker_complete should emit failure signal."""
         service = DbInitializationService(cache_dir=temp_cache_dir)
-        qtbot.addWidget(service)
-
         complete_signals = []
         service.initialization_complete.connect(lambda success, msg: complete_signals.append((success, msg)))
 
@@ -286,8 +270,6 @@ class TestDbInitializationService:
     def test_on_worker_error(self, qtbot, temp_cache_dir):
         """_on_worker_error should emit error_occurred signal."""
         service = DbInitializationService(cache_dir=temp_cache_dir)
-        qtbot.addWidget(service)
-
         error_signals = []
         service.error_occurred.connect(lambda msg: error_signals.append(msg))
 
