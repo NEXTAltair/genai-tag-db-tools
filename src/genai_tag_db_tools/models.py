@@ -118,9 +118,7 @@ class TagRecordPublic(BaseModel):
     alias: bool | None = Field(default=None, description="エイリアスかどうか")
     deprecated: bool | None = Field(default=None, description="非推奨かどうか")
     usage_count: int | None = Field(default=None, description="????")
-    translations: dict[str, list[str]] | None = Field(
-        default=None, description="言語別の翻訳一覧"
-    )
+    translations: dict[str, list[str]] | None = Field(default=None, description="言語別の翻訳一覧")
     format_statuses: dict[str, dict[str, object]] | None = Field(
         default=None, description="フォーマット別の状態一覧"
     )

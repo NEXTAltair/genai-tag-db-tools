@@ -46,9 +46,7 @@ class TagSearchQueryBuilder:
         tag_query = tag_query.filter(tag_conditions)
 
         translation_condition = (
-            TagTranslation.translation.like(keyword)
-            if use_like
-            else TagTranslation.translation == keyword
+            TagTranslation.translation.like(keyword) if use_like else TagTranslation.translation == keyword
         )
         translation_query = translation_query.filter(translation_condition)
 
@@ -60,18 +58,14 @@ class TagSearchQueryBuilder:
         if not format_name or format_name.lower() == "all":
             return tag_ids, 0
 
-        fmt_obj = (
-            self.session.query(TagFormat).filter(TagFormat.format_name == format_name).one_or_none()
-        )
+        fmt_obj = self.session.query(TagFormat).filter(TagFormat.format_name == format_name).one_or_none()
         if not fmt_obj:
             return set(), 0
 
         format_id = fmt_obj.format_id
         format_tag_ids = {
             row[0]
-            for row in self.session.query(TagStatus.tag_id)
-            .filter(TagStatus.format_id == format_id)
-            .all()
+            for row in self.session.query(TagStatus.tag_id).filter(TagStatus.format_id == format_id).all()
         }
         return tag_ids & format_tag_ids, format_id
 
@@ -129,9 +123,7 @@ class TagSearchQueryBuilder:
         if not type_name or type_name.lower() == "all":
             return tag_ids
 
-        type_obj = (
-            self.session.query(TagTypeName).filter(TagTypeName.type_name == type_name).one_or_none()
-        )
+        type_obj = self.session.query(TagTypeName).filter(TagTypeName.type_name == type_name).one_or_none()
         if not type_obj:
             return set()
 
@@ -160,9 +152,7 @@ class TagSearchQueryBuilder:
         if not language or language.lower() == "all":
             return tag_ids
 
-        lang_query = self.session.query(TagTranslation.tag_id).filter(
-            TagTranslation.language == language
-        )
+        lang_query = self.session.query(TagTranslation.tag_id).filter(TagTranslation.language == language)
         lang_tag_ids = {row[0] for row in lang_query.all()}
         return tag_ids & lang_tag_ids
 
@@ -174,18 +164,12 @@ class TagSearchPreloader:
         self.session = session
 
     def load(self, tag_ids: set[int]) -> dict[str, object]:
-        initial_status_rows = (
-            self.session.query(TagStatus).filter(TagStatus.tag_id.in_(tag_ids)).all()
-        )
+        initial_status_rows = self.session.query(TagStatus).filter(TagStatus.tag_id.in_(tag_ids)).all()
         preferred_ids = {
-            row.preferred_tag_id
-            for row in initial_status_rows
-            if row.preferred_tag_id is not None
+            row.preferred_tag_id for row in initial_status_rows if row.preferred_tag_id is not None
         }
         status_tag_ids = set(tag_ids) | preferred_ids
-        status_rows = (
-            self.session.query(TagStatus).filter(TagStatus.tag_id.in_(status_tag_ids)).all()
-        )
+        status_rows = self.session.query(TagStatus).filter(TagStatus.tag_id.in_(status_tag_ids)).all()
         format_ids = {row.format_id for row in status_rows}
         format_name_by_id = {
             fmt.format_id: fmt.format_name
@@ -207,9 +191,7 @@ class TagSearchPreloader:
             t.tag_id: t for t in self.session.query(Tag).filter(Tag.tag_id.in_(status_tag_ids)).all()
         }
         all_translations = (
-            self.session.query(TagTranslation)
-            .filter(TagTranslation.tag_id.in_(status_tag_ids))
-            .all()
+            self.session.query(TagTranslation).filter(TagTranslation.tag_id.in_(status_tag_ids)).all()
         )
         trans_by_tag_id: dict[int, list[TagTranslation]] = {}
         for tr in all_translations:
@@ -262,7 +244,9 @@ class TagSearchResultBuilder:
         if not tag_obj:
             return None
 
-        status_info = self._resolve_status_info(tag_id, status_by_tag_format, type_name_by_key, usage_by_key)
+        status_info = self._resolve_status_info(
+            tag_id, status_by_tag_format, type_name_by_key, usage_by_key
+        )
         if status_info is None:
             return None
 

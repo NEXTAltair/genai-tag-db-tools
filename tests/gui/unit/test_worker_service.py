@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, Mock
 
 import polars as pl
 import pytest
-from PySide6.QtCore import QCoreApplication, QTimer
 
 from genai_tag_db_tools.gui.services.worker_service import TagSearchWorker, WorkerService
 from genai_tag_db_tools.models import TagSearchRequest

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import polars as pl
-import pytest
 
 from genai_tag_db_tools.gui.converters import search_result_to_dataframe, statistics_result_to_dict
 from genai_tag_db_tools.models import TagRecordPublic, TagSearchResult, TagStatisticsResult
@@ -77,9 +76,7 @@ class TestStatisticsResultToDict:
 
     def test_statistics_conversion(self):
         """Statistics result should convert to dictionary correctly."""
-        result = TagStatisticsResult(
-            total_tags=1000, total_aliases=200, total_formats=5, total_types=10
-        )
+        result = TagStatisticsResult(total_tags=1000, total_aliases=200, total_formats=5, total_types=10)
 
         stats_dict = statistics_result_to_dict(result)
 

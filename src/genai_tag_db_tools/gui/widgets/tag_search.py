@@ -110,9 +110,7 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
 
         self._translation_label = QLabel(self.tr("Translation (ja)"), translation_header)
         self._translation_language_combo = QComboBox(translation_header)
-        self._translation_language_combo.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToContents
-        )
+        self._translation_language_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self._translation_language_combo.setMinimumWidth(80)
 
         translation_header_layout.addWidget(self._translation_label)
@@ -149,9 +147,7 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
 
         self._result_format_label = QLabel(self.tr("結果フォーマット:"), filter_bar)
         self._result_format_combo = QComboBox(filter_bar)
-        self._result_format_combo.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToContents
-        )
+        self._result_format_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self._result_format_combo.setMinimumWidth(140)
         self._result_count_label = QLabel(self.tr("件数: 0"), filter_bar)
 
@@ -320,8 +316,7 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         self._results_view.setCurrentIndex(index)
         self._results_view.selectionModel().select(
             index,
-            QItemSelectionModel.SelectionFlag.ClearAndSelect
-            | QItemSelectionModel.SelectionFlag.Rows,
+            QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows,
         )
         self._update_translation_details(0)
 

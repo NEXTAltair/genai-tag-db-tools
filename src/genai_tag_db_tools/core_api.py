@@ -18,6 +18,8 @@ from genai_tag_db_tools.models import (
     TagRegisterResult,
     TagSearchRequest,
     TagSearchResult,
+    TagSearchRow,
+    TagStatisticsResult,
 )
 from genai_tag_db_tools.services.app_services import TagRegisterService
 
@@ -118,20 +120,20 @@ def ensure_databases(requests: list[EnsureDbRequest]) -> list[EnsureDbResult]:
     return results
 
 
-def _filter_rows(rows: list[dict[str, Any]], request: TagSearchRequest) -> list[dict[str, Any]]:
-    filtered: list[dict[str, Any]] = []
+def _filter_rows(rows: list[TagSearchRow], request: TagSearchRequest) -> list[TagSearchRow]:
+    filtered: list[TagSearchRow] = []
     format_names = set(request.format_names or [])
     type_names = set(request.type_names or [])
 
     for row in rows:
-        usage_count = row.get("usage_count") or 0
-        if not request.include_aliases and row.get("alias") is True:
+        usage_count = row["usage_count"] or 0
+        if not request.include_aliases and row["alias"] is True:
             continue
-        if not request.include_deprecated and row.get("deprecated") is True:
+        if not request.include_deprecated and row["deprecated"] is True:
             continue
-        if format_names and row.get("format_name") not in format_names:
+        if format_names and row["type_name"] not in format_names:
             continue
-        if type_names and row.get("type_name") not in type_names:
+        if type_names and row["type_name"] not in type_names:
             continue
         if request.min_usage is not None and usage_count < request.min_usage:
             continue
@@ -157,16 +159,16 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
     rows = _filter_rows(rows, request)
     items = [
         TagRecordPublic(
-            tag=row.get("tag", ""),
-            source_tag=row.get("source_tag"),
-            format_name=row.get("format_name"),
-            type_id=row.get("type_id"),
-            type_name=row.get("type_name"),
-            alias=row.get("alias"),
-            deprecated=row.get("deprecated"),
-            usage_count=row.get("usage_count"),
-            translations=row.get("translations"),
-            format_statuses=row.get("format_statuses"),
+            tag=row["tag"],
+            source_tag=row["source_tag"],
+            format_name=None,
+            type_id=row["type_id"],
+            type_name=row["type_name"],
+            alias=row["alias"],
+            deprecated=row["deprecated"],
+            usage_count=row["usage_count"],
+            translations=row["translations"],
+            format_statuses=row["format_statuses"],
         )
         for row in rows
     ]
@@ -177,9 +179,7 @@ def register_tag(service: TagRegisterService, request: TagRegisterRequest) -> Ta
     return service.register_tag(request)
 
 
-def get_statistics(repo: MergedTagReader) -> "TagStatisticsResult":
-    from genai_tag_db_tools.models import TagStatisticsResult
-
+def get_statistics(repo: MergedTagReader) -> TagStatisticsResult:
     tag_statuses = repo.list_tag_statuses()
     alias_tag_ids = {status.tag_id for status in tag_statuses if status.alias}
     return TagStatisticsResult(

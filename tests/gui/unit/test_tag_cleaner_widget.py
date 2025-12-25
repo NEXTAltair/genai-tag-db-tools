@@ -82,9 +82,7 @@ def test_tag_cleaner_widget_convert_button_executes_conversion(qtbot, tag_cleane
 
     tag_cleaner_widget.on_pushButtonConvert_clicked()
 
-    tag_cleaner_widget._cleaner_service.mock_convert_prompt.assert_called_once_with(
-        "cat, dog", "danbooru"
-    )
+    tag_cleaner_widget._cleaner_service.mock_convert_prompt.assert_called_once_with("cat, dog", "danbooru")
     assert tag_cleaner_widget.plainTextEditResult.toPlainText() == "converted, tags"
 
 

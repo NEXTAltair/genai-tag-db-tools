@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 
 import polars as pl
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal, Slot
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
 
 from genai_tag_db_tools.models import TagSearchRequest
 from genai_tag_db_tools.services.app_services import TagSearchService

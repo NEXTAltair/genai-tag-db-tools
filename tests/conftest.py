@@ -2,8 +2,6 @@
 
 import os
 
-import pytest
-
 
 def pytest_configure(config):
     """Configure pytest markers and environment"""

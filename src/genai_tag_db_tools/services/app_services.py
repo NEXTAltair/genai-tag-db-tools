@@ -1,4 +1,4 @@
-﻿# genai_tag_db_tools/services/app_services.py
+# genai_tag_db_tools/services/app_services.py
 
 import logging
 from typing import TYPE_CHECKING, Any

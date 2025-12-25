@@ -62,7 +62,8 @@ exclude = [
 ignore = [
     "RUF002", # カタカナの `ノ` でのメッセージを無視
     "E501",   # Line too long (line-lengthで制御)
-    "F541"   # f-string in logging (同等のpylint警告W1203 - Ruffでは直接の対応がない)
+    "F541",   # f-string in logging (同等のpylint警告W1203 - Ruffでは直接の対応がない)
+    "C901",   # Function is too complex (複雑度チェックを無効化)
 ]
 fixable = ["ALL"]
 

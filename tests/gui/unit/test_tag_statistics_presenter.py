@@ -3,13 +3,9 @@
 from __future__ import annotations
 
 import polars as pl
-import pytest
 
 from genai_tag_db_tools.gui.presenters.tag_statistics_presenter import (
     BarChartData,
-    BarSeriesData,
-    PieChartData,
-    PieSliceData,
     TagStatisticsView,
     _build_distribution_chart,
     _build_language_chart,
@@ -202,7 +198,9 @@ class TestBuildStatisticsView:
     def test_build_statistics_view_empty_dataframes(self):
         """Empty DataFrames should result in None charts."""
         general_stats = {"total_tags": 0}
-        usage_df = pl.DataFrame(schema={"tag_id": pl.Int64, "format_name": pl.Utf8, "usage_count": pl.Int64})
+        usage_df = pl.DataFrame(
+            schema={"tag_id": pl.Int64, "format_name": pl.Utf8, "usage_count": pl.Int64}
+        )
         type_df = pl.DataFrame(schema={"format_name": pl.Utf8, "type_name": pl.Utf8, "tag_count": pl.Int64})
         translation_df = pl.DataFrame(schema={"languages": pl.List(pl.Utf8)})
 

@@ -8,8 +8,7 @@ from unittest.mock import MagicMock
 import polars as pl
 import pytest
 from pydantic import ValidationError
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QMessageBox
 
 from genai_tag_db_tools.gui.widgets.tag_search import TagSearchWidget
 from genai_tag_db_tools.services.app_services import TagSearchService
@@ -306,9 +305,7 @@ def test_tag_search_widget_result_count_label_initialization(qtbot, tag_search_w
 
 
 @pytest.mark.db_tools
-def test_tag_search_widget_result_count_label_updates_after_search(
-    qtbot, tag_search_widget, monkeypatch
-):
+def test_tag_search_widget_result_count_label_updates_after_search(qtbot, tag_search_widget, monkeypatch):
     """検索実行後に結果件数が更新される"""
     tag_search_widget.lineEditKeyword.setText("cat")
     tag_search_widget._setup_results_view()

@@ -6,7 +6,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PySide6.QtCore import Qt
 
 from genai_tag_db_tools.gui.windows.main_window import MainWindow
 
@@ -78,9 +77,10 @@ def test_main_window_db_init_progress_updates_ui(qtbot, mock_db_init_service):
 @pytest.mark.db_tools
 def test_main_window_db_init_complete_success(qtbot, mock_db_init_service):
     """DB 初期化成功時にサービスが初期化される"""
-    with patch.object(MainWindow, "_initialize_services") as mock_init_services, patch.object(
-        MainWindow, "_initialize_widgets"
-    ) as mock_init_widgets:
+    with (
+        patch.object(MainWindow, "_initialize_services") as mock_init_services,
+        patch.object(MainWindow, "_initialize_widgets") as mock_init_widgets,
+    ):
         window = MainWindow()
         qtbot.addWidget(window)
 
@@ -109,13 +109,12 @@ def test_main_window_db_init_complete_failure(qtbot, mock_db_init_service, monke
 @pytest.mark.db_tools
 def test_main_window_initialize_services_creates_all_services(qtbot, mock_db_init_service):
     """_initialize_services() で全サービスが作成される"""
-    with patch("genai_tag_db_tools.gui.windows.main_window.TagSearchService") as mock_search, patch(
-        "genai_tag_db_tools.gui.windows.main_window.TagCleanerService"
-    ) as mock_cleaner, patch(
-        "genai_tag_db_tools.gui.windows.main_window.TagRegisterService"
-    ) as mock_register, patch(
-        "genai_tag_db_tools.gui.windows.main_window.TagStatisticsService"
-    ) as mock_statistics:
+    with (
+        patch("genai_tag_db_tools.gui.windows.main_window.TagSearchService") as mock_search,
+        patch("genai_tag_db_tools.gui.windows.main_window.TagCleanerService") as mock_cleaner,
+        patch("genai_tag_db_tools.gui.windows.main_window.TagRegisterService") as mock_register,
+        patch("genai_tag_db_tools.gui.windows.main_window.TagStatisticsService") as mock_statistics,
+    ):
         window = MainWindow()
         qtbot.addWidget(window)
 
@@ -134,10 +133,11 @@ def test_main_window_initialize_widgets_injects_services(qtbot, mock_db_init_ser
     qtbot.addWidget(window)
 
     # サービスを手動で設定（DB 初期化をスキップ）
-    with patch("genai_tag_db_tools.gui.windows.main_window.TagSearchService"), patch(
-        "genai_tag_db_tools.gui.windows.main_window.TagCleanerService"
-    ), patch("genai_tag_db_tools.gui.windows.main_window.TagRegisterService"), patch(
-        "genai_tag_db_tools.gui.windows.main_window.TagStatisticsService"
+    with (
+        patch("genai_tag_db_tools.gui.windows.main_window.TagSearchService"),
+        patch("genai_tag_db_tools.gui.windows.main_window.TagCleanerService"),
+        patch("genai_tag_db_tools.gui.windows.main_window.TagRegisterService"),
+        patch("genai_tag_db_tools.gui.windows.main_window.TagStatisticsService"),
     ):
         window._initialize_services()
         window._initialize_widgets()
@@ -152,11 +152,13 @@ def test_main_window_initialize_widgets_injects_services(qtbot, mock_db_init_ser
 @pytest.mark.db_tools
 def test_main_window_close_event_cleans_up_resources(qtbot, mock_db_init_service):
     """closeEvent() でリソースがクリーンアップされる"""
-    with patch("genai_tag_db_tools.gui.windows.main_window.TagSearchService"), patch(
-        "genai_tag_db_tools.gui.windows.main_window.TagCleanerService"
-    ), patch("genai_tag_db_tools.gui.windows.main_window.TagRegisterService"), patch(
-        "genai_tag_db_tools.gui.windows.main_window.TagStatisticsService"
-    ), patch("genai_tag_db_tools.gui.windows.main_window.runtime") as mock_runtime:
+    with (
+        patch("genai_tag_db_tools.gui.windows.main_window.TagSearchService"),
+        patch("genai_tag_db_tools.gui.windows.main_window.TagCleanerService"),
+        patch("genai_tag_db_tools.gui.windows.main_window.TagRegisterService"),
+        patch("genai_tag_db_tools.gui.windows.main_window.TagStatisticsService"),
+        patch("genai_tag_db_tools.gui.windows.main_window.runtime") as mock_runtime,
+    ):
         window = MainWindow()
         qtbot.addWidget(window)
         window._initialize_services()

@@ -1,4 +1,4 @@
-﻿from collections.abc import Callable
+from collections.abc import Callable
 from datetime import datetime
 from logging import getLogger
 
@@ -195,7 +195,7 @@ class TagRepository:
         """既存タグを {tag: tag_id} で返す。"""
         with self.session_factory() as session:
             existing_tags = session.query(Tag.tag, Tag.tag_id).filter(Tag.tag.in_(tag_list)).all()
-            return {tag: tag_id for tag, tag_id in existing_tags}
+            return dict(existing_tags)
 
     # --- TAG_FORMATS ---
     def get_format_id(self, format_name: str) -> int:
@@ -534,7 +534,7 @@ class TagRepository:
         """format_id -> format_name を返す。"""
         with self.session_factory() as session:
             rows = session.query(TagFormat.format_id, TagFormat.format_name).all()
-            return {format_id: format_name for format_id, format_name in rows}
+            return dict(rows)
 
     def get_tag_languages(self) -> list[str]:
         """全languageを取得する。"""

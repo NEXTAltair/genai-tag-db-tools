@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import patch
 
 import pytest
-from PySide6.QtCore import QCoreApplication
 
-from genai_tag_db_tools.gui.services.db_initialization import DbInitWorker, DbInitializationService
-from genai_tag_db_tools.models import DbCacheConfig, EnsureDbResult, DbSourceRef, EnsureDbRequest
+from genai_tag_db_tools.gui.services.db_initialization import DbInitializationService, DbInitWorker
+from genai_tag_db_tools.models import DbCacheConfig, DbSourceRef, EnsureDbRequest, EnsureDbResult
 
 
 @pytest.fixture
@@ -207,7 +206,9 @@ class TestDbInitializationService:
         complete_signals = []
 
         service.progress_updated.connect(lambda msg, pct: progress_signals.append((msg, pct)))
-        service.initialization_complete.connect(lambda success, msg: complete_signals.append((success, msg)))
+        service.initialization_complete.connect(
+            lambda success, msg: complete_signals.append((success, msg))
+        )
 
         # Start initialization
         service.initialize_databases(sources=[sample_db_source])
@@ -247,7 +248,9 @@ class TestDbInitializationService:
         """_on_worker_complete should emit initialization_complete signal."""
         service = DbInitializationService(cache_dir=temp_cache_dir)
         complete_signals = []
-        service.initialization_complete.connect(lambda success, msg: complete_signals.append((success, msg)))
+        service.initialization_complete.connect(
+            lambda success, msg: complete_signals.append((success, msg))
+        )
 
         # Simulate successful completion
         service._on_worker_complete(True, "Initialization successful")
@@ -259,7 +262,9 @@ class TestDbInitializationService:
         """_on_worker_complete should emit failure signal."""
         service = DbInitializationService(cache_dir=temp_cache_dir)
         complete_signals = []
-        service.initialization_complete.connect(lambda success, msg: complete_signals.append((success, msg)))
+        service.initialization_complete.connect(
+            lambda success, msg: complete_signals.append((success, msg))
+        )
 
         # Simulate failed completion
         service._on_worker_complete(False, "Initialization failed")
