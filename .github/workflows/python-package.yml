@@ -40,7 +40,7 @@ jobs:
       run: uv sync --all-extras --dev
 
     - name: Lint with ruff
-      run: uv run ruff check src/genai_tag_db_tools
+      run: uv run ruff check --unsafe-fixes src/genai_tag_db_tools
 
     - name: Format check with ruff
       run: uv run ruff format --check src/genai_tag_db_tools
