@@ -294,3 +294,111 @@ def test_tag_search_widget_save_search_not_implemented(qtbot, tag_search_widget,
         tag_search_widget.on_pushButtonSaveSearch_clicked()
 
     assert "not yet implemented" in caplog.text.lower()
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_result_count_label_initialization(qtbot, tag_search_widget):
+    """結果件数表示ラベルが初期化される"""
+    tag_search_widget._setup_results_view()
+
+    assert tag_search_widget._result_count_label is not None
+    assert "0" in tag_search_widget._result_count_label.text()
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_result_count_label_updates_after_search(
+    qtbot, tag_search_widget, monkeypatch
+):
+    """検索実行後に結果件数が更新される"""
+    tag_search_widget.lineEditKeyword.setText("cat")
+    tag_search_widget._setup_results_view()
+
+    # MessageBox を無効化
+    monkeypatch.setattr(QMessageBox, "critical", MagicMock())
+    monkeypatch.setattr(QMessageBox, "warning", MagicMock())
+
+    tag_search_widget.on_pushButtonSearch_clicked()
+
+    # 件数ラベルが更新される（モックサービスは1件返す）
+    assert tag_search_widget._result_count_label is not None
+    assert "1" in tag_search_widget._result_count_label.text()
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_search_uses_unlimited_limit(qtbot, tag_search_widget, monkeypatch):
+    """検索時にlimitパラメータなし（無制限）で実行される"""
+    tag_search_widget.lineEditKeyword.setText("cat")
+
+    # MessageBox を無効化
+    monkeypatch.setattr(QMessageBox, "critical", MagicMock())
+
+    tag_search_widget.on_pushButtonSearch_clicked()
+
+    # search_tagsが呼ばれた際の引数を確認
+    call_kwargs = tag_search_widget._service.mock_search_tags.call_args.kwargs
+
+    # limit パラメータが渡されていないか、Noneであることを確認
+    assert "limit" not in call_kwargs or call_kwargs.get("limit") is None
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_result_count_label_updates_with_multiple_results(
+    qtbot, tag_search_widget, monkeypatch
+):
+    """複数件の検索結果で件数表示が正しく更新される"""
+    # モックサービスを3件返すように変更
+    tag_search_widget._service.mock_search_tags.return_value = pl.DataFrame(
+        [
+            {
+                "tag": "cat",
+                "translations": {"ja": ["猫"]},
+                "format_statuses": {
+                    "danbooru": {
+                        "alias": False,
+                        "deprecated": False,
+                        "usage_count": 50,
+                        "type_id": 0,
+                        "type_name": "general",
+                    }
+                },
+            },
+            {
+                "tag": "dog",
+                "translations": {"ja": ["犬"]},
+                "format_statuses": {
+                    "danbooru": {
+                        "alias": False,
+                        "deprecated": False,
+                        "usage_count": 30,
+                        "type_id": 0,
+                        "type_name": "general",
+                    }
+                },
+            },
+            {
+                "tag": "bird",
+                "translations": {"ja": ["鳥"]},
+                "format_statuses": {
+                    "danbooru": {
+                        "alias": False,
+                        "deprecated": False,
+                        "usage_count": 20,
+                        "type_id": 0,
+                        "type_name": "general",
+                    }
+                },
+            },
+        ]
+    )
+
+    tag_search_widget.lineEditKeyword.setText("animal")
+    tag_search_widget._setup_results_view()
+
+    # MessageBox を無効化
+    monkeypatch.setattr(QMessageBox, "critical", MagicMock())
+
+    tag_search_widget.on_pushButtonSearch_clicked()
+
+    # 件数ラベルが3件を表示
+    assert tag_search_widget._result_count_label is not None
+    assert "3" in tag_search_widget._result_count_label.text()

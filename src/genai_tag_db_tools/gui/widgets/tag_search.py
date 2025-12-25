@@ -57,6 +57,7 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         self._translation_list = None
         self._result_format_label = None
         self._result_format_combo = None
+        self._result_count_label = None
         self._setup_results_view()
 
         self._connect_signals()
@@ -132,10 +133,12 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
             QComboBox.SizeAdjustPolicy.AdjustToContents
         )
         self._result_format_combo.setMinimumWidth(140)
+        self._result_count_label = QLabel(self.tr("件数: 0"), filter_bar)
 
         layout.addWidget(self._result_format_label)
         layout.addWidget(self._result_format_combo)
         layout.addStretch(1)
+        layout.addWidget(self._result_count_label)
 
         filter_bar.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         filter_bar.setFixedHeight(self._result_format_combo.sizeHint().height() + 6)
@@ -262,6 +265,8 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
             df,
             display_columns=["tag", "type_name", "usage_count", "alias", "deprecated"],
         )
+        if self._result_count_label is not None:
+            self._result_count_label.setText(self.tr(f"件数: {df.height}"))
         self._select_first_row()
 
     def _current_translation_language(self) -> str:

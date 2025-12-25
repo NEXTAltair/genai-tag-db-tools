@@ -77,7 +77,7 @@ class TagSearchRequest(BaseModel):
     include_deprecated: bool = Field(default=False, description="非推奨タグを含める")
     min_usage: int | None = Field(default=None, description="??????")
     max_usage: int | None = Field(default=None, description="??????")
-    limit: int = Field(default=50, description="取得件数")
+    limit: int | None = Field(default=None, description="取得件数（Noneで無制限）")
     offset: int = Field(default=0, description="取得オフセット")
 
 
