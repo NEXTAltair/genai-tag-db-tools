@@ -1,4 +1,4 @@
-# genai_tag_db_tools/services/app_services.py
+﻿# genai_tag_db_tools/services/app_services.py
 
 import logging
 from typing import TYPE_CHECKING, Any
@@ -129,23 +129,18 @@ class TagSearchService(GuiServiceBase):
         min_usage: int | None = None,
         max_usage: int | None = None,
         alias: bool | None = None,
-        limit: int | None = None,
-        offset: int = 0,
     ) -> pl.DataFrame:
         """タグ検索を行い、Polars DataFrameで返す (core_api統合版)。
 
         Args:
-            keyword: 検索キーワード
-            partial: 部分一致検索フラグ
-            format_name: フォーマット名フィルタ
-            type_name: タイプ名フィルタ
-            language: 言語フィルタ（core_api未対応、WARNING出力）
-            min_usage: 最小使用回数フィルタ（core_api未対応、WARNING出力）
-            max_usage: 最大使用回数フィルタ（core_api未対応、WARNING出力）
-            alias: エイリアス含む検索フラグ
-            limit: 取得上限数（NoneでTagSearchRequestデフォルトを使用）
-            offset: 取得開始位置（デフォルト0）
-
+            keyword: Search keyword.
+            partial: Whether to use partial matching.
+            format_name: Optional format filter.
+            type_name: Optional type filter.
+            language: Optional language filter (not yet supported by core_api).
+            min_usage: Optional minimum usage filter.
+            max_usage: Optional maximum usage filter.
+            alias: Whether to include aliases.
         Returns:
             検索結果の Polars DataFrame
         """
@@ -167,10 +162,7 @@ class TagSearchService(GuiServiceBase):
                 "include_deprecated": False,
                 "min_usage": min_usage,
                 "max_usage": max_usage,
-                "offset": offset,
             }
-            if limit is not None:
-                request_kwargs["limit"] = limit
 
             request = TagSearchRequest(**request_kwargs)
 
@@ -236,7 +228,13 @@ class TagRegisterService(GuiServiceBase):
         self._repo = repository if repository else TagRepository()
 
     def register_tag(self, request: "TagRegisterRequest") -> "TagRegisterResult":
-        """外部向けのタグ登録/更新を行う。"""
+        """Register a tag and optional metadata via the repository.
+
+        Args:
+            request: Tag registration request.
+        Returns:
+            TagRegisterResult indicating whether the tag was created.
+        """
         from genai_tag_db_tools.models import TagRegisterRequest, TagRegisterResult
 
         if not isinstance(request, TagRegisterRequest):

@@ -85,29 +85,6 @@ class TestTagSearchServiceCoreApiIntegration:
             assert len(result) == 1
             assert result["tag"][0] == "girl"
 
-    def test_search_tags_with_custom_limit_offset(self, qtbot):
-        """Custom limit and offset should be passed to core_api."""
-        mock_searcher = MagicMock()
-        service = TagSearchService(searcher=mock_searcher)
-
-        with (
-            patch.object(service, "_get_merged_reader"),
-            patch("genai_tag_db_tools.core_api") as mock_core_api,
-        ):
-            # Setup mock返却値
-            mock_core_api.search_tags.return_value = TagSearchResult(items=[], total=0)
-
-            # カスタム limit/offset で検索
-            result = service.search_tags(keyword="test", limit=100, offset=50)
-
-            # core_api.search_tags が正しい引数で呼ばれたか確認
-            assert mock_core_api.search_tags.called
-            call_args = mock_core_api.search_tags.call_args
-            request = call_args[0][1]  # 2番目の引数が TagSearchRequest
-            assert request.limit == 100
-            assert request.offset == 50
-            assert isinstance(result, pl.DataFrame)
-
     def test_search_tags_validation_error_raises(self, qtbot):
         """ValidationError should propagate."""
         service = TagSearchService(searcher=MagicMock())

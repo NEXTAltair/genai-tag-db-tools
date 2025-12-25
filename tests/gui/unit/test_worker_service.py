@@ -33,8 +33,6 @@ def search_request():
         resolve_preferred=True,
         include_aliases=True,
         include_deprecated=False,
-        limit=100,
-        offset=0,
     )
 
 
@@ -90,8 +88,6 @@ class TestTagSearchWorker:
             alias=True,
             min_usage=None,
             max_usage=None,
-            limit=100,
-            offset=0,
         )
 
     def test_worker_error_handling(self, qtbot, mock_search_service, search_request):

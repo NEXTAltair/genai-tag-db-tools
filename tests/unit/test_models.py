@@ -105,8 +105,6 @@ def test_tag_search_request_defaults():
     assert request.resolve_preferred is True
     assert request.include_aliases is True
     assert request.include_deprecated is False
-    assert request.limit == 50
-    assert request.offset == 0
 
 
 @pytest.mark.db_tools
@@ -116,12 +114,10 @@ def test_tag_search_request_with_filters():
         format_names=["danbooru"],
         type_names=["character"],
         include_deprecated=True,
-        limit=100,
     )
     assert request.format_names == ["danbooru"]
     assert request.type_names == ["character"]
     assert request.include_deprecated is True
-    assert request.limit == 100
 
 
 @pytest.mark.db_tools

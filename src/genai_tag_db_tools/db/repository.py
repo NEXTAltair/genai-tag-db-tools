@@ -1,4 +1,4 @@
-from collections.abc import Callable
+﻿from collections.abc import Callable
 from datetime import datetime
 from logging import getLogger
 
@@ -6,8 +6,13 @@ import polars as pl
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import or_
 
+from genai_tag_db_tools.db.query_utils import (
+    TagSearchPreloader,
+    TagSearchQueryBuilder,
+    TagSearchResultBuilder,
+    normalize_search_keyword,
+)
 from genai_tag_db_tools.db.schema import (
     Tag,
     TagFormat,
@@ -17,6 +22,7 @@ from genai_tag_db_tools.db.schema import (
     TagTypeName,
     TagUsageCounts,
 )
+from genai_tag_db_tools.models import TagSearchRow
 from genai_tag_db_tools.utils.messages import ErrorMessages
 
 
@@ -63,17 +69,12 @@ class TagRepository:
 
     def get_tag_id_by_name(self, keyword: str, partial: bool = False) -> int | None:
         """タグ名でtag_idを検索する。'*' はワイルドカードとして扱う。"""
-        if "*" in keyword:
-            keyword = keyword.replace("*", "%")
+        keyword, use_like = normalize_search_keyword(keyword, partial)
 
         with self.session_factory() as session:
             query = session.query(Tag)
 
-            if partial or "%" in keyword:
-                if not keyword.startswith("%"):
-                    keyword = "%" + keyword
-                if not keyword.endswith("%"):
-                    keyword = keyword + "%"
+            if use_like:
                 query = query.filter(Tag.tag.like(keyword))
             else:
                 query = query.filter(Tag.tag == keyword)
@@ -85,7 +86,7 @@ class TagRepository:
             if len(results) == 1:
                 return results[0].tag_id
 
-            if partial or "%" in keyword:
+            if use_like:
                 return results[0].tag_id
 
             raise ValueError(f"複数ヒット: {results}")
@@ -430,36 +431,12 @@ class TagRepository:
     # --- 検索 ---
     def search_tag_ids(self, keyword: str, partial: bool = False) -> list[int]:
         """tag/source_tag/translationからtag_idを検索する。"""
-        if "*" in keyword:
-            keyword = keyword.replace("*", "%")
+        keyword, use_like = normalize_search_keyword(keyword, partial)
 
         with self.session_factory() as session:
-            tag_query = session.query(Tag.tag_id)
-            translation_query = session.query(TagTranslation.tag_id)
-
-            if partial or "%" in keyword:
-                if not keyword.startswith("%"):
-                    keyword = "%" + keyword
-                if not keyword.endswith("%"):
-                    keyword = keyword + "%"
-
-            tag_conditions = or_(
-                Tag.tag.like(keyword) if partial or "%" in keyword else Tag.tag == keyword,
-                Tag.source_tag.like(keyword) if partial or "%" in keyword else Tag.source_tag == keyword,
-            )
-            tag_query = tag_query.filter(tag_conditions)
-
-            translation_condition = (
-                TagTranslation.translation.like(keyword)
-                if partial or "%" in keyword
-                else TagTranslation.translation == keyword
-            )
-            translation_query = translation_query.filter(translation_condition)
-
-            tag_ids = {row[0] for row in tag_query.all()}
-            translation_ids = {row[0] for row in translation_query.all()}
-
-            return list(tag_ids | translation_ids)
+            builder = TagSearchQueryBuilder(session)
+            tag_ids = builder.initial_tag_ids(keyword, use_like)
+            return list(tag_ids)
 
     def search_tags(
         self,
@@ -473,250 +450,49 @@ class TagRepository:
         max_usage: int | None = None,
         alias: bool | None = None,
         resolve_preferred: bool = False,
-        limit: int | None = None,
-        offset: int | None = None,
-    ) -> list[dict]:
+    ) -> list[TagSearchRow]:
         """検索結果を辞書配列で返す。"""
-        if "*" in keyword:
-            keyword = keyword.replace("*", "%")
+        keyword, use_like = normalize_search_keyword(keyword, partial)
 
         with self.session_factory() as session:
-            tag_query = session.query(Tag.tag_id)
-            translation_query = session.query(TagTranslation.tag_id)
-
-            if partial or "%" in keyword:
-                if not keyword.startswith("%"):
-                    keyword = "%" + keyword
-                if not keyword.endswith("%"):
-                    keyword = keyword + "%"
-
-            tag_conditions = or_(
-                Tag.tag.like(keyword) if partial or "%" in keyword else Tag.tag == keyword,
-                Tag.source_tag.like(keyword) if partial or "%" in keyword else Tag.source_tag == keyword,
-            )
-            tag_query = tag_query.filter(tag_conditions)
-
-            translation_condition = (
-                TagTranslation.translation.like(keyword)
-                if partial or "%" in keyword
-                else TagTranslation.translation == keyword
-            )
-            translation_query = translation_query.filter(translation_condition)
-
-            tag_ids = {row[0] for row in tag_query.all()}
-            translation_ids = {row[0] for row in translation_query.all()}
-            tag_ids |= translation_ids
+            builder = TagSearchQueryBuilder(session)
+            tag_ids = builder.initial_tag_ids(keyword, use_like)
             if not tag_ids:
                 return []
 
-            format_id = 0
-            if format_name and format_name.lower() != "all":
-                fmt_obj = (
-                    session.query(TagFormat).filter(TagFormat.format_name == format_name).one_or_none()
-                )
-                if not fmt_obj:
-                    return []
-                format_id = fmt_obj.format_id
-                format_tag_ids = {
-                    row[0]
-                    for row in session.query(TagStatus.tag_id)
-                    .filter(TagStatus.format_id == format_id)
-                    .all()
-                }
-                tag_ids &= format_tag_ids
-                if not tag_ids:
-                    return []
+            tag_ids, format_id = builder.apply_format_filter(tag_ids, format_name)
+            if not tag_ids:
+                return []
 
-            if min_usage is not None or max_usage is not None:
-                usage_query = session.query(TagUsageCounts.tag_id)
-                if format_id:
-                    usage_query = usage_query.filter(TagUsageCounts.format_id == format_id)
-                if min_usage is not None:
-                    usage_query = usage_query.filter(TagUsageCounts.count >= min_usage)
-                if max_usage is not None:
-                    usage_query = usage_query.filter(TagUsageCounts.count <= max_usage)
-                usage_tag_ids = {row[0] for row in usage_query.all()}
+            tag_ids = builder.apply_usage_filter(tag_ids, format_id, min_usage, max_usage)
+            if not tag_ids:
+                return []
 
-                if (min_usage is None or min_usage <= 0) and (max_usage is None or max_usage >= 0):
-                    usage_all_query = session.query(TagUsageCounts.tag_id)
-                    if format_id:
-                        usage_all_query = usage_all_query.filter(TagUsageCounts.format_id == format_id)
-                    usage_all_tag_ids = {row[0] for row in usage_all_query.all()}
-                    usage_tag_ids |= tag_ids - usage_all_tag_ids
+            tag_ids = builder.apply_type_filter(tag_ids, format_id, type_name)
+            if not tag_ids:
+                return []
 
-                tag_ids &= usage_tag_ids
-                if not tag_ids:
-                    return []
+            tag_ids = builder.apply_alias_filter(tag_ids, format_id, alias)
+            if not tag_ids:
+                return []
 
-            if type_name and type_name.lower() != "all":
-                type_obj = (
-                    session.query(TagTypeName).filter(TagTypeName.type_name == type_name).one_or_none()
-                )
-                if not type_obj:
-                    return []
-                type_query = session.query(TagStatus.tag_id).join(
-                    TagTypeFormatMapping,
-                    (TagStatus.format_id == TagTypeFormatMapping.format_id)
-                    & (TagStatus.type_id == TagTypeFormatMapping.type_id),
-                )
-                type_query = type_query.filter(TagTypeFormatMapping.type_name_id == type_obj.type_name_id)
-                if format_id:
-                    type_query = type_query.filter(TagStatus.format_id == format_id)
-                type_tag_ids = {row[0] for row in type_query.all()}
-                tag_ids &= type_tag_ids
-                if not tag_ids:
-                    return []
+            tag_ids = builder.apply_language_filter(tag_ids, language)
+            if not tag_ids:
+                return []
 
-            if alias is not None:
-                alias_query = session.query(TagStatus.tag_id).filter(TagStatus.alias == alias)
-                if format_id:
-                    alias_query = alias_query.filter(TagStatus.format_id == format_id)
-                alias_tag_ids = {row[0] for row in alias_query.all()}
-                tag_ids &= alias_tag_ids
-                if not tag_ids:
-                    return []
+            preloader = TagSearchPreloader(session)
+            preloaded = preloader.load(tag_ids)
 
-            if language and language.lower() != "all":
-                lang_query = session.query(TagTranslation.tag_id).filter(
-                    TagTranslation.language == language
-                )
-                lang_tag_ids = {row[0] for row in lang_query.all()}
-                tag_ids &= lang_tag_ids
-                if not tag_ids:
-                    return []
-
-            initial_status_rows = (
-                session.query(TagStatus)
-                .filter(TagStatus.tag_id.in_(tag_ids))
-                .all()
+            rows: list[TagSearchRow] = []
+            result_builder = TagSearchResultBuilder(
+                format_id=format_id,
+                resolve_preferred=resolve_preferred,
+                logger=self.logger,
             )
-            preferred_ids = {
-                row.preferred_tag_id
-                for row in initial_status_rows
-                if row.preferred_tag_id is not None
-            }
-            status_tag_ids = set(tag_ids) | preferred_ids
-            status_rows = (
-                session.query(TagStatus)
-                .filter(TagStatus.tag_id.in_(status_tag_ids))
-                .all()
-            )
-            format_ids = {row.format_id for row in status_rows}
-            format_name_by_id = {
-                fmt.format_id: fmt.format_name
-                for fmt in session.query(TagFormat).filter(TagFormat.format_id.in_(format_ids)).all()
-            }
-            type_name_by_key = {
-                (mapping.format_id, mapping.type_id): (
-                    mapping.type_name.type_name if mapping.type_name else ""
-                )
-                for mapping in session.query(TagTypeFormatMapping)
-                .filter(TagTypeFormatMapping.format_id.in_(format_ids))
-                .all()
-            }
-            usage_by_key = {
-                (usage.tag_id, usage.format_id): usage.count
-                for usage in session.query(TagUsageCounts)
-                .filter(TagUsageCounts.tag_id.in_(status_tag_ids))
-                .all()
-            }
-
-            # N+1クエリ問題修正: ループ前に全データを一括取得
-            tags_by_id = {
-                t.tag_id: t
-                for t in session.query(Tag).filter(Tag.tag_id.in_(status_tag_ids)).all()
-            }
-            all_translations = (
-                session.query(TagTranslation)
-                .filter(TagTranslation.tag_id.in_(status_tag_ids))
-                .all()
-            )
-            trans_by_tag_id: dict[int, list[TagTranslation]] = {}
-            for tr in all_translations:
-                trans_by_tag_id.setdefault(tr.tag_id, []).append(tr)
-
-            status_by_tag_format: dict[tuple[int, int], TagStatus] = {}
-            statuses_by_tag_id: dict[int, list[TagStatus]] = {}
-            for status in status_rows:
-                status_by_tag_format[(status.tag_id, status.format_id)] = status
-                statuses_by_tag_id.setdefault(status.tag_id, []).append(status)
-
-            rows: list[dict] = []
             for t_id in sorted(tag_ids):
-                tag_obj = tags_by_id.get(t_id)
-                if not tag_obj:
-                    continue
-
-                usage_count = 0
-                is_alias = False
-                resolved_type_name = ""
-                resolved_type_id = None
-                preferred_tag_id = t_id
-                deprecated = False
-
-                if format_id:
-                    status_obj = status_by_tag_format.get((t_id, format_id))
-                    if status_obj:
-                        if status_obj.alias is None:
-                            self.logger.warning(
-                                "[search_tags] alias=NULL detected (tag_id=%s, format_id=%s).",
-                                t_id,
-                                format_id,
-                            )
-                            continue
-                        is_alias = status_obj.alias
-                        preferred_tag_id = status_obj.preferred_tag_id
-                        deprecated = bool(status_obj.deprecated)
-                        resolved_type_name = type_name_by_key.get((format_id, status_obj.type_id), "")
-                    resolved_type_id = status_obj.type_id if status_obj else None
-
-                    usage_count = usage_by_key.get((t_id, format_id), 0)
-
-                resolved_tag_id = t_id
-                if resolve_preferred and format_id and preferred_tag_id != t_id:
-                    preferred_obj = tags_by_id.get(preferred_tag_id)
-                    if preferred_obj:
-                        tag_obj = preferred_obj
-                        resolved_tag_id = preferred_tag_id
-
-                trans_dict: dict[str, list[str]] = {}
-                translations = trans_by_tag_id.get(resolved_tag_id, [])
-                for tr in translations:
-                    if tr.language and tr.translation:
-                        trans_dict.setdefault(tr.language, []).append(tr.translation)
-
-                format_statuses: dict[str, dict[str, object]] = {}
-                for status in statuses_by_tag_id.get(resolved_tag_id, []):
-                    fmt_name = format_name_by_id.get(status.format_id)
-                    if not fmt_name:
-                        continue
-                    format_statuses[fmt_name] = {
-                        "alias": status.alias,
-                        "deprecated": bool(status.deprecated),
-                        "usage_count": usage_by_key.get((status.tag_id, status.format_id), 0),
-                        "type_id": status.type_id,
-                        "type_name": type_name_by_key.get((status.format_id, status.type_id), ""),
-                    }
-
-                rows.append(
-                    {
-                        "tag_id": resolved_tag_id,
-                        "tag": tag_obj.tag,
-                        "source_tag": tag_obj.source_tag,
-                        "usage_count": usage_count,
-                        "alias": is_alias,
-                        "deprecated": deprecated,
-                        "type_id": resolved_type_id,
-                        "type_name": resolved_type_name,
-                        "translations": trans_dict,
-                        "format_statuses": format_statuses,
-                    }
-                )
-
-            if offset is not None:
-                rows = rows[offset:]
-            if limit is not None:
-                rows = rows[:limit]
+                row = result_builder.build_row(t_id, preloaded)
+                if row is not None:
+                    rows.append(row)
 
             return rows
 
@@ -944,10 +720,8 @@ class MergedTagReader:
         max_usage: int | None = None,
         alias: bool | None = None,
         resolve_preferred: bool = False,
-        limit: int | None = None,
-        offset: int | None = None,
-    ) -> list[dict]:
-        merged: dict[int, dict] = {}
+    ) -> list[TagSearchRow]:
+        merged: dict[int, TagSearchRow] = {}
         for repo in self._iter_base_repos_low_to_high():
             rows = repo.search_tags(
                 keyword,
@@ -959,8 +733,6 @@ class MergedTagReader:
                 max_usage=max_usage,
                 alias=alias,
                 resolve_preferred=resolve_preferred,
-                limit=limit,
-                offset=offset,
             )
             for row in rows:
                 merged[row["tag_id"]] = row
@@ -975,8 +747,6 @@ class MergedTagReader:
                 max_usage=max_usage,
                 alias=alias,
                 resolve_preferred=resolve_preferred,
-                limit=limit,
-                offset=offset,
             )
             for row in user_rows:
                 merged[row["tag_id"]] = row

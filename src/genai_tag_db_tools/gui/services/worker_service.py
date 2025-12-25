@@ -53,8 +53,6 @@ class TagSearchWorker(QRunnable):
                 alias=self.request.include_aliases,
                 min_usage=self.request.min_usage,
                 max_usage=self.request.max_usage,
-                limit=self.request.limit,
-                offset=self.request.offset,
             )
 
             self.signals.progress.emit(90, "検索完了")

@@ -153,8 +153,6 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
         format_name=format_name,
         type_name=type_name,
         resolve_preferred=request.resolve_preferred,
-        limit=request.limit,
-        offset=request.offset,
     )
     rows = _filter_rows(rows, request)
     items = [

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TypedDict
+
 from pydantic import BaseModel, Field
 
 
@@ -69,16 +71,14 @@ class TagSearchRequest(BaseModel):
         offset: 取得オフセット。
     """
 
-    query: str = Field(..., description="検索クエリ")
-    format_names: list[str] | None = Field(default=None, description="対象フォーマット名の絞り込み")
-    type_names: list[str] | None = Field(default=None, description="対象タイプ名の絞り込み")
-    resolve_preferred: bool = Field(default=True, description="推奨タグへ正規化して返す")
-    include_aliases: bool = Field(default=True, description="エイリアスを含める")
-    include_deprecated: bool = Field(default=False, description="非推奨タグを含める")
-    min_usage: int | None = Field(default=None, description="??????")
-    max_usage: int | None = Field(default=None, description="??????")
-    limit: int | None = Field(default=None, description="取得件数(Noneで無制限)")
-    offset: int = Field(default=0, description="取得オフセット")
+    query: str = Field(..., description="Search query")
+    format_names: list[str] | None = Field(default=None, description="Format name filters")
+    type_names: list[str] | None = Field(default=None, description="Type name filters")
+    resolve_preferred: bool = Field(default=True, description="Resolve to preferred tags")
+    include_aliases: bool = Field(default=True, description="Include alias tags")
+    include_deprecated: bool = Field(default=False, description="Include deprecated tags")
+    min_usage: int | None = Field(default=None, description="Minimum usage count")
+    max_usage: int | None = Field(default=None, description="Maximum usage count")
 
 
 class TagIdRef(BaseModel):
@@ -134,8 +134,36 @@ class TagSearchResult(BaseModel):
         total: 総件数（不明ならNone）。
     """
 
-    items: list[TagRecordPublic] = Field(..., description="検索結果の一覧")
-    total: int | None = Field(default=None, description="総件数(不明ならNone)")
+    items: list[TagRecordPublic] = Field(..., description="Search result rows")
+    total: int | None = Field(default=None, description="Total count if known")
+
+
+class TagSearchRow(TypedDict):
+    """Internal repository row for tag search results.
+
+    Keys:
+        tag_id: Tag id.
+        tag: Normalized tag string.
+        source_tag: Source tag if present.
+        usage_count: Usage count for the active format.
+        alias: True if alias.
+        deprecated: True if deprecated.
+        type_id: Type id if known.
+        type_name: Type name for the active format.
+        translations: Language to translations mapping.
+        format_statuses: Per-format status mapping.
+    """
+
+    tag_id: int
+    tag: str
+    source_tag: str | None
+    usage_count: int
+    alias: bool
+    deprecated: bool
+    type_id: int | None
+    type_name: str
+    translations: dict[str, list[str]]
+    format_statuses: dict[str, dict[str, object]]
 
 
 class TagTranslationInput(BaseModel):
