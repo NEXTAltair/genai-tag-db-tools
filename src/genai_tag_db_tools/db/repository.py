@@ -636,8 +636,10 @@ class TagRepository:
                 trans_by_tag_id.setdefault(tr.tag_id, []).append(tr)
 
             status_by_tag_format: dict[tuple[int, int], TagStatus] = {}
+            statuses_by_tag_id: dict[int, list[TagStatus]] = {}
             for status in status_rows:
                 status_by_tag_format[(status.tag_id, status.format_id)] = status
+                statuses_by_tag_id.setdefault(status.tag_id, []).append(status)
 
             rows: list[dict] = []
             for t_id in sorted(tag_ids):
@@ -684,9 +686,7 @@ class TagRepository:
                         trans_dict.setdefault(tr.language, []).append(tr.translation)
 
                 format_statuses: dict[str, dict[str, object]] = {}
-                for status in status_rows:
-                    if status.tag_id != resolved_tag_id:
-                        continue
+                for status in statuses_by_tag_id.get(resolved_tag_id, []):
                     fmt_name = format_name_by_id.get(status.format_id)
                     if not fmt_name:
                         continue
