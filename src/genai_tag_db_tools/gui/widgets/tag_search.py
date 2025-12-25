@@ -54,6 +54,7 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         self._results_view = None
         self._results_splitter = None
         self._translation_label = None
+        self._translation_language_combo = None
         self._translation_list = None
         self._result_format_label = None
         self._result_format_combo = None
@@ -81,6 +82,10 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         self.comboBoxLanguage.currentIndexChanged.connect(self._refresh_translation_from_selection)
         if self._result_format_combo is not None:
             self._result_format_combo.currentIndexChanged.connect(self._apply_display_filters)
+        if self._translation_language_combo is not None:
+            self._translation_language_combo.currentIndexChanged.connect(
+                self._refresh_translation_from_selection
+            )
 
     def _setup_results_view(self) -> None:
         self._results_view = QTableView(self.tabList)
@@ -98,11 +103,26 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         detail_layout = QVBoxLayout(detail_panel)
         detail_layout.setContentsMargins(0, 0, 0, 0)
 
-        self._translation_label = QLabel(self.tr("Translation (ja)"), detail_panel)
+        translation_header = QWidget(detail_panel)
+        translation_header_layout = QHBoxLayout(translation_header)
+        translation_header_layout.setContentsMargins(0, 0, 0, 0)
+        translation_header_layout.setSpacing(6)
+
+        self._translation_label = QLabel(self.tr("Translation (ja)"), translation_header)
+        self._translation_language_combo = QComboBox(translation_header)
+        self._translation_language_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToContents
+        )
+        self._translation_language_combo.setMinimumWidth(80)
+
+        translation_header_layout.addWidget(self._translation_label)
+        translation_header_layout.addStretch(1)
+        translation_header_layout.addWidget(self._translation_language_combo)
+
         self._translation_list = QListWidget(detail_panel)
         self._translation_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
 
-        detail_layout.addWidget(self._translation_label)
+        detail_layout.addWidget(translation_header)
         detail_layout.addWidget(self._translation_list)
         detail_layout.addStretch(1)
 
@@ -155,6 +175,22 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         languages = self._service.get_tag_languages()
         for lang in languages:
             self.comboBoxLanguage.addItem(lang)
+
+        if self._translation_language_combo is not None:
+            self._translation_language_combo.clear()
+            if not languages:
+                languages = ["ja"]
+            seen = set()
+            if "zh" not in languages:
+                languages = ["zh", *languages]
+            for lang in languages:
+                if lang in seen:
+                    continue
+                seen.add(lang)
+                self._translation_language_combo.addItem(lang)
+            default_index = self._translation_language_combo.findText("ja")
+            if default_index >= 0:
+                self._translation_language_combo.setCurrentIndex(default_index)
 
         self.comboBoxType.clear()
         self.comboBoxType.addItem(self.tr("All"))
@@ -270,7 +306,10 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         self._select_first_row()
 
     def _current_translation_language(self) -> str:
-        selected = normalize_choice(self.comboBoxLanguage.currentText())
+        if self._translation_language_combo is not None:
+            selected = normalize_choice(self._translation_language_combo.currentText())
+        else:
+            selected = normalize_choice(self.comboBoxLanguage.currentText())
         return selected or "ja"
 
     def _select_first_row(self) -> None:
@@ -316,7 +355,15 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         row_data = self._results_model.get_row(row)
         translations = row_data.get("translations") or {}
         language = self._current_translation_language()
-        values = translations.get(language, []) or []
+        if language.lower() == "zh":
+            values = []
+            for key, items in translations.items():
+                if not key:
+                    continue
+                if key.lower().startswith("zh"):
+                    values.extend(items or [])
+        else:
+            values = translations.get(language, []) or []
 
         if self._translation_label is not None:
             self._translation_label.setText(self.tr(f"Translation ({language})"))

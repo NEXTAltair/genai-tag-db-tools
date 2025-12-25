@@ -14,7 +14,7 @@ class DbSourceRef(BaseModel):
 
     repo_id: str = Field(..., examples=["NEXTAltair/genai-image-tag-db-CC4"])
     filename: str = Field(..., examples=["genai-image-tag-db-cc4.sqlite"])
-    revision: str | None = Field(default=None, description="ブランチ/タグ/コミット（未指定なら既定）")
+    revision: str | None = Field(default=None, description="ブランチ/タグ/コミット(未指定なら既定)")
 
 
 class DbCacheConfig(BaseModel):
@@ -77,7 +77,7 @@ class TagSearchRequest(BaseModel):
     include_deprecated: bool = Field(default=False, description="非推奨タグを含める")
     min_usage: int | None = Field(default=None, description="??????")
     max_usage: int | None = Field(default=None, description="??????")
-    limit: int | None = Field(default=None, description="取得件数（Noneで無制限）")
+    limit: int | None = Field(default=None, description="取得件数(Noneで無制限)")
     offset: int = Field(default=0, description="取得オフセット")
 
 
@@ -135,7 +135,7 @@ class TagSearchResult(BaseModel):
     """
 
     items: list[TagRecordPublic] = Field(..., description="検索結果の一覧")
-    total: int | None = Field(default=None, description="総件数（不明ならNone）")
+    total: int | None = Field(default=None, description="総件数(不明ならNone)")
 
 
 class TagTranslationInput(BaseModel):
@@ -146,7 +146,7 @@ class TagTranslationInput(BaseModel):
         translation: 翻訳文字列。
     """
 
-    language: str = Field(..., description="言語コード（例: ja, zh-CN）")
+    language: str = Field(..., description="言語コード(例: ja, zh-CN)")
     translation: str = Field(..., description="翻訳文字列")
 
 
@@ -168,7 +168,7 @@ class TagRegisterRequest(BaseModel):
     format_name: str = Field(..., description="フォーマット名")
     type_name: str = Field(..., description="タイプ名")
     alias: bool = Field(default=False, description="エイリアスかどうか")
-    preferred_tag: str | None = Field(default=None, description="推奨タグ（alias時のみ）")
+    preferred_tag: str | None = Field(default=None, description="推奨タグ(alias時のみ)")
     translations: list[TagTranslationInput] | None = Field(default=None, description="翻訳の追加")
 
 

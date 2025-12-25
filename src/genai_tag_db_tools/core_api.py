@@ -179,7 +179,7 @@ def register_tag(service: TagRegisterService, request: TagRegisterRequest) -> Ta
     return service.register_tag(request)
 
 
-def get_statistics(repo: MergedTagReader) -> TagStatisticsResult:
+def get_statistics(repo: MergedTagReader) -> "TagStatisticsResult":
     from genai_tag_db_tools.models import TagStatisticsResult
 
     tag_statuses = repo.list_tag_statuses()
