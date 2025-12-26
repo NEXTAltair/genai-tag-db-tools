@@ -575,10 +575,10 @@ class TagRepository:
             return [tag_id[0] for tag_id in tag_ids]
 
     def get_tag_formats(self) -> list[str]:
-        """全format_nameを取得する。"""
+        """全format_nameを取得する（アルファベット順）。"""
         with self.session_factory() as session:
             formats = session.query(TagFormat.format_name).distinct().all()
-            return [format[0] for format in formats]
+            return sorted([format[0] for format in formats])
 
     def get_format_map(self) -> dict[int, str]:
         """format_id -> format_name を返す。"""
@@ -587,10 +587,10 @@ class TagRepository:
             return dict(rows)
 
     def get_tag_languages(self) -> list[str]:
-        """全languageを取得する。"""
+        """全languageを取得する（アルファベット順）。"""
         with self.session_factory() as session:
             languages = session.query(TagTranslation.language).distinct().all()
-            return [lang[0] for lang in languages]
+            return sorted([lang[0] for lang in languages])
 
     def get_tag_types(self, format_id: int) -> list[str]:
         """format_idに紐づくタイプ名一覧を取得する。"""
@@ -842,7 +842,7 @@ class MergedTagReader:
             formats |= set(repo.get_tag_formats())
         if self._has_user():
             formats |= set(self.user_repo.get_tag_formats())
-        return list(formats)
+        return sorted(list(formats))
 
     def get_format_map(self) -> dict[int, str]:
         formats: dict[int, str] = {}
@@ -858,7 +858,7 @@ class MergedTagReader:
             languages |= set(repo.get_tag_languages())
         if self._has_user():
             languages |= set(self.user_repo.get_tag_languages())
-        return list(languages)
+        return sorted(list(languages))
 
     def get_tag_types(self, format_id: int) -> list[str]:
         types: set[str] = set()
