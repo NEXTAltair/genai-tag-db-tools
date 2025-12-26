@@ -149,16 +149,15 @@ def cmd_stats(args: argparse.Namespace) -> None:
     _dump(result)
 
 
-
 def cmd_convert(args: argparse.Namespace) -> None:
     """Convert tags to specified format."""
     from genai_tag_db_tools.core_api import convert_tags
 
     _set_db_paths(args.base_db, args.user_db_dir)
     repo = get_default_repository()
-    
+
     converted = convert_tags(repo, args.tags, args.format_name, separator=args.separator)
-    
+
     if args.json:
         result = {
             "input": args.tags,

@@ -211,7 +211,6 @@ class TagCleanerService(GuiServiceBase):
 
         self.logger.info("TagCleanerService: convert_prompt() called")
 
-
         repo = get_default_repository()
         return convert_tags(repo, prompt, format_name)
 
@@ -450,5 +449,3 @@ class TagStatisticsService(GuiServiceBase):
             self.logger.error("翻訳統計取得中にエラーが発生: %s", e)
             self.error_occurred.emit(str(e))
             raise
-
-
