@@ -316,7 +316,7 @@ def test_tag_search_widget_result_count_label_updates_after_search(qtbot, tag_se
 
     tag_search_widget.on_pushButtonSearch_clicked()
 
-    # 件数ラベルが更新される（モックサービスは1件返す）
+    # 件数ラベルが更新される(モックサービスは1件返す)
     assert tag_search_widget._result_count_label is not None
     assert "1" in tag_search_widget._result_count_label.text()
 

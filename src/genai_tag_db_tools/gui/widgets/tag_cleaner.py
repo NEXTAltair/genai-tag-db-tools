@@ -1,6 +1,6 @@
 # genai_tag_db_tools/widgets/tag_cleaner.py
 
-from PySide6.QtCore import Slot
+from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import QWidget
 
@@ -19,6 +19,9 @@ class TagCleanerWidget(QWidget, Ui_TagCleanerWidget):
         """Set service instance (initialization deferred to showEvent)."""
         self._cleaner_service = cleaner_service
         self._initialized = False
+        if self.isVisible():
+            self._initialize_ui()
+            self._initialized = True
 
     def showEvent(self, event: QShowEvent) -> None:
         """Initialize UI when widget is first shown."""
@@ -32,6 +35,9 @@ class TagCleanerWidget(QWidget, Ui_TagCleanerWidget):
         formats = self._cleaner_service.get_tag_formats()
         self.comboBoxFormat.clear()
         self.comboBoxFormat.addItems(formats)
+        default_index = self.comboBoxFormat.findText("danbooru", Qt.MatchFixedString)
+        if default_index >= 0:
+            self.comboBoxFormat.setCurrentIndex(default_index)
 
     def initialize(self, cleaner_service: TagCleanerService) -> None:
         self.set_service(cleaner_service)

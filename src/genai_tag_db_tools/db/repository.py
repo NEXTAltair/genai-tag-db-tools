@@ -496,6 +496,56 @@ class TagRepository:
 
             return rows
 
+    def search_tags_bulk(
+        self,
+        keywords: list[str],
+        *,
+        format_name: str | None = None,
+        resolve_preferred: bool = False,
+    ) -> dict[str, TagSearchRow]:
+        """複数キーワードをまとめて検索し、keyword -> row を返す。"""
+        cleaned = [keyword.strip() for keyword in keywords if keyword and keyword.strip()]
+        if not cleaned:
+            return {}
+
+        with self.session_factory() as session:
+            builder = TagSearchQueryBuilder(session)
+            tag_ids_by_keyword = builder.initial_tag_ids_for_keywords(cleaned)
+            if not tag_ids_by_keyword:
+                return {}
+
+            all_tag_ids: set[int] = set()
+            for tag_ids in tag_ids_by_keyword.values():
+                all_tag_ids |= set(tag_ids)
+
+            tag_ids, format_id = builder.apply_format_filter(all_tag_ids, format_name)
+            if not tag_ids:
+                return {}
+
+            preloader = TagSearchPreloader(session)
+            preloaded = preloader.load(tag_ids)
+            result_builder = TagSearchResultBuilder(
+                format_id=format_id,
+                resolve_preferred=resolve_preferred,
+                logger=self.logger,
+            )
+
+            row_by_input_id: dict[int, TagSearchRow] = {}
+            for t_id in sorted(tag_ids):
+                row = result_builder.build_row(t_id, preloaded)
+                if row is not None:
+                    row_by_input_id[t_id] = row
+
+            result: dict[str, TagSearchRow] = {}
+            for keyword, ids in tag_ids_by_keyword.items():
+                for tag_id in sorted(ids):
+                    row = row_by_input_id.get(tag_id)
+                    if row is not None:
+                        result[keyword] = row
+                        break
+
+            return result
+
     _LEGACY_SEARCH_HELPERS = """
     def search_tag_ids_by_usage_count_range(self, min_count=None, max_count=None, format_id=None):
         ...
@@ -751,6 +801,32 @@ class MergedTagReader:
             for row in user_rows:
                 merged[row["tag_id"]] = row
         return list(merged.values())
+
+    def search_tags_bulk(
+        self,
+        keywords: list[str],
+        *,
+        format_name: str | None = None,
+        resolve_preferred: bool = False,
+    ) -> dict[str, TagSearchRow]:
+        merged: dict[str, TagSearchRow] = {}
+        for repo in self._iter_base_repos_low_to_high():
+            merged.update(
+                repo.search_tags_bulk(
+                    keywords,
+                    format_name=format_name,
+                    resolve_preferred=resolve_preferred,
+                )
+            )
+        if self._has_user():
+            merged.update(
+                self.user_repo.search_tags_bulk(
+                    keywords,
+                    format_name=format_name,
+                    resolve_preferred=resolve_preferred,
+                )
+            )
+        return merged
 
     def get_all_tag_ids(self) -> list[int]:
         tag_ids: set[int] = set()

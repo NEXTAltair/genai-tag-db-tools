@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 class GuiServiceBase(QObject):
-    """GUI向けの共通基底クラス（シグナル/ロガー）。"""
+    """GUI向けの共通基底クラス。シグナル/ロガー。"""
 
     progress_updated = Signal(int, str)  # (progress, message)
     process_finished = Signal(str)  # (message)
@@ -28,7 +28,7 @@ class GuiServiceBase(QObject):
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def close(self) -> None:
-        """リソース解放（サブクラスでオーバーライド可能）。"""
+        """リソース解放。サブクラスでオーバーライド可能。"""
         self.logger.info("Closing %s", self.__class__.__name__)
         # Signal の切断
         try:
@@ -58,12 +58,21 @@ class TagCoreService:
         return self._searcher.tag_repo.get_format_id(format_name)
 
     def convert_tag(self, tag: str, format_id: int) -> str:
-        """単一タグを指定フォーマットに変換する。"""
-        return self._searcher.convert_tag(tag, format_id)
+        """単一タグを指定フォーマットに変換する。
+        Note: This method is deprecated. Use core_api.convert_tags() instead.
+        """
+        from genai_tag_db_tools.core_api import convert_tags
+        from genai_tag_db_tools.db.repository import get_default_repository
+
+        repo = get_default_repository()
+        format_name = self._searcher.tag_repo.get_tag_formats()[format_id - 1] if format_id > 0 else None
+        if not format_name:
+            return tag
+        return convert_tags(repo, tag, format_name)
 
 
 class TagSearchService(GuiServiceBase):
-    """GUI向け検索サービス（TagSearcher を利用）。"""
+    """GUI向け検索サービス。TagSearcher を利用。"""
 
     def __init__(
         self,
@@ -131,7 +140,6 @@ class TagSearchService(GuiServiceBase):
         alias: bool | None = None,
     ) -> pl.DataFrame:
         """タグ検索を行い、Polars DataFrameで返す (core_api統合版)。
-
         Args:
             keyword: Search keyword.
             partial: Whether to use partial matching.
@@ -193,23 +201,19 @@ class TagCleanerService(GuiServiceBase):
         self._core = core or TagCoreService()
 
     def get_tag_formats(self) -> list[str]:
-        """フォーマット一覧に 'All' を付けて返す。"""
-        format_list = ["All"]
-        format_list.extend(self._core.get_tag_formats())
-        return format_list
+        """Return available tag formats."""
+        return self._core.get_tag_formats()
 
     def convert_prompt(self, prompt: str, format_name: str) -> str:
         """カンマ区切りのタグを指定フォーマットへ変換する。"""
+        from genai_tag_db_tools.core_api import convert_tags
+        from genai_tag_db_tools.db.repository import get_default_repository
+
         self.logger.info("TagCleanerService: convert_prompt() called")
 
-        format_id = self._core.get_format_id(format_name)
-        if format_id is None:
-            self.logger.warning("Unknown format: %s", format_name)
-            return prompt
 
-        raw_tags = [t.strip() for t in prompt.split(",")]
-        converted_list = [self._core.convert_tag(tag, format_id) for tag in raw_tags]
-        return ", ".join(converted_list)
+        repo = get_default_repository()
+        return convert_tags(repo, prompt, format_name)
 
 
 class TagImportService(GuiServiceBase):
@@ -235,12 +239,7 @@ class TagRegisterService(GuiServiceBase):
         Returns:
             TagRegisterResult indicating whether the tag was created.
         """
-        from genai_tag_db_tools.models import TagRegisterRequest, TagRegisterResult
-
-        if not isinstance(request, TagRegisterRequest):
-            msg = "TagRegisterRequest 以外の入力は受け付けません。"
-            self.logger.error(msg)
-            raise TypeError(msg)
+        from genai_tag_db_tools.models import TagRegisterResult
 
         try:
             tag = request.tag
@@ -435,11 +434,11 @@ class TagStatisticsService(GuiServiceBase):
             raise
 
     def get_type_distribution(self) -> pl.DataFrame:
-        """タイプ分布統計を取得する。"""
+        """タイプの分布統計を取得する。"""
         try:
             return self._stats.get_type_distribution()
         except Exception as e:
-            self.logger.error("タイプ分布統計取得中にエラーが発生: %s", e)
+            self.logger.error("タイプの分布統計取得中にエラーが発生: %s", e)
             self.error_occurred.emit(str(e))
             raise
 
@@ -451,3 +450,5 @@ class TagStatisticsService(GuiServiceBase):
             self.logger.error("翻訳統計取得中にエラーが発生: %s", e)
             self.error_occurred.emit(str(e))
             raise
+
+

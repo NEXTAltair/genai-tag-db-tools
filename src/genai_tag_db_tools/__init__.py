@@ -2,9 +2,11 @@
 
 from .core_api import (
     build_downloaded_at_utc,
+    convert_tags,
     ensure_databases,
     ensure_db,
     get_statistics,
+    get_tag_formats,
     register_tag,
     search_tags,
 )
@@ -15,9 +17,11 @@ __all__ = [
     "TagCleaner",
     "TagSearcher",
     "build_downloaded_at_utc",
+    "convert_tags",
     "ensure_databases",
     "ensure_db",
     "get_statistics",
+    "get_tag_formats",
     "initialize_tag_cleaner",
     "initialize_tag_searcher",
     "register_tag",

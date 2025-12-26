@@ -54,6 +54,34 @@ class TagSearchQueryBuilder:
         translation_ids = {row[0] for row in translation_query.all()}
         return tag_ids | translation_ids
 
+    def initial_tag_ids_for_keywords(self, keywords: list[str]) -> dict[str, set[int]]:
+        if not keywords:
+            return {}
+
+        keyword_set = set(keywords)
+        tag_rows = (
+            self.session.query(Tag.tag_id, Tag.tag, Tag.source_tag)
+            .filter(or_(Tag.tag.in_(keyword_set), Tag.source_tag.in_(keyword_set)))
+            .all()
+        )
+        trans_rows = (
+            self.session.query(TagTranslation.tag_id, TagTranslation.translation)
+            .filter(TagTranslation.translation.in_(keyword_set))
+            .all()
+        )
+
+        tag_ids_by_keyword: dict[str, set[int]] = {keyword: set() for keyword in keyword_set}
+        for tag_id, tag, source_tag in tag_rows:
+            if tag in tag_ids_by_keyword:
+                tag_ids_by_keyword[tag].add(tag_id)
+            if source_tag in tag_ids_by_keyword:
+                tag_ids_by_keyword[source_tag].add(tag_id)
+        for tag_id, translation in trans_rows:
+            if translation in tag_ids_by_keyword:
+                tag_ids_by_keyword[translation].add(tag_id)
+
+        return {keyword: ids for keyword, ids in tag_ids_by_keyword.items() if ids}
+
     def apply_format_filter(self, tag_ids: set[int], format_name: str | None) -> tuple[set[int], int]:
         if not format_name or format_name.lower() == "all":
             return tag_ids, 0

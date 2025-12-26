@@ -70,8 +70,6 @@ def _fetch_remote_etag(spec: HFDatasetSpec, token: str | None) -> str | None:
 
 def download_hf_dataset_file(spec: HFDatasetSpec, *, dest_dir: Path, token: str | None = None) -> Path:
     """HF Datasetから指定ファイルをダウンロードする。"""
-    if dest_dir is None:
-        raise ValueError("dest_dir は必須です。保存先を指定してください。")
     dest_dir.mkdir(parents=True, exist_ok=True)
     logger.info("HFダウンロード開始: %s/%s", spec.repo_id, spec.filename)
 
@@ -82,7 +80,6 @@ def download_hf_dataset_file(spec: HFDatasetSpec, *, dest_dir: Path, token: str 
         revision=spec.revision,
         token=token,
         local_dir=dest_dir,
-        local_dir_use_symlinks=False,
     )
     resolved = Path(local_path).resolve()
     logger.info("HFダウンロード完了: %s", resolved)
@@ -91,8 +88,6 @@ def download_hf_dataset_file(spec: HFDatasetSpec, *, dest_dir: Path, token: str 
 
 def download_with_fallback(spec: HFDatasetSpec, *, dest_dir: Path, token: str | None = None) -> Path:
     """リモートの更新確認とフォールバックを含めてダウンロードする。"""
-    if dest_dir is None:
-        raise ValueError("dest_dir は必須です。保存先を指定してください。")
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     manifest_path = _manifest_path(dest_dir, spec)

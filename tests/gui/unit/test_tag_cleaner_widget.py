@@ -1,4 +1,4 @@
-"""TagCleanerWidget のテスト（pytest-qt ベース）"""
+"""TagCleanerWidget のチE��ト！Eytest-qt ベ�Eス�E�E""
 
 from __future__ import annotations
 
@@ -11,10 +11,10 @@ from genai_tag_db_tools.services.app_services import TagCleanerService
 
 
 class MockTagCleanerService(TagCleanerService):
-    """TagCleanerService のモック"""
+    """TagCleanerService のモチE��"""
 
     def __init__(self):
-        self.mock_get_tag_formats = MagicMock(return_value=["All", "danbooru", "e621"])
+        self.mock_get_tag_formats = MagicMock(return_value=["danbooru", "e621"])
         self.mock_convert_prompt = MagicMock(return_value="converted, tags")
 
     def get_tag_formats(self) -> list[str]:
@@ -56,7 +56,7 @@ def test_tag_cleaner_widget_set_service(qtbot, tag_cleaner_widget):
 
 @pytest.mark.db_tools
 def test_tag_cleaner_widget_showEvent_initializes_ui(qtbot, tag_cleaner_widget):
-    """showEvent() で UI が初期化される"""
+    """showEvent() で UI が�E期化されめE""
     tag_cleaner_widget.show()
     qtbot.waitExposed(tag_cleaner_widget)
 
@@ -69,13 +69,13 @@ def test_tag_cleaner_widget_initialize_ui_populates_formats(qtbot, tag_cleaner_w
     """_initialize_ui() でフォーマットコンボが設定される"""
     tag_cleaner_widget._initialize_ui()
 
-    assert tag_cleaner_widget.comboBoxFormat.count() == 3
-    assert tag_cleaner_widget.comboBoxFormat.itemText(0) == "All"
+    assert tag_cleaner_widget.comboBoxFormat.count() == 2
+    assert tag_cleaner_widget.comboBoxFormat.currentText() == "danbooru"
 
 
 @pytest.mark.db_tools
 def test_tag_cleaner_widget_convert_button_executes_conversion(qtbot, tag_cleaner_widget):
-    """変換ボタンクリックで変換が実行される"""
+    """変換ボタンクリチE��で変換が実行される"""
     tag_cleaner_widget._initialize_ui()
     tag_cleaner_widget.plainTextEditPrompt.setPlainText("cat, dog")
     tag_cleaner_widget.comboBoxFormat.setCurrentText("danbooru")
@@ -88,7 +88,7 @@ def test_tag_cleaner_widget_convert_button_executes_conversion(qtbot, tag_cleane
 
 @pytest.mark.db_tools
 def test_tag_cleaner_widget_convert_button_handles_no_service(qtbot, tag_cleaner_widget):
-    """変換ボタンクリックでサービスがない場合のエラー処理"""
+    """変換ボタンクリチE��でサービスがなぁE��合�Eエラー処琁E""
     tag_cleaner_widget._cleaner_service = None
     tag_cleaner_widget.plainTextEditPrompt.setPlainText("cat, dog")
 
@@ -99,9 +99,24 @@ def test_tag_cleaner_widget_convert_button_handles_no_service(qtbot, tag_cleaner
 
 @pytest.mark.db_tools
 def test_tag_cleaner_widget_initialize_legacy_method(qtbot, tag_cleaner_widget):
-    """initialize() legacy メソッドが動作する"""
+    """initialize() legacy メソチE��が動作すめE""
     new_service = MockTagCleanerService()
 
     tag_cleaner_widget.initialize(new_service)
 
     assert tag_cleaner_widget._cleaner_service is new_service
+
+
+@pytest.mark.db_tools
+def test_tag_cleaner_widget_set_service_after_show_initializes(qtbot):
+    """Initialize when service is set after showing."""
+    widget = TagCleanerWidget(parent=None, service=None)
+    qtbot.addWidget(widget)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    service = MockTagCleanerService()
+    widget.set_service(service)
+
+    assert widget._initialized is True
+    assert widget.comboBoxFormat.currentText() == "danbooru"

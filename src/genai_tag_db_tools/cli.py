@@ -65,10 +65,13 @@ def _dump(obj: object) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
 
 
-def _set_db_paths(base_db_paths: Iterable[str], user_db_dir: str | None) -> None:
-    runtime.set_base_database_paths(list(base_db_paths))
+def _set_db_paths(base_db_paths: Iterable[str] | None, user_db_dir: str | None) -> None:
+    from pathlib import Path
+
+    if base_db_paths:
+        runtime.set_base_database_paths([Path(p) for p in base_db_paths])
     if user_db_dir:
-        runtime.init_user_db(user_db_dir)
+        runtime.init_user_db(Path(user_db_dir))
 
 
 def _build_register_service() -> TagRegisterService:
@@ -146,12 +149,33 @@ def cmd_stats(args: argparse.Namespace) -> None:
     _dump(result)
 
 
-def _add_base_db_args(parser: argparse.ArgumentParser) -> None:
+
+def cmd_convert(args: argparse.Namespace) -> None:
+    """Convert tags to specified format."""
+    from genai_tag_db_tools.core_api import convert_tags
+
+    _set_db_paths(args.base_db, args.user_db_dir)
+    repo = get_default_repository()
+    
+    converted = convert_tags(repo, args.tags, args.format_name, separator=args.separator)
+    
+    if args.json:
+        result = {
+            "input": args.tags,
+            "output": converted,
+            "format": args.format_name,
+        }
+        _dump(result)
+    else:
+        print(converted)
+
+
+def _add_base_db_args(parser: argparse.ArgumentParser, required: bool = True) -> None:
     parser.add_argument(
         "--base-db",
         action="append",
-        required=True,
-        help="Base database path. Repeat for multiple base DBs.",
+        required=required,
+        help="Base database path. Repeat for multiple base DBs. Optional if using default cache.",
     )
     parser.add_argument(
         "--user-db-dir",
@@ -214,6 +238,14 @@ def main() -> None:
     stats_parser = subparsers.add_parser("stats", help="Show statistics.")
     _add_base_db_args(stats_parser)
     stats_parser.set_defaults(func=cmd_stats)
+
+    convert_parser = subparsers.add_parser("convert", help="Convert tags to format.")
+    convert_parser.add_argument("--tags", required=True, help="Comma-separated tags")
+    convert_parser.add_argument("--format-name", required=True, help="Target format (e.g., danbooru, e621)")
+    convert_parser.add_argument("--separator", default=", ", help="Tag separator (default: ', ')")
+    convert_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    _add_base_db_args(convert_parser, required=False)
+    convert_parser.set_defaults(func=cmd_convert)
 
     args = parser.parse_args()
     args.func(args)

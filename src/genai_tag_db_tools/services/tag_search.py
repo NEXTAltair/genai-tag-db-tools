@@ -54,35 +54,13 @@ class TagSearcher:
         return pl.DataFrame(rows)
 
     def convert_tag(self, search_tag: str, format_id: int) -> str:
-        """指定フォーマットの推奨タグへ変換する。"""
-        tag_id = self.tag_repo.get_tag_id_by_name(search_tag, partial=False)
-        if tag_id is None:
-            return search_tag
+        """指定フォーマットの推奨タグへ変換する。
 
-        status = self.tag_repo.get_tag_status(tag_id, format_id)
-        if not status:
-            return search_tag
-
-        preferred_tag_id = status.preferred_tag_id
-        if preferred_tag_id == tag_id:
-            return search_tag
-
-        preferred_tag_obj = self.tag_repo.get_tag_by_id(preferred_tag_id)
-        if not preferred_tag_obj:
-            return search_tag
-
-        preferred_tag = preferred_tag_obj.tag
-        if preferred_tag == "invalid tag":
-            self.logger.warning(
-                "[convert_tag] '%s' の推奨先が invalid tag のため変換を回避します。",
-                search_tag,
-            )
-            return search_tag
-
-        if search_tag != preferred_tag:
-            self.logger.info("タグ '%s' を '%s' に変換", search_tag, preferred_tag)
-
-        return preferred_tag
+        Deprecated: Use core_api.convert_tags() instead.
+        """
+        raise NotImplementedError(
+            "TagSearcher.convert_tag() is deprecated. Use core_api.convert_tags() instead."
+        )
 
     def get_tag_types(self, format_name: str) -> list[str]:
         """フォーマットに紐づくタグタイプ名一覧を取得する。"""
@@ -104,7 +82,10 @@ class TagSearcher:
         return self.tag_repo.get_tag_formats()
 
     def get_format_id(self, format_name: str | None) -> int:
-        """フォーマット名からフォーマットIDを取得する。"""
-        if format_name is None:
-            return 0
-        return self.tag_repo.get_format_id(format_name)
+        """フォーマット名からフォーマットIDを取得する。
+
+        Deprecated: Use core_api.get_tag_formats() and repo.get_format_id() instead.
+        """
+        raise NotImplementedError(
+            "TagSearcher.get_format_id() is deprecated. Use repo.get_format_id() instead."
+        )

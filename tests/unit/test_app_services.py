@@ -175,7 +175,7 @@ def test_tag_cleaner_service_get_tag_formats():
 
     formats = service.get_tag_formats()
 
-    assert formats == ["All", "danbooru", "e621"]
+    assert formats == ["danbooru", "e621"]
 
 
 @pytest.mark.db_tools

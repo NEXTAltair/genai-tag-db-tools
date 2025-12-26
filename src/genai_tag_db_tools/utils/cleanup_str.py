@@ -219,20 +219,10 @@ class TagCleaner:
         return caption.strip(" ,")
 
     def convert_prompt(self, prompt: str, format_name: str) -> str:
-        """
-        カンマ区切りの複数タグを DBで検索・変換し、一括で置き換える。
-        例: "1boy, 1girl" + "e621" → DBを参照して各タグを変換 → "male, female" (仮)
-        """
-        # フォーマットIDを取得
-        format_id = self.tag_searcher.get_format_id(format_name)
-        if format_id is None:
-            return prompt
+        """カンマ区切りの複数タグを DBで検索・変換し、一括で置き換える。
 
-        raw_tags = [t.strip() for t in prompt.split(",")]
-        converted_list = []
-        for tag in raw_tags:
-            converted = self.tag_searcher.convert_tag(tag, format_id)
-            converted_list.append(converted)
-
-        # カンマ区切りで結合して返す
-        return ", ".join(converted_list)
+        Deprecated: Use core_api.convert_tags() instead.
+        """
+        raise NotImplementedError(
+            "TagCleaner.convert_prompt() is deprecated. Use core_api.convert_tags() instead."
+        )
