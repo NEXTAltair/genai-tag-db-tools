@@ -7,7 +7,7 @@ name = "genai-tag-db-tools"  # パッケージ名 ハイフン推奨なぜかは
 version = "0.2.2"
 description = "AI生成画像のタグ管理ツール"  # プロジェクトの説明
 readme = "README.md"
-requires-python = ">=3.12,<3.13"  # 必要なPythonバージョン
+requires-python = ">=3.11,<3.14"  # 必要なPythonバージョン
 license = { text = "MIT" }
 authors = [{ name = "NEXTAltair" }]
 
@@ -91,6 +91,7 @@ markers = [
     "integration: Integration tests",
     "gui: GUI tests",
     "slow: Tests that take more time",
+    "network: Tests that require network access",
     "db_tools: Database tools tests",
 ]
 

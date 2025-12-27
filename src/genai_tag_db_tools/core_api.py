@@ -42,8 +42,6 @@ def build_downloaded_at_utc() -> str:
     return datetime.now(UTC).isoformat()
 
 
-
-
 def ensure_databases(requests: list[EnsureDbRequest]) -> list[EnsureDbResult]:
     if not requests:
         raise ValueError("requests は空にできません")

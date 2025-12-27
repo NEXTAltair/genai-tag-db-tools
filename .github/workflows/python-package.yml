@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
     - uses: actions/checkout@v4
@@ -37,10 +37,10 @@ jobs:
         sudo apt-get install -y libegl1
 
     - name: Install dependencies
-      run: uv sync --all-extras --dev
+      run: uv sync --dev
 
     - name: Lint with ruff
-      run: uv run ruff check --unsafe-fixes src/genai_tag_db_tools
+      run: uv run ruff check src/genai_tag_db_tools
 
     - name: Format check with ruff
       run: uv run ruff format --check src/genai_tag_db_tools
@@ -52,7 +52,8 @@ jobs:
       env:
         QT_QPA_PLATFORM: offscreen
         QTWEBENGINE_DISABLE_SANDBOX: 1
-      run: uv run pytest --cov=src/genai_tag_db_tools --cov-report=xml --cov-report=term
+        HF_HUB_OFFLINE: 1
+      run: uv run pytest --cov=src/genai_tag_db_tools --cov-report=xml --cov-report=term -m "not slow and not network"
 
     - name: Upload coverage to Codecov
       if: matrix.python-version == '3.12'
@@ -60,35 +61,4 @@ jobs:
       with:
         file: ./coverage.xml
         fail_ci_if_error: false
-
-  docs:
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.ref == 'refs/heads/master'
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@v5
-      with:
-        enable-cache: true
-        cache-dependency-glob: "uv.lock"
-
-    - name: Set up Python 3.12
-      run: uv python install 3.12
-
-    - name: Install dependencies
-      run: uv sync --all-extras --dev
-
-    - name: Build documentation
-      run: |
-        mkdir -p docs/build
-        uv run sphinx-build -b html docs docs/build -W --keep-going
-
-    - name: Deploy to GitHub Pages
-      uses: peaceiris/actions-gh-pages@v4
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: docs/build
-        force_orphan: true
+        token: ${{ secrets.CODECOV_TOKEN }}

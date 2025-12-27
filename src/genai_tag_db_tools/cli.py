@@ -85,8 +85,6 @@ def _build_register_service() -> TagRegisterService:
     return TagRegisterService(repo)
 
 
-
-
 def cmd_ensure_dbs(args: argparse.Namespace) -> None:
     cache = _build_cache_config(args)
     requests = [
