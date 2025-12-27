@@ -22,7 +22,7 @@
     </widget>
    </item>
    <item>
-    <widget class="QPushButton" name="statsGennerateButton">
+    <widget class="QPushButton" name="statsGenerateButton">
      <property name="text">
       <string>タグ統計情報を作成 ※時間がかかる</string>
      </property>

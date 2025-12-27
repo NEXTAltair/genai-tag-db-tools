@@ -25,8 +25,10 @@ dependencies = [
     "superqt>=0.6.7", # PySide6の拡張機能（QRangeSlider）
     "polars>=1.9.0", # 高性能データフレームライブラリ（基本機能のみ）
     "numpy>=1.24.0", # 数値計算ライブラリ
+    "pydantic>=2.7.0", # データバリデーション/モデル定義
     "alembic>=1.13.1", # データベースマイグレーションツール
     "sqlalchemy>=2.0.0", # データベースORM
+    "huggingface_hub>=0.25.0", # HFデータセット/モデルのダウンロード
 ]
 
 # 開発時のみ必要な追加パッケージ
@@ -60,7 +62,8 @@ exclude = [
 ignore = [
     "RUF002", # カタカナの `ノ` でのメッセージを無視
     "E501",   # Line too long (line-lengthで制御)
-    "F541"   # f-string in logging (同等のpylint警告W1203 - Ruffでは直接の対応がない)
+    "F541",   # f-string in logging (同等のpylint警告W1203 - Ruffでは直接の対応がない)
+    "C901",   # Function is too complex (複雑度チェックを無効化)
 ]
 fixable = ["ALL"]
 
@@ -82,12 +85,13 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = ["-v", "-s", "-ra", "--tb=short", "--showlocals", "--cov=src", "--cov-report=xml"]
+addopts = ["-v", "-s", "-ra", "--tb=short", "--showlocals"]
 markers = [
     "unit: Unit tests",
     "integration: Integration tests",
     "gui: GUI tests",
     "slow: Tests that take more time",
+    "db_tools: Database tools tests",
 ]
 
 

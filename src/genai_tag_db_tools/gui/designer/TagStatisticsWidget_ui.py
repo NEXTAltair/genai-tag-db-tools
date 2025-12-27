@@ -65,10 +65,10 @@ class Ui_TagStatisticsWidget(object):
 
         self.verticalLayout.addWidget(self.labelSummary)
 
-        self.statsGennerateButton = QPushButton(TagStatisticsWidget)
-        self.statsGennerateButton.setObjectName("statsGennerateButton")
+        self.statsGenerateButton = QPushButton(TagStatisticsWidget)
+        self.statsGenerateButton.setObjectName("statsGenerateButton")
 
-        self.verticalLayout.addWidget(self.statsGennerateButton)
+        self.verticalLayout.addWidget(self.statsGenerateButton)
 
         self.tabWidgetCharts = QTabWidget(TagStatisticsWidget)
         self.tabWidgetCharts.setObjectName("tabWidgetCharts")
@@ -105,7 +105,7 @@ class Ui_TagStatisticsWidget(object):
         self.labelSummary.setText(
             QCoreApplication.translate("TagStatisticsWidget", "\u30bf\u30b0\u6982\u8981", None)
         )
-        self.statsGennerateButton.setText(
+        self.statsGenerateButton.setText(
             QCoreApplication.translate(
                 "TagStatisticsWidget",
                 "\u30bf\u30b0\u7d71\u8a08\u60c5\u5831\u3092\u4f5c\u6210 \u203b\u6642\u9593\u304c\u304b\u304b\u308b",

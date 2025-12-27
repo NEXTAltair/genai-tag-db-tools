@@ -1,151 +1,401 @@
+"""TagSearchWidget のテスト（pytest-qt ベース）"""
+
+from __future__ import annotations
+
+from typing import Any
 from unittest.mock import MagicMock
 
 import polars as pl
 import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QTableWidgetItem
+from pydantic import ValidationError
+from PySide6.QtWidgets import QMessageBox
 
-# TagSearchWidget をインポート
 from genai_tag_db_tools.gui.widgets.tag_search import TagSearchWidget
-
-# TagSearchService などサービス層をインポート
 from genai_tag_db_tools.services.app_services import TagSearchService
 
 
+class MockTagSearchService(TagSearchService):
+    """TagSearchService のモック"""
+
+    def __init__(self):
+        """シグナルなしで初期化"""
+        self.mock_get_tag_formats = MagicMock(return_value=["danbooru", "e621"])
+        self.mock_get_tag_languages = MagicMock(return_value=["en", "ja"])
+        self.mock_get_tag_types = MagicMock(return_value=["character", "general"])
+        self.mock_search_tags = MagicMock(
+            return_value=pl.DataFrame(
+                [
+                    {
+                        "tag": "cat",
+                        "translations": {"ja": ["猫"]},
+                        "format_statuses": {
+                            "danbooru": {
+                                "alias": False,
+                                "deprecated": False,
+                                "usage_count": 50,
+                                "type_id": 0,
+                                "type_name": "general",
+                            }
+                        },
+                    }
+                ]
+            )
+        )
+
+    def get_tag_formats(self) -> list[str]:
+        return self.mock_get_tag_formats()
+
+    def get_tag_languages(self) -> list[str]:
+        return self.mock_get_tag_languages()
+
+    def get_tag_types(self, format_name: str | None) -> list[str]:
+        return self.mock_get_tag_types(format_name)
+
+    def search_tags(self, **kwargs: Any) -> pl.DataFrame:
+        return self.mock_search_tags(**kwargs)
+
+
 @pytest.fixture
-def widget_fixture(qtbot):
-    """
-    pytest-qt の qtbot で TagSearchWidget を生成し、テスト管理下に置く。
-    モック化されたサービスを注入することで、DBアクセスを回避する。
-    """
-    mock_service = MagicMock(spec=TagSearchService)
-    # get_tag_formats() や get_tag_languages() の戻り値を定義
-    mock_service.get_tag_formats.return_value = ["formatA", "formatB"]
-    mock_service.get_tag_languages.return_value = ["en", "ja"]
-    mock_service.get_tag_types.return_value = ["type1", "type2"]
-
-    # 検索結果用の DataFrame サンプル
-    # 例: 2行×3列くらい
-    sample_df = pl.DataFrame({"tag_id": [101, 102], "tag": ["cat", "dog"], "usage_count": [10, 20]})
-
-    # search_tags() が呼ばれたときに sample_df を返す
-    mock_service.search_tags.return_value = sample_df
-
-    widget = TagSearchWidget(service=mock_service)
+def tag_search_widget(qtbot):
+    """TagSearchWidget fixture with mock service"""
+    service = MockTagSearchService()
+    widget = TagSearchWidget(service=service, parent=None)
     qtbot.addWidget(widget)
-    widget.show()
-    return widget, mock_service
+    return widget
 
 
-def test_initialize_ui(widget_fixture):
-    """
-    initialize_ui() により、各コンボボックスが正しく初期化されるかをテスト。
-    """
-    widget, mock_service = widget_fixture
+@pytest.mark.db_tools
+def test_tag_search_widget_initialization(qtbot):
+    """Widget が正しく初期化される"""
+    service = MockTagSearchService()
+    widget = TagSearchWidget(service=service)
+    qtbot.addWidget(widget)
 
-    # comboBoxFormat のアイテムを確認
-    format_items = [widget.comboBoxFormat.itemText(i) for i in range(widget.comboBoxFormat.count())]
-    assert "All" in format_items
-    assert "formatA" in format_items
-    assert "formatB" in format_items
-
-    # comboBoxLanguage のアイテムを確認
-    lang_items = [widget.comboBoxLanguage.itemText(i) for i in range(widget.comboBoxLanguage.count())]
-    assert "All" in lang_items
-    assert "en" in lang_items
-    assert "ja" in lang_items
+    assert widget._service is service
+    assert widget._initialized is False
+    assert widget._results_model is not None
+    assert widget._results_view is not None
 
 
-def test_on_pushButtonSearch_clicked(widget_fixture, qtbot):
-    """
-    検索ボタンを押したときに search_tags が呼ばれ、テーブルが更新されるかテスト。
-    """
-    widget, mock_service = widget_fixture
+@pytest.mark.db_tools
+def test_tag_search_widget_set_service(qtbot, tag_search_widget):
+    """set_service() でサービスを設定できる"""
+    new_service = MockTagSearchService()
+    tag_search_widget.set_service(new_service)
 
-    # UI操作: キーワードを入力して検索ボタン押下
-    widget.lineEditKeyword.setText("cat")
-    qtbot.mouseClick(widget.pushButtonSearch, Qt.MouseButton.LeftButton)
-
-    # mock_service.search_tags が呼ばれたか
-    mock_service.search_tags.assert_called_once()
-    _, call_kwargs = mock_service.search_tags.call_args
-    # キーワード引数をチェック
-    assert call_kwargs["keyword"] == "cat"
-    assert call_kwargs["partial"] == True  # デフォルトのpartial検索設定
-
-    # テーブルに表示されたか確認
-    table = widget.tableWidgetResults
-    assert table.rowCount() == 2
-    assert table.columnCount() == 3
-
-    # 行0, 列0 の Itemを確認
-    item_0_0 = table.item(0, 0)
-    assert isinstance(item_0_0, QTableWidgetItem)
-    assert item_0_0.text() == "101"  # sample_df の "tag_id" 行
-
-    # 行0, 列1 → "cat"
-    item_0_1 = table.item(0, 1)
-    assert item_0_1.text() == "cat"
+    assert tag_search_widget._service is new_service
+    assert tag_search_widget._initialized is False
 
 
-def test_empty_result(widget_fixture, qtbot):
-    """
-    search_tags が空の DataFrame を返した場合、テーブルがクリアされるかテスト。
-    """
-    widget, mock_service = widget_fixture
+@pytest.mark.db_tools
+def test_tag_search_widget_showEvent_initializes_ui(qtbot, tag_search_widget):
+    """showEvent() で UI が初期化される"""
+    tag_search_widget.show()
+    qtbot.waitExposed(tag_search_widget)
 
-    # 空DataFrame を返すように変更
-    mock_service.search_tags.return_value = pl.DataFrame([])
-
-    # 検索ボタン押下
-    qtbot.mouseClick(widget.pushButtonSearch, Qt.MouseButton.LeftButton)
-
-    # テーブルがクリアされているか
-    table = widget.tableWidgetResults
-    assert table.rowCount() == 0
-    assert table.columnCount() == 0
+    assert tag_search_widget._initialized is True
+    assert tag_search_widget.comboBoxFormat.count() > 0
+    assert tag_search_widget.comboBoxLanguage.count() > 0
 
 
-def test_slider_usage_range(widget_fixture):
-    """
-    スライダーの get_range() が TagSearchWidget 内で使われるかをテスト。
-    ここでは単純に CustomLogScaleSlider のUI操作まではテストせず、値を直接セットして確認。
-    """
-    widget, mock_service = widget_fixture
+@pytest.mark.db_tools
+def test_tag_search_widget_initialize_ui_populates_combos(qtbot, tag_search_widget):
+    """initialize_ui() でコンボボックスが設定される"""
+    tag_search_widget.initialize_ui()
 
-    # カスタムスライダー
-    slider = widget.customSlider.slider  # QRangeSlider
-    # 0〜100 の間でセット ( 例: (25,75) )
-    slider.setValue((25, 75))
+    # Format combo: "All" + formats
+    assert tag_search_widget.comboBoxFormat.count() == 3
+    assert tag_search_widget.comboBoxFormat.itemText(0) == "All"
+    assert tag_search_widget.comboBoxFormat.itemText(1) == "danbooru"
 
-    # on_pushButtonSearch_clicked 呼び出し
-    # (検索ボタンを押す手もあるが、ここでは直接メソッド呼び出しでも可)
-    widget.on_pushButtonSearch_clicked()
-
-    # mock_service.search_tags の呼び出しを確認
-    _, call_kwargs = mock_service.search_tags.call_args
-    assert call_kwargs["min_usage"] is not None
-    assert call_kwargs["max_usage"] is not None
-    # 具体的に scale_to_count(25), scale_to_count(75) の値を確認したいなら
-    # slider.valueChanged等を経由して計算されるため、CustomLogScaleSliderの挙動をモック or assert
+    # Language combo: "All" + languages
+    assert tag_search_widget.comboBoxLanguage.count() == 3
+    assert tag_search_widget.comboBoxLanguage.itemText(0) == "All"
 
 
-@pytest.mark.skip(reason="save 機能未実装のためスキップ")
-def test_save_search_button_clicked(widget_fixture, qtbot):
-    """
-    [保存ボタン] クリック時に on_pushButtonSaveSearch_clicked が呼ばれるか確認。
-    実際の保存処理は未実装なので、print のスタブ呼び出しをチェックする。
-    """
-    widget, _ = widget_fixture
+@pytest.mark.db_tools
+def test_tag_search_widget_build_query_partial_search(qtbot, tag_search_widget):
+    """_build_query() で部分検索クエリを構築できる"""
+    tag_search_widget.lineEditKeyword.setText("cat")
+    tag_search_widget.radioButtonPartial.setChecked(True)
 
-    # stdoutキャプチャなどをする or print をpatch する
-    # ここでは簡単にメソッドを直接呼び出すか、ボタンクリックする
-    with qtbot.waitSignal(widget.error_occurred, timeout=300, raising=False) as signal_catcher:
-        # signal_catcher は "error_occurred" シグナルを待つが、発生しない想定
-        qtbot.mouseClick(widget.pushButtonSaveSearch, Qt.MouseButton.LeftButton)
+    query = tag_search_widget._build_query()
 
-    # シグナルが発行されていないか確認
-    # signal_catcher.signal_triggered == False (発火していない) or None
-    assert not signal_catcher.signal_triggered
-    # 実際には "print" で "[on_pushButtonSaveSearch_clicked] 保存ロジック..." が出るが
-    # 現状はそこまでテストせずに済ませる
+    assert query.keyword == "cat"
+    assert query.partial is True
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_build_query_exact_search(qtbot, tag_search_widget):
+    """_build_query() で完全一致検索クエリを構築できる"""
+    tag_search_widget.lineEditKeyword.setText("cat")
+    tag_search_widget.radioButtonExact.setChecked(True)
+
+    query = tag_search_widget._build_query()
+
+    assert query.keyword == "cat"
+    assert query.partial is False
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_build_query_with_format(qtbot, tag_search_widget):
+    """_build_query() でフォーマット指定クエリを構築できる"""
+    tag_search_widget.initialize_ui()
+    tag_search_widget.comboBoxFormat.setCurrentText("danbooru")
+
+    query = tag_search_widget._build_query()
+
+    assert query.format_name == "danbooru"
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_build_query_normalizes_all(qtbot, tag_search_widget):
+    """_build_query() で "All" を None に正規化する"""
+    tag_search_widget.initialize_ui()
+    tag_search_widget.comboBoxFormat.setCurrentText("All")
+
+    query = tag_search_widget._build_query()
+
+    assert query.format_name is None
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_search_button_executes_search(qtbot, tag_search_widget, monkeypatch):
+    """検索ボタンクリックで検索が実行される"""
+    tag_search_widget.lineEditKeyword.setText("cat")
+
+    # MessageBox を無効化
+    monkeypatch.setattr(QMessageBox, "critical", MagicMock())
+    monkeypatch.setattr(QMessageBox, "warning", MagicMock())
+
+    tag_search_widget.on_pushButtonSearch_clicked()
+
+    tag_search_widget._service.mock_search_tags.assert_called_once()
+    assert tag_search_widget._results_model.rowCount(None) > 0
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_search_updates_model(qtbot, tag_search_widget, monkeypatch):
+    """検索結果がモデルに反映される"""
+    tag_search_widget.lineEditKeyword.setText("cat")
+
+    monkeypatch.setattr(QMessageBox, "critical", MagicMock())
+
+    tag_search_widget.on_pushButtonSearch_clicked()
+
+    assert tag_search_widget._results_model.rowCount(None) == 1
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_search_handles_validation_error(qtbot, tag_search_widget, monkeypatch):
+    """検索時の ValidationError を処理する"""
+    tag_search_widget._service.mock_search_tags.side_effect = ValidationError.from_exception_data(
+        "test",
+        [
+            {
+                "type": "value_error",
+                "loc": ("test",),
+                "msg": "Test error",
+                "input": None,
+                "ctx": {"error": "Test error"},
+            }
+        ],
+    )
+
+    mock_critical = MagicMock()
+    monkeypatch.setattr(QMessageBox, "critical", mock_critical)
+
+    error_messages = []
+
+    def capture_error(msg: str):
+        error_messages.append(msg)
+
+    tag_search_widget.error_occurred.connect(capture_error)
+
+    tag_search_widget.on_pushButtonSearch_clicked()
+
+    mock_critical.assert_called_once()
+    assert len(error_messages) == 1
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_search_handles_file_not_found(qtbot, tag_search_widget, monkeypatch):
+    """検索時の FileNotFoundError を処理する"""
+    tag_search_widget._service.mock_search_tags.side_effect = FileNotFoundError("Database not found")
+
+    mock_warning = MagicMock()
+    monkeypatch.setattr(QMessageBox, "warning", mock_warning)
+
+    error_messages = []
+
+    def capture_error(msg: str):
+        error_messages.append(msg)
+
+    tag_search_widget.error_occurred.connect(capture_error)
+
+    tag_search_widget.on_pushButtonSearch_clicked()
+
+    mock_warning.assert_called_once()
+    assert len(error_messages) == 1
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_search_handles_unexpected_error(qtbot, tag_search_widget, monkeypatch):
+    """検索時の予期しないエラーを処理する"""
+    tag_search_widget._service.mock_search_tags.side_effect = RuntimeError("Unexpected error")
+
+    mock_critical = MagicMock()
+    monkeypatch.setattr(QMessageBox, "critical", mock_critical)
+
+    error_messages = []
+
+    def capture_error(msg: str):
+        error_messages.append(msg)
+
+    tag_search_widget.error_occurred.connect(capture_error)
+
+    tag_search_widget.on_pushButtonSearch_clicked()
+
+    mock_critical.assert_called_once()
+    assert len(error_messages) == 1
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_update_type_combo_box_all_format(qtbot, tag_search_widget):
+    """update_type_combo_box() で "All" フォーマット時に全タイプを取得"""
+    tag_search_widget.initialize_ui()
+    tag_search_widget.comboBoxFormat.setCurrentText("All")
+
+    tag_search_widget.update_type_combo_box()
+
+    assert tag_search_widget.comboBoxType.count() > 0
+    tag_search_widget._service.mock_get_tag_types.assert_called_with(None)
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_update_type_combo_box_specific_format(qtbot, tag_search_widget):
+    """update_type_combo_box() で特定フォーマット時にそのタイプを取得"""
+    tag_search_widget.initialize_ui()
+    tag_search_widget.comboBoxFormat.setCurrentText("danbooru")
+
+    tag_search_widget.update_type_combo_box()
+
+    assert tag_search_widget.comboBoxType.count() > 0
+    tag_search_widget._service.mock_get_tag_types.assert_called_with("danbooru")
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_save_search_not_implemented(qtbot, tag_search_widget, caplog):
+    """on_pushButtonSaveSearch_clicked() で未実装ログを出力"""
+    import logging
+
+    with caplog.at_level(logging.INFO):
+        tag_search_widget.on_pushButtonSaveSearch_clicked()
+
+    assert "not yet implemented" in caplog.text.lower()
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_result_count_label_initialization(qtbot, tag_search_widget):
+    """結果件数表示ラベルが初期化される"""
+    tag_search_widget._setup_results_view()
+
+    assert tag_search_widget._result_count_label is not None
+    assert "0" in tag_search_widget._result_count_label.text()
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_result_count_label_updates_after_search(qtbot, tag_search_widget, monkeypatch):
+    """検索実行後に結果件数が更新される"""
+    tag_search_widget.lineEditKeyword.setText("cat")
+    tag_search_widget._setup_results_view()
+
+    # MessageBox を無効化
+    monkeypatch.setattr(QMessageBox, "critical", MagicMock())
+    monkeypatch.setattr(QMessageBox, "warning", MagicMock())
+
+    tag_search_widget.on_pushButtonSearch_clicked()
+
+    # 件数ラベルが更新される(モックサービスは1件返す)
+    assert tag_search_widget._result_count_label is not None
+    assert "1" in tag_search_widget._result_count_label.text()
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_search_uses_unlimited_limit(qtbot, tag_search_widget, monkeypatch):
+    """検索時にlimitパラメータなし（無制限）で実行される"""
+    tag_search_widget.lineEditKeyword.setText("cat")
+
+    # MessageBox を無効化
+    monkeypatch.setattr(QMessageBox, "critical", MagicMock())
+
+    tag_search_widget.on_pushButtonSearch_clicked()
+
+    # search_tagsが呼ばれた際の引数を確認
+    call_kwargs = tag_search_widget._service.mock_search_tags.call_args.kwargs
+
+    # limit パラメータが渡されていないか、Noneであることを確認
+    assert "limit" not in call_kwargs or call_kwargs.get("limit") is None
+
+
+@pytest.mark.db_tools
+def test_tag_search_widget_result_count_label_updates_with_multiple_results(
+    qtbot, tag_search_widget, monkeypatch
+):
+    """複数件の検索結果で件数表示が正しく更新される"""
+    # モックサービスを3件返すように変更
+    tag_search_widget._service.mock_search_tags.return_value = pl.DataFrame(
+        [
+            {
+                "tag": "cat",
+                "translations": {"ja": ["猫"]},
+                "format_statuses": {
+                    "danbooru": {
+                        "alias": False,
+                        "deprecated": False,
+                        "usage_count": 50,
+                        "type_id": 0,
+                        "type_name": "general",
+                    }
+                },
+            },
+            {
+                "tag": "dog",
+                "translations": {"ja": ["犬"]},
+                "format_statuses": {
+                    "danbooru": {
+                        "alias": False,
+                        "deprecated": False,
+                        "usage_count": 30,
+                        "type_id": 0,
+                        "type_name": "general",
+                    }
+                },
+            },
+            {
+                "tag": "bird",
+                "translations": {"ja": ["鳥"]},
+                "format_statuses": {
+                    "danbooru": {
+                        "alias": False,
+                        "deprecated": False,
+                        "usage_count": 20,
+                        "type_id": 0,
+                        "type_name": "general",
+                    }
+                },
+            },
+        ]
+    )
+
+    tag_search_widget.lineEditKeyword.setText("animal")
+    tag_search_widget._setup_results_view()
+
+    # MessageBox を無効化
+    monkeypatch.setattr(QMessageBox, "critical", MagicMock())
+
+    tag_search_widget.on_pushButtonSearch_clicked()
+
+    # 件数ラベルが3件を表示
+    assert tag_search_widget._result_count_label is not None
+    assert "3" in tag_search_widget._result_count_label.text()
