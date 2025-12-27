@@ -20,8 +20,10 @@ class DummySearcher:
     """TagSearcher のモック"""
 
     def __init__(self) -> None:
-        self.tag_repo = SimpleNamespace(
+        self.reader = SimpleNamespace(
             get_format_id=lambda name: {"danbooru": 1, "e621": 2}.get(name),
+            get_tag_formats=lambda: ["danbooru", "e621"],
+            get_format_name=lambda format_id: {1: "danbooru", 2: "e621"}.get(format_id),
         )
 
     def get_tag_formats(self) -> list[str]:
@@ -95,9 +97,18 @@ def test_tag_core_service_get_format_id():
 
 
 @pytest.mark.db_tools
-def test_tag_core_service_convert_tag():
+def test_tag_core_service_convert_tag(monkeypatch):
     searcher = DummySearcher()
     service = TagCoreService(searcher=searcher)
+
+    monkeypatch.setattr(
+        "genai_tag_db_tools.services.app_services.get_default_reader",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "genai_tag_db_tools.core_api.convert_tags",
+        lambda _reader, tag, _format_name: "neko" if tag == "cat" else tag,
+    )
 
     converted = service.convert_tag("cat", 1)
 
@@ -145,9 +156,22 @@ def test_tag_search_service_get_tag_types_none_format(qtbot):
 
 
 @pytest.mark.db_tools
-def test_tag_search_service_search_tags(qtbot):
+def test_tag_search_service_search_tags(qtbot, monkeypatch):
     searcher = DummySearcher()
     service = TagSearchService(searcher=searcher)
+
+    monkeypatch.setattr(
+        "genai_tag_db_tools.services.app_services.get_default_reader",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "genai_tag_db_tools.core_api.search_tags",
+        lambda *_args, **_kwargs: {"items": [{"tag": "cat", "tag_id": 1}], "total": 1},
+    )
+    monkeypatch.setattr(
+        "genai_tag_db_tools.gui.converters.search_result_to_dataframe",
+        lambda _result: pl.DataFrame([{"tag": "cat", "tag_id": 1}]),
+    )
 
     result = service.search_tags("cat")
 
@@ -157,9 +181,22 @@ def test_tag_search_service_search_tags(qtbot):
 
 
 @pytest.mark.db_tools
-def test_tag_search_service_emits_error_on_exception(qtbot):
+def test_tag_search_service_emits_error_on_exception(qtbot, monkeypatch):
     """Test that searching for non-existent keyword returns empty results."""
     service = TagSearchService()
+
+    monkeypatch.setattr(
+        "genai_tag_db_tools.services.app_services.get_default_reader",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "genai_tag_db_tools.core_api.search_tags",
+        lambda *_args, **_kwargs: {"items": [], "total": 0},
+    )
+    monkeypatch.setattr(
+        "genai_tag_db_tools.gui.converters.search_result_to_dataframe",
+        lambda _result: pl.DataFrame([]),
+    )
 
     # Non-existent keyword should return empty DataFrame, not raise error
     result = service.search_tags("nonexistent_keyword_xyz_abcdef_12345")
@@ -179,9 +216,18 @@ def test_tag_cleaner_service_get_tag_formats():
 
 
 @pytest.mark.db_tools
-def test_tag_cleaner_service_convert_prompt():
+def test_tag_cleaner_service_convert_prompt(monkeypatch):
     core = TagCoreService(searcher=DummySearcher())
     service = TagCleanerService(core=core)
+
+    monkeypatch.setattr(
+        "genai_tag_db_tools.services.app_services.get_default_reader",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "genai_tag_db_tools.core_api.convert_tags",
+        lambda _reader, tags, _format_name: tags.replace("cat", "neko"),
+    )
 
     converted = service.convert_prompt("cat, dog", "danbooru")
 
@@ -189,9 +235,18 @@ def test_tag_cleaner_service_convert_prompt():
 
 
 @pytest.mark.db_tools
-def test_tag_cleaner_service_convert_prompt_unknown_format():
+def test_tag_cleaner_service_convert_prompt_unknown_format(monkeypatch):
     core = TagCoreService(searcher=DummySearcher())
     service = TagCleanerService(core=core)
+
+    monkeypatch.setattr(
+        "genai_tag_db_tools.services.app_services.get_default_reader",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "genai_tag_db_tools.core_api.convert_tags",
+        lambda _reader, tags, _format_name: tags,
+    )
 
     converted = service.convert_prompt("cat, dog", "unknown")
 

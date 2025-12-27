@@ -8,7 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from genai_tag_db_tools.db.repository import TagRepository
+from genai_tag_db_tools.db.repository import MergedTagReader, TagReader, TagRepository
 from genai_tag_db_tools.db.schema import Base, Tag, TagFormat, TagTranslation
 
 pytestmark = pytest.mark.db_tools
@@ -26,14 +26,16 @@ def session_factory() -> Callable[[], Session]:
 
 
 def test_create_tag_returns_existing_id(session_factory: Callable[[], Session]) -> None:
-    repo = TagRepository(session_factory)
+    reader = TagReader(session_factory)
+    repo = TagRepository(session_factory, reader=MergedTagReader(base_repo=reader))
     first_id = repo.create_tag("witch", "witch")
     second_id = repo.create_tag("witch", "witch")
     assert first_id == second_id
 
 
 def test_bulk_insert_tags_deduplicates_by_tag(session_factory: Callable[[], Session]) -> None:
-    repo = TagRepository(session_factory)
+    reader = TagReader(session_factory)
+    repo = TagRepository(session_factory, reader=MergedTagReader(base_repo=reader))
     df = pl.DataFrame(
         {
             "source_tag": ["a", "b", "a"],
@@ -50,7 +52,7 @@ def test_bulk_insert_tags_deduplicates_by_tag(session_factory: Callable[[], Sess
 
 def test_get_tag_formats_returns_sorted_list(session_factory: Callable[[], Session]) -> None:
     """Test that get_tag_formats returns formats in alphabetical order."""
-    repo = TagRepository(session_factory)
+    repo = TagReader(session_factory)
 
     with session_factory() as session:
         session.add(TagFormat(format_id=1, format_name="e621"))
@@ -66,7 +68,7 @@ def test_get_tag_formats_returns_sorted_list(session_factory: Callable[[], Sessi
 
 def test_get_tag_languages_returns_sorted_list(session_factory: Callable[[], Session]) -> None:
     """Test that get_tag_languages returns languages in alphabetical order."""
-    repo = TagRepository(session_factory)
+    repo = TagReader(session_factory)
 
     with session_factory() as session:
         tag = Tag(tag_id=1, tag="test", source_tag="test")

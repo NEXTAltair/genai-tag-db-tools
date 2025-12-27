@@ -7,7 +7,11 @@ import polars as pl
 from PySide6.QtCore import QObject, Signal
 from sqlalchemy.orm import Session
 
-from genai_tag_db_tools.db.repository import TagRepository
+from genai_tag_db_tools.db.repository import (
+    TagRepository,
+    get_default_reader,
+    get_default_repository,
+)
 from genai_tag_db_tools.services.tag_search import TagSearcher
 from genai_tag_db_tools.services.tag_statistics import TagStatistics
 
@@ -17,7 +21,7 @@ if TYPE_CHECKING:
 
 
 class GuiServiceBase(QObject):
-    """GUI向けの共通基底クラス。シグナル/ロガー。"""
+    """GUI向けの共通基 底クラス、シグナル/ロガー"""
 
     progress_updated = Signal(int, str)  # (progress, message)
     process_finished = Signal(str)  # (message)
@@ -28,9 +32,9 @@ class GuiServiceBase(QObject):
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def close(self) -> None:
-        """リソース解放。サブクラスでオーバーライド可能。"""
+        """リソース解放(サブクラスでオーバーライド可能)"""
         self.logger.info("Closing %s", self.__class__.__name__)
-        # Signal の切断
+        # Signal
         try:
             self.disconnect()
         except TypeError:
@@ -39,40 +43,38 @@ class GuiServiceBase(QObject):
 
 
 class TagCoreService:
-    """DBのコア検索/変換機能をまとめた軽量サービス。"""
+    """DBのコア検索/変換機能をまとめた軽量サービス"""
 
     def __init__(self, searcher: TagSearcher | None = None):
         self.logger = logging.getLogger(self.__class__.__name__)
         self._searcher = searcher or TagSearcher()
 
     def get_tag_formats(self) -> list[str]:
-        """タグフォーマット一覧を取得する。"""
+        """タグフォーマット一覧を取得する"""
         return self._searcher.get_tag_formats()
 
     def get_tag_languages(self) -> list[str]:
-        """言語一覧を取得する。"""
+        """言語一覧を取得する"""
         return self._searcher.get_tag_languages()
 
     def get_format_id(self, format_name: str) -> int:
-        """フォーマット名からIDを取得する。"""
-        return self._searcher.tag_repo.get_format_id(format_name)
+        """フォーマット名からIDを取得する"""
+        return self._searcher.reader.get_format_id(format_name)
 
     def convert_tag(self, tag: str, format_id: int) -> str:
-        """単一タグを指定フォーマットに変換する。
+        """単一タグを指定フォーマットに変換する
         Note: This method is deprecated. Use core_api.convert_tags() instead.
         """
         from genai_tag_db_tools.core_api import convert_tags
-        from genai_tag_db_tools.db.repository import get_default_repository
-
-        repo = get_default_repository()
-        format_name = self._searcher.tag_repo.get_tag_formats()[format_id - 1] if format_id > 0 else None
+        reader = get_default_reader()
+        format_name = self._searcher.reader.get_format_name(format_id) if format_id > 0 else None
         if not format_name:
             return tag
-        return convert_tags(repo, tag, format_name)
+        return convert_tags(reader, tag, format_name)
 
 
 class TagSearchService(GuiServiceBase):
-    """GUI向け検索サービス。TagSearcher を利用。"""
+    """GUI向け検索サービス(TagSearcher を利用)"""
 
     def __init__(
         self,
@@ -89,18 +91,12 @@ class TagSearchService(GuiServiceBase):
     def _get_merged_reader(self) -> "MergedTagReader":
         """Lazy-initialize MergedTagReader if not provided."""
         if not self._merged_reader_initialized:
-            from genai_tag_db_tools.db.repository import MergedTagReader, get_default_repository
-
-            repo = get_default_repository()
-            if isinstance(repo, MergedTagReader):
-                self._merged_reader = repo
-            else:
-                self._merged_reader = MergedTagReader(base_repo=repo, user_repo=None)
+            self._merged_reader = get_default_reader()
             self._merged_reader_initialized = True
         return self._merged_reader
 
     def get_tag_formats(self) -> list[str]:
-        """タグフォーマット一覧を取得する。"""
+        """タグフォーマット一覧を取得する"""
         try:
             return self._searcher.get_tag_formats()
         except Exception as e:
@@ -109,7 +105,7 @@ class TagSearchService(GuiServiceBase):
             raise
 
     def get_tag_languages(self) -> list[str]:
-        """言語一覧を取得する。"""
+        """言語一覧を取得する"""
         try:
             return self._searcher.get_tag_languages()
         except Exception as e:
@@ -118,7 +114,7 @@ class TagSearchService(GuiServiceBase):
             raise
 
     def get_tag_types(self, format_name: str | None) -> list[str]:
-        """フォーマットに紐づくタグタイプ一覧を取得する。"""
+        """フォーマットに紐づくタグ タイプ一覧を取得する"""
         try:
             if format_name is None:
                 return self._searcher.get_all_types()
@@ -139,7 +135,7 @@ class TagSearchService(GuiServiceBase):
         max_usage: int | None = None,
         alias: bool | None = None,
     ) -> pl.DataFrame:
-        """タグ検索を行い、Polars DataFrameで返す (core_api統合版)。
+        """タグ検索を行い、Polars DataFrameで返す (core_api統合版)、E
         Args:
             keyword: Search keyword.
             partial: Whether to use partial matching.
@@ -194,7 +190,7 @@ class TagSearchService(GuiServiceBase):
 
 
 class TagCleanerService(GuiServiceBase):
-    """GUIの一括変換など簡易処理をまとめるサービス。"""
+    """GUIの一括変換など簡易�E琁E��まとめるサービス"""
 
     def __init__(self, parent: QObject | None = None, core: TagCoreService | None = None):
         super().__init__(parent)
@@ -205,14 +201,12 @@ class TagCleanerService(GuiServiceBase):
         return self._core.get_tag_formats()
 
     def convert_prompt(self, prompt: str, format_name: str) -> str:
-        """カンマ区切りのタグを指定フォーマットへ変換する。"""
+        """カンマ区別のタグを指定フォーマットへ変換する"""
         from genai_tag_db_tools.core_api import convert_tags
-        from genai_tag_db_tools.db.repository import get_default_repository
-
         self.logger.info("TagCleanerService: convert_prompt() called")
 
-        repo = get_default_repository()
-        return convert_tags(repo, prompt, format_name)
+        reader = get_default_reader()
+        return convert_tags(reader, prompt, format_name)
 
 
 class TagImportService(GuiServiceBase):
@@ -224,11 +218,17 @@ class TagImportService(GuiServiceBase):
 
 
 class TagRegisterService(GuiServiceBase):
-    """GUI向けのタグ登録サービス。"""
+    """GUI向けのタグ登録サービス"""
 
-    def __init__(self, parent: QObject | None = None, repository: TagRepository | None = None):
+    def __init__(
+        self,
+        parent: QObject | None = None,
+        repository: TagRepository | None = None,
+        reader: "MergedTagReader | None" = None,
+    ):
         super().__init__(parent)
-        self._repo = repository if repository else TagRepository()
+        self._repo = repository if repository else get_default_repository()
+        self._reader = reader or get_default_reader()
 
     def register_tag(self, request: "TagRegisterRequest") -> "TagRegisterResult":
         """Register a tag and optional metadata via the repository.
@@ -243,23 +243,23 @@ class TagRegisterService(GuiServiceBase):
         try:
             tag = request.tag
             source_tag = request.source_tag or request.tag
-            fmt_id = self._repo.get_format_id(request.format_name)
+            fmt_id = self._reader.get_format_id(request.format_name)
             if fmt_id is None:
-                raise ValueError(f"format_name が無効です: {request.format_name}")
+                raise ValueError(f"format_name が無効でぁE {request.format_name}")
 
-            type_id = self._repo.get_type_id(request.type_name)
+            type_id = self._reader.get_type_id(request.type_name)
             if type_id is None:
-                raise ValueError(f"type_name が無効です: {request.type_name}")
+                raise ValueError(f"type_name が無効でぁE {request.type_name}")
 
-            existing_id = self._repo.get_tag_id_by_name(tag, partial=False)
+            existing_id = self._reader.get_tag_id_by_name(tag, partial=False)
             tag_id = self._repo.create_tag(source_tag, tag)
             created = existing_id is None
 
             preferred_tag_id = tag_id
             if request.alias:
                 if not request.preferred_tag:
-                    raise ValueError("alias=True の場合は preferred_tag が必要です。")
-                preferred_tag_id = self._repo.get_tag_id_by_name(request.preferred_tag, partial=False)
+                    raise ValueError("alias=True の場合 preferred_tag が必須です")
+                preferred_tag_id = self._reader.get_tag_id_by_name(request.preferred_tag, partial=False)
                 if preferred_tag_id is None:
                     raise ValueError(f"推奨タグが見つかりません: {request.preferred_tag}")
 
@@ -278,12 +278,12 @@ class TagRegisterService(GuiServiceBase):
             return TagRegisterResult(created=created)
 
         except Exception as e:
-            self.logger.error("タグ登録中にエラー発生: %s", e)
+            self.logger.error("タグ登録中にエラー発甁E %s", e)
             self.error_occurred.emit(str(e))
             raise
 
     def register_or_update_tag(self, tag_info: dict) -> int:
-        """タグ登録/更新を行う。"""
+        """タグ登録/更新を行う"""
         try:
             normalized_tag = tag_info.get("normalized_tag")
             source_tag = tag_info.get("source_tag")
@@ -294,7 +294,7 @@ class TagRegisterService(GuiServiceBase):
             translation = tag_info.get("translation", "")
 
             if not normalized_tag or not source_tag:
-                raise ValueError("タグまたはソースタグが空です。")
+                raise ValueError("タグまたはソースタグが空です")
 
             if format_name and type_name:
                 from genai_tag_db_tools.models import TagRegisterRequest, TagTranslationInput
@@ -312,16 +312,16 @@ class TagRegisterService(GuiServiceBase):
                         translations=translations,
                     )
                 )
-                tag_id = self._repo.get_tag_id_by_name(normalized_tag, partial=False)
+                tag_id = self._reader.get_tag_id_by_name(normalized_tag, partial=False)
                 if tag_id is None:
-                    raise ValueError("登録後にタグIDが見つかりません。")
+                    raise ValueError("登録後にタグIDが見つかりません")
                 if usage_count > 0:
-                    fmt_id = self._repo.get_format_id(format_name)
+                    fmt_id = self._reader.get_format_id(format_name)
                     self._repo.update_usage_count(tag_id, fmt_id, usage_count)
                 return tag_id
 
-            fmt_id = self._repo.get_format_id(format_name)
-            type_id = self._repo.get_type_id(type_name) if type_name else None
+            fmt_id = self._reader.get_format_id(format_name)
+            type_id = self._reader.get_type_id(type_name) if type_name else None
 
             tag_id = self._repo.create_tag(source_tag, normalized_tag)
 
@@ -342,19 +342,19 @@ class TagRegisterService(GuiServiceBase):
             return tag_id
 
         except Exception as e:
-            self.logger.error("タグ登録中にエラー発生: %s", e)
+            self.logger.error("タグ登録中にエラー発甁E %s", e)
             self.error_occurred.emit(str(e))
             raise
 
     def get_tag_details(self, tag_id: int) -> pl.DataFrame:
-        """登録後のタグ詳細を取得する。"""
+        """登録後のタグ詳細を取得する"""
         try:
-            tag_obj = self._repo.get_tag_by_id(tag_id)
+            tag_obj = self._reader.get_tag_by_id(tag_id)
             if not tag_obj:
                 return pl.DataFrame()
 
-            status_list = self._repo.list_tag_statuses(tag_id)
-            translations = self._repo.get_translations(tag_id)
+            status_list = self._reader.list_tag_statuses(tag_id)
+            translations = self._reader.get_translations(tag_id)
 
             rows = [
                 {
@@ -363,7 +363,7 @@ class TagRegisterService(GuiServiceBase):
                     "formats": [s.format_id for s in status_list],
                     "types": [s.type_id for s in status_list],
                     "total_usage_count": sum(
-                        self._repo.get_usage_count(tag_id, s.format_id) or 0 for s in status_list
+                        self._reader.get_usage_count(tag_id, s.format_id) or 0 for s in status_list
                     ),
                     "translations": {t.language: t.translation for t in translations},
                 }
@@ -372,13 +372,13 @@ class TagRegisterService(GuiServiceBase):
             return pl.DataFrame(rows)
 
         except Exception as e:
-            self.logger.error("タグ詳細取得中にエラー発生: %s", e)
+            self.logger.error("タグ詳細取得中にエラー発甁E %s", e)
             self.error_occurred.emit(str(e))
             raise
 
 
 class TagStatisticsService(GuiServiceBase):
-    """統計取得用のGUIサービス。"""
+    """統計取得用のGUIサービス"""
 
     def __init__(
         self,
@@ -391,61 +391,102 @@ class TagStatisticsService(GuiServiceBase):
         # Store merged_reader, will be lazy-initialized on first use if None
         self._merged_reader = merged_reader
         self._merged_reader_initialized = merged_reader is not None
+        self._cache_version: str | None = None
+        self._cache_general_stats: dict[str, Any] | None = None
+        self._cache_usage_df: pl.DataFrame | None = None
+        self._cache_type_dist_df: pl.DataFrame | None = None
+        self._cache_translation_df: pl.DataFrame | None = None
+
+    def _get_cache_version(self) -> str | None:
+        try:
+            reader = getattr(self._stats, "reader", None)
+            if reader is not None and hasattr(reader, "get_database_version"):
+                return reader.get_database_version()
+        except Exception as e:
+            self.logger.warning("Failed to read database version for cache: %s", e)
+        return None
+
+    def _compute_general_stats(self) -> dict[str, Any]:
+        try:
+            from genai_tag_db_tools import core_api
+            from genai_tag_db_tools.gui.converters import statistics_result_to_dict
+
+            result = core_api.get_statistics(self._get_merged_reader())
+            stats = statistics_result_to_dict(result)
+        except FileNotFoundError as e:
+            self.logger.warning("core_api statistics failed, falling back to legacy: %s", e)
+            stats = self._stats.get_general_stats()
+
+        if "format_counts" not in stats:
+            try:
+                stats["format_counts"] = self._stats.get_format_counts()
+            except Exception as e:
+                self.logger.warning("Failed to compute format_counts: %s", e)
+                stats["format_counts"] = {}
+
+        return stats
+
+    def _refresh_cache(self, version: str | None) -> None:
+        self._cache_version = version
+        self._cache_general_stats = self._compute_general_stats()
+        self._cache_usage_df = self._stats.get_usage_stats()
+        self._cache_type_dist_df = self._stats.get_type_distribution()
+        self._cache_translation_df = self._stats.get_translation_stats()
+
+    def _ensure_cache(self) -> None:
+        version = self._get_cache_version()
+        if self._cache_general_stats is None:
+            self._refresh_cache(version)
+            return
+        if version is None and self._cache_version is None:
+            return
+        if version != self._cache_version:
+            self._refresh_cache(version)
 
     def _get_merged_reader(self) -> "MergedTagReader":
         """Lazy-initialize MergedTagReader if not provided."""
         if not self._merged_reader_initialized:
-            from genai_tag_db_tools.db.repository import MergedTagReader, get_default_repository
-
-            base_repo = get_default_repository()
-            self._merged_reader = MergedTagReader(base_repo=base_repo, user_repo=None)
+            self._merged_reader = get_default_reader()
             self._merged_reader_initialized = True
         return self._merged_reader
 
     def get_general_stats(self) -> dict[str, Any]:
-        """全体サマリを取得する (core_api統合版)。"""
+        """全体サマリを取得する(core_api統合版)"""
         try:
-            # First try core_api integration
-            try:
-                from genai_tag_db_tools import core_api
-                from genai_tag_db_tools.gui.converters import statistics_result_to_dict
-
-                # Use core_api.get_statistics() with MergedTagReader
-                result = core_api.get_statistics(self._get_merged_reader())
-                return statistics_result_to_dict(result)
-            except FileNotFoundError as e:
-                # Fall back to legacy TagStatistics if core_api fails
-                self.logger.warning("core_api statistics failed, falling back to legacy: %s", e)
-                return self._stats.get_general_stats()
+            self._ensure_cache()
+            return self._cache_general_stats or {}
 
         except Exception as e:
-            self.logger.error("統計取得中にエラーが発生: %s", e)
+            self.logger.error("統計取得中にエラーが発生しました: %s", e)
             self.error_occurred.emit(str(e))
             raise
 
     def get_usage_stats(self) -> pl.DataFrame:
-        """使用回数統計を取得する。"""
+        """使用回数統計を取得する"""
         try:
-            return self._stats.get_usage_stats()
+            self._ensure_cache()
+            return self._cache_usage_df or pl.DataFrame([])
         except Exception as e:
-            self.logger.error("使用回数統計取得中にエラーが発生: %s", e)
+            self.logger.error("使用回数統計取得中にエラーが発生しました: %s", e)
             self.error_occurred.emit(str(e))
             raise
 
     def get_type_distribution(self) -> pl.DataFrame:
-        """タイプの分布統計を取得する。"""
+        """タイプ別計を取得する"""
         try:
-            return self._stats.get_type_distribution()
+            self._ensure_cache()
+            return self._cache_type_dist_df or pl.DataFrame([])
         except Exception as e:
-            self.logger.error("タイプの分布統計取得中にエラーが発生: %s", e)
+            self.logger.error("タイプ別計取得中にエラーが発生しました: %s", e)
             self.error_occurred.emit(str(e))
             raise
 
     def get_translation_stats(self) -> pl.DataFrame:
-        """翻訳統計を取得する。"""
+        """翻訳統計を取得する"""
         try:
-            return self._stats.get_translation_stats()
+            self._ensure_cache()
+            return self._cache_translation_df or pl.DataFrame([])
         except Exception as e:
-            self.logger.error("翻訳統計取得中にエラーが発生: %s", e)
+            self.logger.error("翻訳統計取得中にエラーが発生しました: %s", e)
             self.error_occurred.emit(str(e))
             raise

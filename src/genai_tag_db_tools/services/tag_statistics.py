@@ -1,54 +1,58 @@
-from typing import Any
-
 import polars as pl
 from sqlalchemy.orm import Session
 
-from genai_tag_db_tools.db.repository import TagRepository, get_default_repository
+from genai_tag_db_tools.db.repository import MergedTagReader, TagReader, get_default_reader
+from genai_tag_db_tools.models import GeneralStatsResult
 
 
 class TagStatistics:
-    """タグDBの統計情報をまとめて取得する。"""
+    """タグDBの統計情報をまとめて取得する"""
 
     def __init__(
         self,
         session: Session | None = None,
-        repository: TagRepository | None = None,
+        reader: MergedTagReader | TagReader | None = None,
     ):
-        if repository is not None:
-            self.repo = repository
+        if reader is not None:
+            self.reader = reader
             return
         if session is not None:
 
             def session_factory():
                 return session
 
-            self.repo = TagRepository(session_factory=session_factory)
+            self.reader = TagReader(session_factory=session_factory)
             return
-        self.repo = get_default_repository()
+        self.reader = get_default_reader()
 
-    def get_general_stats(self) -> dict[str, Any]:
-        """全体サマリを返す。"""
-        tags = self.repo.list_tags()
+    def get_general_stats(self) -> GeneralStatsResult:
+        """全体サマリを返す"""
+        tags = self.reader.list_tags()
         total_tags = len(tags)
-        statuses = self.repo.list_tag_statuses()
+        statuses = self.reader.list_tag_statuses()
         alias_tag_ids = {status.tag_id for status in statuses if status.alias}
         alias_tags = len(alias_tag_ids)
         non_alias_tags = total_tags - alias_tags
+        format_counts = self.get_format_counts()
 
-        return {
-            "total_tags": total_tags,
-            "alias_tags": alias_tags,
-            "non_alias_tags": non_alias_tags,
-        }
+        return GeneralStatsResult(
+            total_tags=total_tags,
+            alias_tags=alias_tags,
+            non_alias_tags=non_alias_tags,
+            format_counts=format_counts,
+        )
 
     def get_usage_stats(self) -> pl.DataFrame:
-        """使用回数をformat別に返す。"""
-        usage_rows = self.repo.list_usage_counts()
+        """使用回数をformat 別に返す"""
+        usage_rows = self.reader.list_usage_counts()
         if not usage_rows:
             return pl.DataFrame([])
 
-        format_map = self.repo.get_format_map()
-        status_map = {(status.tag_id, status.format_id): status for status in self.repo.list_tag_statuses()}
+        format_map = self.reader.get_format_map()
+        status_map = {
+            (status.tag_id, status.format_id): status
+            for status in self.reader.list_tag_statuses()
+        }
         filtered_rows = []
         for usage in usage_rows:
             status = status_map.get((usage.tag_id, usage.format_id))
@@ -68,11 +72,11 @@ class TagStatistics:
         return pl.DataFrame(filtered_rows)
 
     def get_type_distribution(self) -> pl.DataFrame:
-        """format別のtype分布を返す。"""
-        format_map = self.repo.get_format_map()
-        type_map = self.repo.get_type_mapping_map()
+        """format 別のtype 別の使用回数を返す"""
+        format_map = self.reader.get_format_map()
+        type_map = self.reader.get_type_mapping_map()
         counts: dict[tuple[str, str], int] = {}
-        for status in self.repo.list_tag_statuses():
+        for status in self.reader.list_tag_statuses():
             if status.alias or status.deprecated:
                 continue
             format_name = format_map.get(status.format_id, f"format:{status.format_id}")
@@ -87,12 +91,31 @@ class TagStatistics:
             ]
         )
 
+    def get_format_counts(self) -> dict[str, int]:
+        """format 別の使用回数を返す"""
+        format_map = self.reader.get_format_map()
+        counts: dict[str, int] = {}
+        for status in self.reader.list_tag_statuses():
+            if status.alias or status.deprecated:
+                continue
+            format_name = format_map.get(status.format_id, f"format:{status.format_id}")
+            counts[format_name] = counts.get(format_name, 0) + 1
+        return counts
+
     def get_translation_stats(self) -> pl.DataFrame:
-        """タグごとの翻訳状況を返す。"""
-        all_tag_ids = self.repo.get_all_tag_ids()
+        """タグごとの翻訳状況を返す"""
+        from collections import defaultdict
+
+        from genai_tag_db_tools.db.schema import TagTranslation
+
+        all_translations = self.reader.list_translations()
+
+        by_tag: dict[int, list[TagTranslation]] = defaultdict(list)
+        for tr in all_translations:
+            by_tag[tr.tag_id].append(tr)
+
         rows = []
-        for t_id in all_tag_ids:
-            translations = self.repo.get_translations(t_id)
+        for t_id, translations in by_tag.items():
             lang_set = {tr.language for tr in translations}
             rows.append(
                 {
@@ -119,7 +142,7 @@ if __name__ == "__main__":
     print()
 
     type_dist_df = stats.get_type_distribution()
-    print("[型分布データフレーム]")
+    print("[型別分布データフレーム]")
     print(type_dist_df)
     print()
 

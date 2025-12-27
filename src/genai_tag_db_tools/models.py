@@ -222,3 +222,19 @@ class TagStatisticsResult(BaseModel):
     total_aliases: int = Field(..., description="エイリアス総数")
     total_formats: int = Field(..., description="フォーマット総数")
     total_types: int = Field(..., description="タイプ総数")
+
+
+class GeneralStatsResult(BaseModel):
+    """全体統計結果。
+
+    Args:
+        total_tags: 総タグ数。
+        alias_tags: エイリアスタグ数。
+        non_alias_tags: 非エイリアスタグ数。
+        format_counts: フォーマット別タグ数。
+    """
+
+    total_tags: int = Field(..., description="総タグ数")
+    alias_tags: int = Field(..., description="エイリアスタグ数")
+    non_alias_tags: int = Field(..., description="非エイリアスタグ数")
+    format_counts: dict[str, int] = Field(..., description="フォーマット別タグ数")

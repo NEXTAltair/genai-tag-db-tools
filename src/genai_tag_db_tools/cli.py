@@ -11,7 +11,7 @@ from genai_tag_db_tools.core_api import (
     search_tags,
 )
 from genai_tag_db_tools.db import runtime
-from genai_tag_db_tools.db.repository import TagRepository, get_default_repository
+from genai_tag_db_tools.db.repository import get_default_reader, get_default_repository
 from genai_tag_db_tools.models import (
     DbCacheConfig,
     DbSourceRef,
@@ -75,7 +75,7 @@ def _set_db_paths(base_db_paths: Iterable[str] | None, user_db_dir: str | None) 
 
 
 def _build_register_service() -> TagRegisterService:
-    repo = TagRepository(runtime.get_user_session_factory())
+    repo = get_default_repository()
     return TagRegisterService(repo)
 
 
@@ -109,7 +109,7 @@ def cmd_ensure_dbs(args: argparse.Namespace) -> None:
 
 def cmd_search(args: argparse.Namespace) -> None:
     _set_db_paths(args.base_db, args.user_db_dir)
-    repo = get_default_repository()
+    repo = get_default_reader()
     request = TagSearchRequest(
         query=args.query,
         format_names=args.format_name or None,
@@ -144,7 +144,7 @@ def cmd_register(args: argparse.Namespace) -> None:
 
 def cmd_stats(args: argparse.Namespace) -> None:
     _set_db_paths(args.base_db, args.user_db_dir)
-    repo = get_default_repository()
+    repo = get_default_reader()
     result = get_statistics(repo)
     _dump(result)
 
@@ -154,7 +154,7 @@ def cmd_convert(args: argparse.Namespace) -> None:
     from genai_tag_db_tools.core_api import convert_tags
 
     _set_db_paths(args.base_db, args.user_db_dir)
-    repo = get_default_repository()
+    repo = get_default_reader()
 
     converted = convert_tags(repo, args.tags, args.format_name, separator=args.separator)
 

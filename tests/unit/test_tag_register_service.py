@@ -46,10 +46,25 @@ class DummyRepo:
         self.usage_updates.append((tag_id, format_id, count))
 
 
+class DummyReader:
+    def __init__(self, repo: DummyRepo) -> None:
+        self.repo = repo
+
+    def get_format_id(self, format_name: str) -> int | None:
+        return self.repo.get_format_id(format_name)
+
+    def get_type_id(self, type_name: str) -> int | None:
+        return self.repo.get_type_id(type_name)
+
+    def get_tag_id_by_name(self, tag: str, partial: bool = False) -> int | None:
+        return self.repo.get_tag_id_by_name(tag, partial=partial)
+
+
 @pytest.mark.db_tools
 def test_register_tag_creates_and_updates_status():
     repo = DummyRepo()
-    service = TagRegisterService(repository=repo)
+    reader = DummyReader(repo)
+    service = TagRegisterService(repository=repo, reader=reader)
     request = TagRegisterRequest(
         tag="foo",
         source_tag=None,
@@ -69,7 +84,8 @@ def test_register_tag_creates_and_updates_status():
 @pytest.mark.db_tools
 def test_register_tag_alias_requires_preferred():
     repo = DummyRepo()
-    service = TagRegisterService(repository=repo)
+    reader = DummyReader(repo)
+    service = TagRegisterService(repository=repo, reader=reader)
     request = TagRegisterRequest(
         tag="foo",
         source_tag=None,
@@ -85,7 +101,8 @@ def test_register_tag_alias_requires_preferred():
 @pytest.mark.db_tools
 def test_register_tag_alias_resolves_preferred():
     repo = DummyRepo()
-    service = TagRegisterService(repository=repo)
+    reader = DummyReader(repo)
+    service = TagRegisterService(repository=repo, reader=reader)
     request = TagRegisterRequest(
         tag="foo",
         source_tag=None,
@@ -104,7 +121,8 @@ def test_register_tag_alias_resolves_preferred():
 @pytest.mark.db_tools
 def test_register_or_update_tag_routes_to_register_tag():
     repo = DummyRepo()
-    service = TagRegisterService(repository=repo)
+    reader = DummyReader(repo)
+    service = TagRegisterService(repository=repo, reader=reader)
     tag_info = {
         "normalized_tag": "foo",
         "source_tag": "foo",

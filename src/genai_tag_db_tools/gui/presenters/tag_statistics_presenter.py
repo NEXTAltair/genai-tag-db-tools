@@ -19,24 +19,11 @@ class BarChartData:
 
 
 @dataclass(frozen=True)
-class PieSliceData:
-    label: str
-    value: float
-
-
-@dataclass(frozen=True)
-class PieChartData:
-    title: str
-    slices: list[PieSliceData]
-
-
-@dataclass(frozen=True)
 class TagStatisticsView:
     summary_text: str
     distribution: BarChartData | None
-    usage: PieChartData | None
+    usage: BarChartData | None
     language: BarChartData | None
-    top_tags: list[str]
 
 
 def _safe_float(value) -> float:
@@ -52,7 +39,18 @@ def _build_summary_text(general_stats: dict) -> str:
     total_tags = general_stats.get("total_tags", 0)
     alias_tags = general_stats.get("alias_tags", 0)
     non_alias_tags = general_stats.get("non_alias_tags", 0)
-    return f"total_tags: {total_tags}\nalias_tags: {alias_tags}\nnon_alias_tags: {non_alias_tags}\n"
+    format_counts = general_stats.get("format_counts") or {}
+
+    lines = [
+        f"total_tags: {total_tags}",
+        f"alias_tags: {alias_tags}",
+        f"non_alias_tags: {non_alias_tags}",
+    ]
+    if format_counts:
+        lines.append("format_counts:")
+        for format_name in sorted(format_counts.keys()):
+            lines.append(f"  {format_name}: {format_counts[format_name]}")
+    return "\n".join(lines) + "\n"
 
 
 def _build_distribution_chart(type_df: pl.DataFrame) -> BarChartData | None:
@@ -85,16 +83,55 @@ def _build_distribution_chart(type_df: pl.DataFrame) -> BarChartData | None:
     )
 
 
-def _build_usage_chart(usage_df: pl.DataFrame) -> PieChartData | None:
+def _build_usage_chart(usage_df: pl.DataFrame) -> BarChartData | None:
     if usage_df.is_empty():
         return None
 
-    grouped = usage_df.group_by("format_name").agg([pl.col("usage_count").sum().alias("total_usage")])
-    slices = [
-        PieSliceData(label=row["format_name"], value=_safe_float(row["total_usage"]))
-        for row in grouped.iter_rows(named=True)
-    ]
-    return PieChartData(title="Usage by Format", slices=slices)
+    bucket = (
+        pl.when(pl.col("usage_count") <= 0)
+        .then("0")
+        .when(pl.col("usage_count") < 10)
+        .then("1-9")
+        .when(pl.col("usage_count") < 100)
+        .then("10-99")
+        .when(pl.col("usage_count") < 1_000)
+        .then("100-999")
+        .when(pl.col("usage_count") < 10_000)
+        .then("1k-9k")
+        .when(pl.col("usage_count") < 100_000)
+        .then("10k-99k")
+        .when(pl.col("usage_count") < 1_000_000)
+        .then("100k-999k")
+        .otherwise("1M+")
+        .alias("usage_bucket")
+    )
+
+    bucket_order = ["0", "1-9", "10-99", "100-999", "1k-9k", "10k-99k", "100k-999k", "1M+"]
+
+    bucketed = usage_df.with_columns(bucket)
+    grouped = (
+        bucketed.group_by(["format_name", "usage_bucket"])
+        .agg([pl.len().alias("tag_count")])
+        .sort(["format_name", "usage_bucket"])
+    )
+
+    formats = sorted(bucketed["format_name"].unique().to_list())
+    series: list[BarSeriesData] = []
+    for fmt_name in formats:
+        values: list[float] = []
+        fmt_rows = grouped.filter(pl.col("format_name") == fmt_name)
+        fmt_map = {
+            row["usage_bucket"]: _safe_float(row["tag_count"]) for row in fmt_rows.iter_rows(named=True)
+        }
+        for bucket_name in bucket_order:
+            values.append(fmt_map.get(bucket_name, 0.0))
+        series.append(BarSeriesData(name=fmt_name, values=values))
+
+    return BarChartData(
+        title="Usage Distribution (Tags by Usage Count)",
+        categories=bucket_order,
+        series=series,
+    )
 
 
 def _build_language_chart(translation_df: pl.DataFrame) -> BarChartData | None:
@@ -120,18 +157,6 @@ def _build_language_chart(translation_df: pl.DataFrame) -> BarChartData | None:
     )
 
 
-def _build_top_tags(usage_df: pl.DataFrame) -> list[str]:
-    if usage_df.is_empty():
-        return []
-
-    grouped = usage_df.group_by("tag_id").agg([pl.col("usage_count").sum().alias("sum_usage")])
-    top_10 = grouped.sort("sum_usage", descending=True).head(10)
-    items: list[str] = []
-    for row in top_10.iter_rows(named=True):
-        items.append(f"TagID={row['tag_id']}, usage={row['sum_usage']}")
-    return items
-
-
 def build_statistics_view(
     general_stats: dict,
     usage_df: pl.DataFrame,
@@ -143,5 +168,4 @@ def build_statistics_view(
         distribution=_build_distribution_chart(type_dist_df),
         usage=_build_usage_chart(usage_df),
         language=_build_language_chart(translation_df),
-        top_tags=_build_top_tags(usage_df),
     )

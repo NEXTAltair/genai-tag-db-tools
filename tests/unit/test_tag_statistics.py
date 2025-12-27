@@ -8,7 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from genai_tag_db_tools.db.repository import TagRepository
+from genai_tag_db_tools.db.repository import MergedTagReader, TagReader, TagRepository
 from genai_tag_db_tools.db.schema import (
     Base,
     TagFormat,
@@ -65,7 +65,8 @@ def _seed_sample_data(repo: TagRepository, session_factory: Callable[[], Session
 
 
 def test_general_stats_counts_aliases(session_factory: Callable[[], Session]) -> None:
-    repo = TagRepository(session_factory)
+    reader = TagReader(session_factory)
+    repo = TagRepository(session_factory, reader=MergedTagReader(base_repo=reader))
     _seed_sample_data(repo, session_factory)
 
     stats = TagStatistics(session_factory())
@@ -77,7 +78,8 @@ def test_general_stats_counts_aliases(session_factory: Callable[[], Session]) ->
 
 
 def test_usage_stats_returns_rows(session_factory: Callable[[], Session]) -> None:
-    repo = TagRepository(session_factory)
+    reader = TagReader(session_factory)
+    repo = TagRepository(session_factory, reader=MergedTagReader(base_repo=reader))
     ids = _seed_sample_data(repo, session_factory)
 
     stats = TagStatistics(session_factory())
@@ -91,7 +93,8 @@ def test_usage_stats_returns_rows(session_factory: Callable[[], Session]) -> Non
 
 
 def test_type_distribution_counts_tags(session_factory: Callable[[], Session]) -> None:
-    repo = TagRepository(session_factory)
+    reader = TagReader(session_factory)
+    repo = TagRepository(session_factory, reader=MergedTagReader(base_repo=reader))
     _seed_sample_data(repo, session_factory)
 
     stats = TagStatistics(session_factory())
@@ -105,7 +108,8 @@ def test_type_distribution_counts_tags(session_factory: Callable[[], Session]) -
 
 
 def test_translation_stats_lists_languages(session_factory: Callable[[], Session]) -> None:
-    repo = TagRepository(session_factory)
+    reader = TagReader(session_factory)
+    repo = TagRepository(session_factory, reader=MergedTagReader(base_repo=reader))
     _seed_sample_data(repo, session_factory)
 
     stats = TagStatistics(session_factory())

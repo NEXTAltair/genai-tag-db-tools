@@ -8,7 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from genai_tag_db_tools.db.repository import TagRepository
+from genai_tag_db_tools.db.repository import MergedTagReader, TagReader, TagRepository
 from genai_tag_db_tools.db.schema import Base, TagFormat, TagTypeFormatMapping, TagTypeName
 from genai_tag_db_tools.services.tag_search import TagSearcher
 
@@ -34,8 +34,10 @@ def _seed_format_and_type(session: Session, *, format_id: int = 1, type_id: int 
 
 
 def test_search_tags_filters_by_format_type_language(session_factory: Callable[[], Session]) -> None:
-    repo = TagRepository(session_factory)
-    searcher = TagSearcher(repo)
+    reader = TagReader(session_factory)
+    merged_reader = MergedTagReader(base_repo=reader)
+    repo = TagRepository(session_factory, reader=merged_reader)
+    searcher = TagSearcher(merged_reader)
 
     tag_id = repo.create_tag("alpha", "alpha")
     with session_factory() as session:
@@ -64,28 +66,19 @@ def test_search_tags_filters_by_format_type_language(session_factory: Callable[[
     assert row["translations"]["ja"] == ["alpha_ja"]
 
 
-def test_convert_tag_resolves_alias(session_factory: Callable[[], Session]) -> None:
-    repo = TagRepository(session_factory)
-    searcher = TagSearcher(repo)
+def test_convert_tag_is_not_implemented(session_factory: Callable[[], Session]) -> None:
+    reader = TagReader(session_factory)
+    searcher = TagSearcher(MergedTagReader(base_repo=reader))
 
-    preferred_id = repo.create_tag("new_tag", "new_tag")
-    alias_id = repo.create_tag("old_tag", "old_tag")
-    invalid_id = repo.create_tag("invalid tag", "invalid tag")
-    bad_id = repo.create_tag("bad_tag", "bad_tag")
-
-    with session_factory() as session:
-        _seed_format_and_type(session)
-
-    repo.update_tag_status(alias_id, format_id=1, alias=True, preferred_tag_id=preferred_id, type_id=0)
-    repo.update_tag_status(bad_id, format_id=1, alias=True, preferred_tag_id=invalid_id, type_id=0)
-
-    assert searcher.convert_tag("old_tag", format_id=1) == "new_tag"
-    assert searcher.convert_tag("bad_tag", format_id=1) == "bad_tag"
+    with pytest.raises(NotImplementedError):
+        searcher.convert_tag("old_tag", format_id=1)
 
 
 def test_get_formats_languages_types(session_factory: Callable[[], Session]) -> None:
-    repo = TagRepository(session_factory)
-    searcher = TagSearcher(repo)
+    reader = TagReader(session_factory)
+    merged_reader = MergedTagReader(base_repo=reader)
+    repo = TagRepository(session_factory, reader=merged_reader)
+    searcher = TagSearcher(merged_reader)
 
     tag_id = repo.create_tag("alpha", "alpha")
     with session_factory() as session:
@@ -102,8 +95,10 @@ def test_get_formats_languages_types(session_factory: Callable[[], Session]) -> 
 def test_search_tags_resolve_preferred_replaces_tag_and_translations(
     session_factory: Callable[[], Session],
 ) -> None:
-    repo = TagRepository(session_factory)
-    searcher = TagSearcher(repo)
+    reader = TagReader(session_factory)
+    merged_reader = MergedTagReader(base_repo=reader)
+    repo = TagRepository(session_factory, reader=merged_reader)
+    searcher = TagSearcher(merged_reader)
 
     preferred_id = repo.create_tag("new_tag", "new_tag")
     alias_id = repo.create_tag("old_tag", "old_tag")

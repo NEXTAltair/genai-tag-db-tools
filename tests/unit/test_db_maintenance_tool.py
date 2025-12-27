@@ -8,7 +8,8 @@ import genai_tag_db_tools.db.db_maintenance_tool as maintenance_module
 def _make_tool(monkeypatch: pytest.MonkeyPatch, repo):
     monkeypatch.setattr(maintenance_module, "set_database_path", lambda path: None)
     monkeypatch.setattr(maintenance_module, "init_engine", lambda path: None)
-    monkeypatch.setattr(maintenance_module, "TagRepository", lambda: repo)
+    monkeypatch.setattr(maintenance_module, "get_default_repository", lambda: repo)
+    monkeypatch.setattr(maintenance_module, "get_default_reader", lambda: repo)
     return maintenance_module.DatabaseMaintenanceTool("dummy.db")
 
 

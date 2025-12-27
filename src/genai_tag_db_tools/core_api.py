@@ -238,7 +238,7 @@ def convert_tags(repo: MergedTagReader, tags: str, format_name: str, separator: 
         return tags
 
     format_id = repo.get_format_id(format_name)
-    if format_id is None:
+    if not format_id:
         return tags
 
     normalized_tags = _normalize_prompt_tags(tags)

@@ -6,17 +6,16 @@ from PySide6.QtCharts import (
     QBarSet,
     QChart,
     QChartView,
-    QPieSeries,
+    QStackedBarSeries,
     QValueAxis,
 )
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QShowEvent
-from PySide6.QtWidgets import QLabel, QListWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from genai_tag_db_tools.gui.designer.TagStatisticsWidget_ui import Ui_TagStatisticsWidget
 from genai_tag_db_tools.gui.presenters.tag_statistics_presenter import (
     BarChartData,
-    PieChartData,
     TagStatisticsView,
     build_statistics_view,
 )
@@ -39,6 +38,8 @@ class TagStatisticsWidget(QWidget, Ui_TagStatisticsWidget):
         self._initialized = False
 
         self.setup_chart_layouts()
+        if hasattr(self, "listWidgetTopTags"):
+            self.listWidgetTopTags.hide()
 
     def set_service(self, service: TagStatisticsService) -> None:
         """Set service instance (initialization deferred to showEvent)."""
@@ -72,7 +73,6 @@ class TagStatisticsWidget(QWidget, Ui_TagStatisticsWidget):
         self.update_usage_chart(view_state.usage)
         self.update_language_chart(view_state.language)
         self.update_trends_chart()
-        self.update_top_tags(view_state.top_tags)
 
     def update_summary(self, view_state: TagStatisticsView) -> None:
         self.labelSummary.setText(view_state.summary_text)
@@ -111,18 +111,41 @@ class TagStatisticsWidget(QWidget, Ui_TagStatisticsWidget):
             self.clear_layout(self.chartLayoutDistribution)
             self.chartLayoutDistribution.addWidget(chart_view)
 
-    def update_usage_chart(self, data: PieChartData | None = None) -> None:
+    def update_usage_chart(self, data: BarChartData | None = None) -> None:
         if data is None:
             return
 
         chart = QChart()
         chart.setTitle(data.title)
-        series = QPieSeries()
-        for slice_data in data.slices:
-            series.append(slice_data.label, slice_data.value)
-        chart.addSeries(series)
-        chart_view = QChartView(chart)
+        bar_series = QStackedBarSeries()
+        max_val = 0.0
+        for series in data.series:
+            bar_set = QBarSet(series.name)
+            for value in series.values:
+                bar_set.append(value)
+            bar_series.append(bar_set)
 
+        for idx in range(len(data.categories)):
+            total = 0.0
+            for series in data.series:
+                if idx < len(series.values):
+                    total += float(series.values[idx])
+            max_val = max(max_val, total)
+
+        chart.addSeries(bar_series)
+
+        x_axis = QBarCategoryAxis()
+        x_axis.append([str(item) for item in data.categories])
+        chart.addAxis(x_axis, Qt.AlignmentFlag.AlignBottom)
+        bar_series.attachAxis(x_axis)
+
+        y_axis = QValueAxis()
+        y_axis.setLabelFormat("%d")
+        y_axis.setRange(0.0, max_val * 1.1 if max_val else 10.0)
+        chart.addAxis(y_axis, Qt.AlignmentFlag.AlignLeft)
+        bar_series.attachAxis(y_axis)
+
+        chart_view = QChartView(chart)
         if hasattr(self, "chartLayoutUsage"):
             self.clear_layout(self.chartLayoutUsage)
             self.chartLayoutUsage.addWidget(chart_view)
@@ -163,11 +186,6 @@ class TagStatisticsWidget(QWidget, Ui_TagStatisticsWidget):
     def update_trends_chart(self) -> None:
         if hasattr(self, "labelTrends"):
             self.labelTrends.setText("Trends chart: not implemented")
-
-    def update_top_tags(self, items: list[str]) -> None:
-        self.listWidgetTopTags.clear()
-        for item in items:
-            self.listWidgetTopTags.addItem(QListWidgetItem(item))
 
     def setup_chart_layouts(self) -> None:
         self.chartLayoutDistribution = QVBoxLayout(self.tabDistribution)
