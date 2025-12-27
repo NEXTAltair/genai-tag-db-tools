@@ -113,25 +113,12 @@ class DbInitWorker(QRunnable):
             self.signals.complete.emit(False, error_msg)
 
         except ConnectionError as e:
-            error_msg = f"Network error: {e}. Using cached database if available."
-            logger.warning(error_msg)
-            # オフライン時はキャッシュを使用
-            try:
-                base_paths = [
-                    Path(req.cache.cache_dir) / "base_dbs" / req.source.filename for req in self.requests
-                ]
-                if all(p.exists() for p in base_paths):
-                    runtime.set_base_database_paths(base_paths)
-                    runtime.init_engine(base_paths[0])
-                    runtime.init_user_db(self.cache_dir)
-                    self.signals.complete.emit(True, "Using cached databases")
-                else:
-                    self.signals.error.emit("No cached base databases available")
-                    self.signals.complete.emit(False, "Base databases unavailable")
-            except Exception as fallback_error:
-                logger.error("Fallback to cache failed: %s", fallback_error)
-                self.signals.error.emit(str(fallback_error))
-                self.signals.complete.emit(False, str(fallback_error))
+            # ConnectionErrorは`ensure_databases`内の`download_with_offline_fallback`で
+            # 既にハンドリングされているため、ここに到達するのは完全なネットワーク障害のみ
+            error_msg = f"Network error and no cached databases available: {e}"
+            logger.error(error_msg)
+            self.signals.error.emit(error_msg)
+            self.signals.complete.emit(False, error_msg)
 
         except Exception as e:
             error_msg = f"Unexpected error during initialization: {e}"
