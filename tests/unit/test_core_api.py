@@ -45,45 +45,6 @@ def _build_request(tmp_path: Path, repo_id: str, filename: str) -> EnsureDbReque
     )
 
 
-def test_ensure_db_returns_fresh_download(monkeypatch, tmp_path):
-    """ensure_db()が新規ダウンロード時にcached=Falseを返すことを確認。"""
-    payload = b"abc"
-    db_path = tmp_path / "db.sqlite"
-    db_path.write_bytes(payload)
-
-    request = _build_request(tmp_path, "org/db", "db.sqlite")
-
-    def fake_download_with_offline_fallback(spec, *, token=None):
-        return db_path, False  # is_cached=False
-
-    monkeypatch.setattr(
-        hf_downloader, "download_with_offline_fallback", fake_download_with_offline_fallback
-    )
-
-    result = core_api.ensure_db(request)
-    assert result.cached is False
-    assert result.sha256 == _hash_bytes(payload)
-    assert Path(result.db_path) == db_path
-
-
-def test_ensure_db_returns_cached_download(monkeypatch, tmp_path):
-    """ensure_db()がキャッシュ使用時にcached=Trueを返すことを確認。"""
-    payload = b"xyz"
-    db_path = tmp_path / "db.sqlite"
-    db_path.write_bytes(payload)
-
-    request = _build_request(tmp_path, "org/db", "db.sqlite")
-
-    def fake_download_with_offline_fallback(spec, *, token=None):
-        return db_path, True  # is_cached=True
-
-    monkeypatch.setattr(
-        hf_downloader, "download_with_offline_fallback", fake_download_with_offline_fallback
-    )
-
-    result = core_api.ensure_db(request)
-    assert result.cached is True
-    assert result.sha256 == _hash_bytes(payload)
 
 
 def test_ensure_databases_returns_cached_status_per_spec(monkeypatch, tmp_path):

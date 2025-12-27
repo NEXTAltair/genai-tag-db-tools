@@ -112,14 +112,6 @@ class DbInitWorker(QRunnable):
             self.signals.error.emit(error_msg)
             self.signals.complete.emit(False, error_msg)
 
-        except ConnectionError as e:
-            # ConnectionErrorは`ensure_databases`内の`download_with_offline_fallback`で
-            # 既にハンドリングされているため、ここに到達するのは完全なネットワーク障害のみ
-            error_msg = f"Network error and no cached databases available: {e}"
-            logger.error(error_msg)
-            self.signals.error.emit(error_msg)
-            self.signals.complete.emit(False, error_msg)
-
         except Exception as e:
             error_msg = f"Unexpected error during initialization: {e}"
             logger.error(error_msg, exc_info=True)

@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 from genai_tag_db_tools.core_api import (
     ensure_databases,
-    ensure_db,
     get_statistics,
     register_tag,
     search_tags,
@@ -86,15 +85,6 @@ def _build_register_service() -> TagRegisterService:
     return TagRegisterService(repo)
 
 
-def cmd_ensure_db(args: argparse.Namespace) -> None:
-    cache = _build_cache_config(args)
-    source = DbSourceRef(
-        repo_id=args.repo_id,
-        filename=args.filename,
-        revision=args.revision,
-    )
-    result = ensure_db(EnsureDbRequest(source=source, cache=cache))
-    _dump(result)
 
 
 def cmd_ensure_dbs(args: argparse.Namespace) -> None:
@@ -192,16 +182,6 @@ def _add_base_db_args(parser: argparse.ArgumentParser, required: bool = True) ->
 def main() -> None:
     parser = argparse.ArgumentParser(prog="genai-tag-db-tools")
     subparsers = parser.add_subparsers(dest="command", required=True)
-
-    ensure_parser = subparsers.add_parser("ensure-db", help="Download one DB.")
-    ensure_parser.add_argument("--repo-id", required=True)
-    ensure_parser.add_argument("--filename", required=True)
-    ensure_parser.add_argument("--revision")
-    ensure_parser.add_argument(
-        "--user-db-dir", help="User database directory (defaults to OS-specific cache)"
-    )
-    ensure_parser.add_argument("--token")
-    ensure_parser.set_defaults(func=cmd_ensure_db)
 
     ensure_many_parser = subparsers.add_parser("ensure-dbs", help="Download multiple DBs.")
     ensure_many_parser.add_argument(

@@ -42,21 +42,6 @@ def build_downloaded_at_utc() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def ensure_db(request: EnsureDbRequest) -> EnsureDbResult:
-    spec = _to_spec(request.source)
-
-    # Download (or use cache)
-    db_path, is_cached = hf_downloader.download_with_offline_fallback(spec, token=request.cache.token)
-
-    # Compute SHA256
-    sha256 = _compute_sha256(db_path)
-
-    return EnsureDbResult(
-        db_path=str(db_path),
-        sha256=sha256,
-        revision=None,  # Could extract from symlink path if needed
-        cached=is_cached,
-    )
 
 
 def ensure_databases(requests: list[EnsureDbRequest]) -> list[EnsureDbResult]:
