@@ -66,9 +66,7 @@ def ensure_databases(requests: list[EnsureDbRequest]) -> list[EnsureDbResult]:
     results: list[EnsureDbResult] = []
     for req in requests:
         spec = _to_spec(req.source)
-        db_path, is_cached = hf_downloader.download_with_offline_fallback(
-            spec, token=req.cache.token
-        )
+        db_path, is_cached = hf_downloader.download_with_offline_fallback(spec, token=req.cache.token)
 
         results.append(
             EnsureDbResult(

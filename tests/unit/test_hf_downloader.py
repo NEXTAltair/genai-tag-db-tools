@@ -107,9 +107,7 @@ def test_ensure_db_ready_sets_runtime(monkeypatch, tmp_path: Path):
     def fake_download(*_args, **_kwargs):
         return fake_db, False
 
-    monkeypatch.setattr(
-        "genai_tag_db_tools.io.hf_downloader.download_with_offline_fallback", fake_download
-    )
+    monkeypatch.setattr("genai_tag_db_tools.io.hf_downloader.download_with_offline_fallback", fake_download)
 
     spec = HFDatasetSpec(repo_id="dummy", filename="db.sqlite")
     result = ensure_db_ready(spec)
