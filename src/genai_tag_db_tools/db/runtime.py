@@ -41,7 +41,7 @@ def get_database_path() -> Path:
 
 
 def get_base_database_paths() -> list[Path]:
-    """ベースDBパス一覧を返す。未設定なら単一DBを返す。"""
+    """ベースDBパス一覧を返す。未設定なら例外を投げる。"""
     if _base_db_paths is not None:
         return list(_base_db_paths)
     return [get_database_path()]
@@ -99,16 +99,21 @@ def get_base_session_factories() -> list[sessionmaker]:
     return factories
 
 
-def init_user_db(user_db_dir: Path) -> Path:
+def init_user_db(user_db_dir: Path | None = None) -> Path:
     """ユーザーDBを初期化する。存在しなければ空DBを作成する。
 
     Args:
-        user_db_dir: ユーザーDB配置ディレクトリ（明示的に指定必須）
+        user_db_dir: ユーザーDB配置ディレクトリ（Noneの場合はデフォルト）
 
     Returns:
         Path: 初期化されたuser_tags.sqliteのパス
     """
     global _user_db_path, _user_engine, _UserSessionLocal
+
+    if user_db_dir is None:
+        from genai_tag_db_tools.io.hf_downloader import default_cache_dir
+
+        user_db_dir = default_cache_dir()
 
     user_db_path = user_db_dir / "user_tags.sqlite"
     user_db_path.parent.mkdir(parents=True, exist_ok=True)
