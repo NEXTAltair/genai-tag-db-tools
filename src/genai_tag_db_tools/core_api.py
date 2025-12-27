@@ -63,18 +63,12 @@ def ensure_databases(requests: list[EnsureDbRequest]) -> list[EnsureDbResult]:
     if not requests:
         raise ValueError("requests は空にできません")
 
-    cache_dir = requests[0].cache.cache_dir
-    token = requests[0].cache.token
-    for req in requests[1:]:
-        if req.cache.cache_dir != cache_dir:
-            raise ValueError("cache_dir は全てのリクエストで一致させてください")
-        if req.cache.token != token:
-            raise ValueError("token は全てのリクエストで一致させてください")
-
     results: list[EnsureDbResult] = []
     for req in requests:
         spec = _to_spec(req.source)
-        db_path, is_cached = hf_downloader.download_with_offline_fallback(spec, token=token)
+        db_path, is_cached = hf_downloader.download_with_offline_fallback(
+            spec, token=req.cache.token
+        )
 
         results.append(
             EnsureDbResult(

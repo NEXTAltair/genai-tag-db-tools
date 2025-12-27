@@ -3,8 +3,6 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-import pytest
-
 from genai_tag_db_tools import core_api
 from genai_tag_db_tools.io import hf_downloader
 from genai_tag_db_tools.models import (
@@ -86,16 +84,6 @@ def test_ensure_db_returns_cached_download(monkeypatch, tmp_path):
     result = core_api.ensure_db(request)
     assert result.cached is True
     assert result.sha256 == _hash_bytes(payload)
-
-
-def test_ensure_databases_requires_same_cache_dir(tmp_path):
-    req_a = _build_request(tmp_path, "org/a", "a.sqlite")
-    req_b = EnsureDbRequest(
-        source=DbSourceRef(repo_id="org/b", filename="b.sqlite"),
-        cache=DbCacheConfig(cache_dir=str(tmp_path / "other"), token=None),
-    )
-    with pytest.raises(ValueError):
-        core_api.ensure_databases([req_a, req_b])
 
 
 def test_ensure_databases_returns_cached_status_per_spec(monkeypatch, tmp_path):

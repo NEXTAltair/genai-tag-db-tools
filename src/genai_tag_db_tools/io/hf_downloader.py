@@ -99,14 +99,12 @@ def download_with_offline_fallback(
 def ensure_db_ready(
     spec: HFDatasetSpec,
     *,
-    user_db_dir: Path,
     token: str | None = None,
 ) -> Path:
     """DBファイルを取得し、runtime を初期化する。
 
     Args:
         spec: HFデータセット参照情報
-        user_db_dir: ユーザーDB配置ディレクトリ
         token: HFアクセストークン
 
     Returns:
@@ -124,14 +122,12 @@ def ensure_db_ready(
 def ensure_databases_ready(
     specs: list[HFDatasetSpec],
     *,
-    user_db_dir: Path,
     token: str | None = None,
 ) -> list[Path]:
     """複数のDBファイルを取得し、base DB一覧として初期化する。
 
     Args:
         specs: HFデータセット参照情報のリスト
-        user_db_dir: ユーザーDB配置ディレクトリ
         token: HFアクセストークン
 
     Returns:

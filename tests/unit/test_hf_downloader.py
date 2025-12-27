@@ -112,7 +112,7 @@ def test_ensure_db_ready_sets_runtime(monkeypatch, tmp_path: Path):
     )
 
     spec = HFDatasetSpec(repo_id="dummy", filename="db.sqlite")
-    result = ensure_db_ready(spec, user_db_dir=tmp_path)
+    result = ensure_db_ready(spec)
 
     assert result == fake_db
     assert get_database_path() == fake_db
