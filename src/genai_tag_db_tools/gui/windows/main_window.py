@@ -44,7 +44,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
             # データベース初期化サービスを作成
             self.db_init_service = DbInitializationService(
-                cache_dir=cache_dir,
+                user_db_dir=cache_dir,
                 parent=self,
             )
             self._connect_db_init_signals()
