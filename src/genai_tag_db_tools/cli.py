@@ -47,10 +47,17 @@ def _parse_source(value: str) -> ParsedSource:
 
 
 def _build_cache_config(args: argparse.Namespace) -> DbCacheConfig:
+    # Determine user_db_dir (CLI override or default)
+    if hasattr(args, "user_db_dir") and args.user_db_dir:
+        user_db_dir = args.user_db_dir
+    else:
+        from genai_tag_db_tools.io.hf_downloader import default_cache_dir
+
+        user_db_dir = str(default_cache_dir())
+
     return DbCacheConfig(
-        cache_dir=args.cache_dir,
-        token=args.token,
-        max_cache_bytes=args.max_cache_bytes,
+        cache_dir=user_db_dir,  # Repurpose cache_dir as user_db_dir
+        token=args.token if hasattr(args, "token") else None,
     )
 
 
@@ -190,9 +197,10 @@ def main() -> None:
     ensure_parser.add_argument("--repo-id", required=True)
     ensure_parser.add_argument("--filename", required=True)
     ensure_parser.add_argument("--revision")
-    ensure_parser.add_argument("--cache-dir", required=True)
+    ensure_parser.add_argument(
+        "--user-db-dir", help="User database directory (defaults to OS-specific cache)"
+    )
     ensure_parser.add_argument("--token")
-    ensure_parser.add_argument("--max-cache-bytes", type=int)
     ensure_parser.set_defaults(func=cmd_ensure_db)
 
     ensure_many_parser = subparsers.add_parser("ensure-dbs", help="Download multiple DBs.")
@@ -202,9 +210,10 @@ def main() -> None:
         required=True,
         help="repo_id/filename[@revision]. Repeat for multiple sources.",
     )
-    ensure_many_parser.add_argument("--cache-dir", required=True)
+    ensure_many_parser.add_argument(
+        "--user-db-dir", help="User database directory (defaults to OS-specific cache)"
+    )
     ensure_many_parser.add_argument("--token")
-    ensure_many_parser.add_argument("--max-cache-bytes", type=int)
     ensure_many_parser.set_defaults(func=cmd_ensure_dbs)
 
     search_parser = subparsers.add_parser("search", help="Search tags.")

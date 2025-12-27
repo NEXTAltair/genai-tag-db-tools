@@ -66,6 +66,7 @@ class TagCoreService:
         Note: This method is deprecated. Use core_api.convert_tags() instead.
         """
         from genai_tag_db_tools.core_api import convert_tags
+
         reader = get_default_reader()
         format_name = self._searcher.reader.get_format_name(format_id) if format_id > 0 else None
         if not format_name:
@@ -203,6 +204,7 @@ class TagCleanerService(GuiServiceBase):
     def convert_prompt(self, prompt: str, format_name: str) -> str:
         """カンマ区別のタグを指定フォーマットへ変換する"""
         from genai_tag_db_tools.core_api import convert_tags
+
         self.logger.info("TagCleanerService: convert_prompt() called")
 
         reader = get_default_reader()
@@ -465,7 +467,7 @@ class TagStatisticsService(GuiServiceBase):
         """使用回数統計を取得する"""
         try:
             self._ensure_cache()
-            return self._cache_usage_df or pl.DataFrame([])
+            return self._cache_usage_df if self._cache_usage_df is not None else pl.DataFrame([])
         except Exception as e:
             self.logger.error("使用回数統計取得中にエラーが発生しました: %s", e)
             self.error_occurred.emit(str(e))
@@ -475,7 +477,7 @@ class TagStatisticsService(GuiServiceBase):
         """タイプ別計を取得する"""
         try:
             self._ensure_cache()
-            return self._cache_type_dist_df or pl.DataFrame([])
+            return self._cache_type_dist_df if self._cache_type_dist_df is not None else pl.DataFrame([])
         except Exception as e:
             self.logger.error("タイプ別計取得中にエラーが発生しました: %s", e)
             self.error_occurred.emit(str(e))
@@ -485,7 +487,9 @@ class TagStatisticsService(GuiServiceBase):
         """翻訳統計を取得する"""
         try:
             self._ensure_cache()
-            return self._cache_translation_df or pl.DataFrame([])
+            return (
+                self._cache_translation_df if self._cache_translation_df is not None else pl.DataFrame([])
+            )
         except Exception as e:
             self.logger.error("翻訳統計取得中にエラーが発生しました: %s", e)
             self.error_occurred.emit(str(e))

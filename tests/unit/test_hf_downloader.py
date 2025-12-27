@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 import pytest
@@ -8,7 +7,7 @@ from genai_tag_db_tools.io.hf_downloader import (
     HFDatasetSpec,
     default_cache_dir,
     download_hf_dataset_file,
-    download_with_fallback,
+    download_with_offline_fallback,
     ensure_db_ready,
 )
 
@@ -16,146 +15,104 @@ pytestmark = pytest.mark.db_tools
 
 
 def test_default_cache_dir_points_to_app_cache():
+    """default_cache_dir()がユーザーDB配置用ディレクトリを返すことを確認。"""
     cache_dir = default_cache_dir()
     assert "genai-tag-db-tools" in str(cache_dir)
 
 
-def test_download_requires_dest_dir():
-    spec = HFDatasetSpec(repo_id="dummy", filename="db.sqlite")
-    with pytest.raises(ValueError):
-        download_hf_dataset_file(spec, dest_dir=None)
-
-
-def test_download_with_fallback_uses_cached_when_etag_matches(monkeypatch, tmp_path: Path) -> None:
+def test_download_uses_hf_standard_cache(monkeypatch, tmp_path: Path) -> None:
+    """download_hf_dataset_file()がHF標準キャッシュを使用することを確認。"""
     spec = HFDatasetSpec(repo_id="dummy/repo", filename="db.sqlite")
-    cached = tmp_path / "db.sqlite"
-    cached.write_text("")
 
-    manifest_dir = tmp_path / "metadata"
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = manifest_dir / "dummy__repo__db.sqlite.json"
-    manifest_path.write_text(
-        '{"etag": "abc123", "path": "' + str(cached).replace("\\", "/") + '"}',
-        encoding="utf-8",
-    )
+    captured_calls = []
 
-    monkeypatch.setattr(
-        "genai_tag_db_tools.io.hf_downloader._fetch_remote_etag",
-        lambda *_args, **_kwargs: "abc123",
-    )
+    def mock_hf_hub_download(**kwargs):
+        captured_calls.append(kwargs)
+        cache_path = tmp_path / "hub" / "models--dummy--repo" / "snapshots" / "abc123" / "db.sqlite"
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text("")
+        return str(cache_path)
 
-    def fail_download(*_args, **_kwargs):  # pragma: no cover - should not run
-        raise AssertionError("download_hf_dataset_file should not be called")
+    monkeypatch.setattr("genai_tag_db_tools.io.hf_downloader.hf_hub_download", mock_hf_hub_download)
 
-    monkeypatch.setattr(
-        "genai_tag_db_tools.io.hf_downloader.download_hf_dataset_file",
-        fail_download,
-    )
+    result = download_hf_dataset_file(spec, token="test-token")
 
-    result = download_with_fallback(spec, dest_dir=tmp_path)
-    assert result == cached
+    # local_dirパラメータが渡されていないことを確認
+    assert len(captured_calls) == 1
+    assert "local_dir" not in captured_calls[0]
+    assert captured_calls[0]["repo_id"] == "dummy/repo"
+    assert result.exists()
 
 
-def test_download_with_fallback_uses_cached_when_offline(monkeypatch, tmp_path: Path) -> None:
+def test_offline_fallback_uses_local_files_only(monkeypatch, tmp_path: Path) -> None:
+    """オフラインフォールバックがlocal_files_onlyパラメータを使用することを確認。"""
     spec = HFDatasetSpec(repo_id="dummy/repo", filename="db.sqlite")
-    cached = tmp_path / "db.sqlite"
-    cached.write_text("")
 
-    manifest_dir = tmp_path / "metadata"
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = manifest_dir / "dummy__repo__db.sqlite.json"
-    manifest_path.write_text(
-        '{"etag": "old", "path": "' + str(cached).replace("\\", "/") + '"}',
-        encoding="utf-8",
-    )
+    call_count = [0]
 
-    monkeypatch.setattr(
-        "genai_tag_db_tools.io.hf_downloader._fetch_remote_etag",
-        lambda *_args, **_kwargs: None,
-    )
+    def mock_hf_hub_download(**kwargs):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            raise ConnectionError("Network unavailable")
+        else:
+            assert kwargs.get("local_files_only") is True
+            cache_path = tmp_path / "cached.sqlite"
+            cache_path.write_text("")
+            return str(cache_path)
 
-    def fail_download(*_args, **_kwargs):  # pragma: no cover - should not run
-        raise AssertionError("download_hf_dataset_file should not be called")
+    monkeypatch.setattr("genai_tag_db_tools.io.hf_downloader.hf_hub_download", mock_hf_hub_download)
 
-    monkeypatch.setattr(
-        "genai_tag_db_tools.io.hf_downloader.download_hf_dataset_file",
-        fail_download,
-    )
+    result, is_cached = download_with_offline_fallback(spec)
 
-    result = download_with_fallback(spec, dest_dir=tmp_path)
-    assert result == cached
+    assert call_count[0] == 2
+    assert is_cached is True
+    assert result.exists()
 
 
-def test_download_with_fallback_falls_back_on_download_error(monkeypatch, tmp_path: Path) -> None:
+def test_offline_fallback_returns_fresh_download(monkeypatch, tmp_path: Path) -> None:
+    """download_with_offline_fallback()がネットワーク成功時にis_cached=Falseを返すことを確認。"""
     spec = HFDatasetSpec(repo_id="dummy/repo", filename="db.sqlite")
-    cached = tmp_path / "db.sqlite"
-    cached.write_text("")
 
-    manifest_dir = tmp_path / "metadata"
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = manifest_dir / "dummy__repo__db.sqlite.json"
-    manifest_path.write_text(
-        '{"etag": "old", "path": "' + str(cached).replace("\\", "/") + '"}',
-        encoding="utf-8",
-    )
+    def mock_hf_hub_download(**kwargs):
+        cache_path = tmp_path / "fresh.sqlite"
+        cache_path.write_text("")
+        return str(cache_path)
 
-    monkeypatch.setattr(
-        "genai_tag_db_tools.io.hf_downloader._fetch_remote_etag",
-        lambda *_args, **_kwargs: "new",
-    )
+    monkeypatch.setattr("genai_tag_db_tools.io.hf_downloader.hf_hub_download", mock_hf_hub_download)
 
-    def fail_download(*_args, **_kwargs):
-        raise RuntimeError("network error")
+    result, is_cached = download_with_offline_fallback(spec)
 
-    monkeypatch.setattr(
-        "genai_tag_db_tools.io.hf_downloader.download_hf_dataset_file",
-        fail_download,
-    )
-
-    result = download_with_fallback(spec, dest_dir=tmp_path)
-    assert result == cached
+    assert is_cached is False
+    assert result.exists()
 
 
-def test_download_with_fallback_updates_manifest_on_success(monkeypatch, tmp_path: Path) -> None:
+def test_offline_fallback_raises_when_no_cache_available(monkeypatch) -> None:
+    """download_with_offline_fallback()がキャッシュなし時にエラーを投げることを確認。"""
     spec = HFDatasetSpec(repo_id="dummy/repo", filename="db.sqlite")
-    resolved = tmp_path / "fresh.sqlite"
-    resolved.write_text("")
 
-    monkeypatch.setattr(
-        "genai_tag_db_tools.io.hf_downloader._fetch_remote_etag",
-        lambda *_args, **_kwargs: "new-etag",
-    )
+    def mock_hf_hub_download(**kwargs):
+        raise ConnectionError("Network unavailable")
 
-    def fake_download(*_args, **_kwargs):
-        return resolved
+    monkeypatch.setattr("genai_tag_db_tools.io.hf_downloader.hf_hub_download", mock_hf_hub_download)
 
-    monkeypatch.setattr(
-        "genai_tag_db_tools.io.hf_downloader.download_hf_dataset_file",
-        fake_download,
-    )
-
-    result = download_with_fallback(spec, dest_dir=tmp_path)
-    assert result == resolved
-
-    manifest_path = tmp_path / "metadata" / "dummy__repo__db.sqlite.json"
-    assert manifest_path.exists()
-    content = manifest_path.read_text(encoding="utf-8")
-    assert "new-etag" in content
-    manifest = json.loads(content)
-    assert Path(manifest["path"]) == resolved
+    with pytest.raises(RuntimeError, match=r"Failed to download.*no cached version available"):
+        download_with_offline_fallback(spec)
 
 
 def test_ensure_db_ready_sets_runtime(monkeypatch, tmp_path: Path):
+    """ensure_db_ready()がruntimeを初期化することを確認。"""
     fake_db = tmp_path / "db.sqlite"
     fake_db.write_text("")
 
     def fake_download(*_args, **_kwargs):
-        return fake_db
+        return fake_db, False
 
-    monkeypatch.setattr("genai_tag_db_tools.io.hf_downloader.download_with_fallback", fake_download)
+    monkeypatch.setattr(
+        "genai_tag_db_tools.io.hf_downloader.download_with_offline_fallback", fake_download
+    )
 
     spec = HFDatasetSpec(repo_id="dummy", filename="db.sqlite")
-    result = ensure_db_ready(spec, dest_dir=tmp_path)
+    result = ensure_db_ready(spec, user_db_dir=tmp_path)
 
     assert result == fake_db
     assert get_database_path() == fake_db

@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
-import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
-from huggingface_hub import HfApi, hf_hub_download
+from huggingface_hub import hf_hub_download
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +18,12 @@ class HFDatasetSpec:
 
 
 def default_cache_dir() -> Path:
-    """ユーザーキャッシュ配下の既定ディレクトリを返す。"""
+    """ユーザーDB配置用の既定ディレクトリを返す。
+
+    Note:
+        HF標準キャッシュは HF_HOME 環境変数で制御されます。
+        このディレクトリはユーザーDB (user_tags.sqlite) の保存先です。
+    """
     if os.name == "nt":
         base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
     else:
@@ -30,47 +31,22 @@ def default_cache_dir() -> Path:
     return base / "genai-tag-db-tools"
 
 
-def _manifest_key(spec: HFDatasetSpec) -> str:
-    safe_repo = spec.repo_id.replace("/", "__")
-    safe_file = spec.filename.replace("/", "__")
-    return f"{safe_repo}__{safe_file}"
+def download_hf_dataset_file(
+    spec: HFDatasetSpec,
+    *,
+    token: str | None = None,
+    local_files_only: bool = False,
+) -> Path:
+    """HF Datasetから指定ファイルをダウンロードする（標準キャッシュ使用）。
 
+    Args:
+        spec: HFデータセット参照情報
+        token: HFアクセストークン
+        local_files_only: オフラインモード（キャッシュのみ使用）
 
-def _manifest_path(dest_dir: Path, spec: HFDatasetSpec) -> Path:
-    return dest_dir / "metadata" / f"{_manifest_key(spec)}.json"
-
-
-def _load_manifest(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _save_manifest(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def _fetch_remote_etag(spec: HFDatasetSpec, token: str | None) -> str | None:
-    api = HfApi(token=token)
-    if not hasattr(api, "file_metadata"):
-        return None
-    try:
-        info = api.file_metadata(
-            repo_id=spec.repo_id,
-            path=spec.filename,
-            revision=spec.revision,
-            repo_type="dataset",
-        )
-    except Exception as exc:  # pragma: no cover - network errors
-        logger.warning("HF metadata fetch failed: %s", exc)
-        return None
-    return info.etag
-
-
-def download_hf_dataset_file(spec: HFDatasetSpec, *, dest_dir: Path, token: str | None = None) -> Path:
-    """HF Datasetから指定ファイルをダウンロードする。"""
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    Returns:
+        Path: ダウンロードされたファイルへのパス（HFキャッシュ内symlink）
+    """
     logger.info("HFダウンロード開始: %s/%s", spec.repo_id, spec.filename)
 
     local_path = hf_hub_download(
@@ -79,97 +55,88 @@ def download_hf_dataset_file(spec: HFDatasetSpec, *, dest_dir: Path, token: str 
         filename=spec.filename,
         revision=spec.revision,
         token=token,
-        local_dir=dest_dir,
+        local_files_only=local_files_only,
     )
     resolved = Path(local_path).resolve()
     logger.info("HFダウンロード完了: %s", resolved)
     return resolved
 
 
-def download_with_fallback(spec: HFDatasetSpec, *, dest_dir: Path, token: str | None = None) -> Path:
-    """リモートの更新確認とフォールバックを含めてダウンロードする。"""
-    dest_dir.mkdir(parents=True, exist_ok=True)
+def download_with_offline_fallback(
+    spec: HFDatasetSpec,
+    *,
+    token: str | None = None,
+) -> tuple[Path, bool]:
+    """オフラインフォールバック付きでダウンロード。
 
-    manifest_path = _manifest_path(dest_dir, spec)
-    manifest = _load_manifest(manifest_path)
-    remote_etag = _fetch_remote_etag(spec, token)
+    Args:
+        spec: HFデータセット参照情報
+        token: HFアクセストークン
 
-    if manifest and remote_etag and manifest.get("etag") == remote_etag:
-        cached = Path(manifest.get("path", ""))
-        if cached.exists():
-            logger.info("HFキャッシュ一致: %s", cached)
-            return cached
-
-    if manifest and remote_etag is None:
-        cached = Path(manifest.get("path", ""))
-        if cached.exists():
-            logger.info("HFキャッシュを継続利用: %s", cached)
-            return cached
-
-    resolved: Path | None = None
-    last_exc: Exception | None = None
-    attempts = 3
-    for attempt in range(attempts):
+    Returns:
+        tuple[Path, bool]: (resolved_path, is_cached)
+            - resolved_path: ダウンロードされたファイルのパス
+            - is_cached: オフラインモードでキャッシュを使用したか
+    """
+    try:
+        # Try normal download first
+        resolved = download_hf_dataset_file(spec, token=token, local_files_only=False)
+        return resolved, False
+    except Exception as network_exc:
+        logger.warning("Network error, trying cached version: %s", network_exc)
         try:
-            resolved = download_hf_dataset_file(spec, dest_dir=dest_dir, token=token)
-            break
-        except Exception as exc:
-            last_exc = exc
-            _cleanup_partial_files(dest_dir, spec)
-            if attempt < attempts - 1:
-                time.sleep(1 + attempt)
-
-    if resolved is None:
-        if manifest:
-            cached = Path(manifest.get("path", ""))
-            if cached.exists():
-                logger.warning("HFダウンロード失敗のため既存キャッシュを使用: %s", last_exc)
-                return cached
-        raise last_exc or RuntimeError("HFダウンロードに失敗しました。")
-
-    _save_manifest(
-        manifest_path,
-        {
-            "repo_id": spec.repo_id,
-            "filename": spec.filename,
-            "revision": spec.revision,
-            "etag": remote_etag,
-            "path": str(resolved),
-            "downloaded_at": datetime.now(UTC).isoformat(),
-        },
-    )
-    return resolved
+            # Fallback to cached version
+            resolved = download_hf_dataset_file(spec, token=token, local_files_only=True)
+            logger.info("Using cached version: %s", resolved)
+            return resolved, True
+        except Exception as cache_exc:
+            logger.error("No cached version available: %s", cache_exc)
+            raise RuntimeError(
+                f"Failed to download {spec.repo_id}/{spec.filename} and no cached version available"
+            ) from network_exc
 
 
-def _cleanup_partial_files(dest_dir: Path, spec: HFDatasetSpec) -> None:
-    """失敗したダウンロードの残骸を削除する。"""
-    candidates = [
-        dest_dir / f"{spec.filename}.incomplete",
-        dest_dir / f"{spec.filename}.partial",
-        dest_dir / f"{spec.filename}.tmp",
-    ]
-    for path in candidates:
-        if path.exists():
-            try:
-                path.unlink()
-            except OSError:
-                logger.warning("一時ファイル削除に失敗: %s", path)
+def ensure_db_ready(
+    spec: HFDatasetSpec,
+    *,
+    user_db_dir: Path,
+    token: str | None = None,
+) -> Path:
+    """DBファイルを取得し、runtime を初期化する。
 
+    Args:
+        spec: HFデータセット参照情報
+        user_db_dir: ユーザーDB配置ディレクトリ
+        token: HFアクセストークン
 
-def ensure_db_ready(spec: HFDatasetSpec, *, dest_dir: Path, token: str | None = None) -> Path:
-    """DBファイルを取得し、runtime を初期化する。"""
+    Returns:
+        Path: 取得したDBファイルへのパス
+    """
     from genai_tag_db_tools.db.runtime import init_engine, set_database_path
 
-    db_path = download_with_fallback(spec, dest_dir=dest_dir, token=token)
+    db_path, _is_cached = download_with_offline_fallback(spec, token=token)
+
     set_database_path(db_path)
     init_engine(db_path)
     return db_path
 
 
 def ensure_databases_ready(
-    specs: list[HFDatasetSpec], *, dest_dir: Path, token: str | None = None
+    specs: list[HFDatasetSpec],
+    *,
+    user_db_dir: Path,
+    token: str | None = None,
 ) -> list[Path]:
-    """複数のDBファイルを取得し、base DB一覧として初期化する。"""
+    """複数のDBファイルを取得し、base DB一覧として初期化する。
+
+    Args:
+        specs: HFデータセット参照情報のリスト
+        user_db_dir: ユーザーDB配置ディレクトリ
+        token: HFアクセストークン
+
+    Returns:
+        list[Path]: 取得したDBファイルパスのリスト
+    """
     from genai_tag_db_tools.db.runtime import (
         init_engine,
         set_base_database_paths,
@@ -178,7 +145,12 @@ def ensure_databases_ready(
 
     if not specs:
         raise ValueError("specs は空にできません。")
-    paths = [download_with_fallback(spec, dest_dir=dest_dir, token=token) for spec in specs]
+
+    paths: list[Path] = []
+    for spec in specs:
+        db_path, _is_cached = download_with_offline_fallback(spec, token=token)
+        paths.append(db_path)
+
     set_base_database_paths(paths)
     set_database_path(paths[0])
     init_engine(paths[0])

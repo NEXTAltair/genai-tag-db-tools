@@ -62,17 +62,17 @@ class DbInitWorker(QRunnable):
     def __init__(
         self,
         requests: list[EnsureDbRequest],
-        cache_dir: Path,
+        user_db_dir: Path,
     ):
         """初期化。
 
         Args:
             requests: データベース準備リクエストのリスト
-            cache_dir: キャッシュディレクトリのパス（user_db など関連ファイルを配置）
+            user_db_dir: ユーザーDB配置ディレクトリ（明示的に指定）
         """
         super().__init__()
         self.requests = requests
-        self.cache_dir = cache_dir
+        self.user_db_dir = user_db_dir
         self.signals = self.Signals()
 
     def run(self) -> None:
@@ -93,15 +93,15 @@ class DbInitWorker(QRunnable):
             runtime.init_engine(base_paths[0])
 
             self.signals.progress.emit("Initializing user database...", 70)
-            runtime.init_user_db(self.cache_dir)
+            runtime.init_user_db(self.user_db_dir)  # Use explicit parameter
 
             self.signals.progress.emit("Database initialization complete", 100)
 
-            downloaded_count = sum(1 for r in results if r.downloaded)
-            if downloaded_count > 0:
-                message = f"Updated {downloaded_count} database(s) from Hugging Face"
+            # Simplified message (downloaded field removed)
+            if any(r.cached for r in results):
+                message = "Database ready (offline mode)"
             else:
-                message = "Using cached databases"
+                message = "Database ready"
 
             self.signals.complete.emit(True, message)
             logger.info("Database initialization completed successfully")
@@ -153,19 +153,19 @@ class DbInitializationService(QObject):
 
     def __init__(
         self,
-        cache_dir: Path | None = None,
+        user_db_dir: Path | None = None,
         parent: QObject | None = None,
     ):
         """初期化。
 
         Args:
-            cache_dir: キャッシュディレクトリ（Noneの場合はデフォルト）
+            user_db_dir: ユーザーDB配置ディレクトリ（Noneの場合はデフォルト）
             parent: 親QObject
         """
         super().__init__(parent)
-        self.cache_dir = cache_dir or self._default_cache_dir()
+        self.user_db_dir = user_db_dir or self._default_cache_dir()
         self.thread_pool = QThreadPool.globalInstance()
-        logger.info("DbInitializationService initialized with cache_dir=%s", self.cache_dir)
+        logger.info("DbInitializationService initialized with user_db_dir=%s", self.user_db_dir)
 
     def _default_cache_dir(self) -> Path:
         """デフォルトのキャッシュディレクトリを取得。"""
@@ -188,13 +188,13 @@ class DbInitializationService(QObject):
             sources = self._default_sources()
 
         cache_config = DbCacheConfig(
-            cache_dir=str(self.cache_dir),
+            cache_dir=str(self.user_db_dir),  # Repurposed as user_db_dir
             token=token,
         )
 
         requests = [EnsureDbRequest(source=source, cache=cache_config) for source in sources]
 
-        worker = DbInitWorker(requests, self.cache_dir)
+        worker = DbInitWorker(requests, self.user_db_dir)  # Pass explicit path
         worker.signals.progress.connect(self._on_worker_progress)
         worker.signals.complete.connect(self._on_worker_complete)
         worker.signals.error.connect(self._on_worker_error)

@@ -9,20 +9,7 @@ from genai_tag_db_tools.db.schema import Base
 logger = logging.getLogger(__name__)
 
 
-def _get_default_database_path() -> Path:
-    """デフォルトのデータベースパスを返す。"""
-    from genai_tag_db_tools.io.hf_downloader import default_cache_dir
-
-    cache_dir = default_cache_dir()
-    # デフォルトのファイル名(models.pyの例から)
-    default_filename = "genai-image-tag-db-cc4.sqlite"
-
-    # Hugging Face Hubのデフォルト保存先(local_dir使用時)
-    # local_dir配下に直接ファイルが保存される
-    return cache_dir / default_filename
-
-
-_db_path: Path | None = None
+# Global state
 _base_db_paths: list[Path] | None = None
 _engine = None
 _SessionLocal = None
@@ -32,28 +19,25 @@ _UserSessionLocal = None
 
 
 def set_database_path(path: Path) -> None:
-    """グローバルのDBパスを設定する。"""
-    global _db_path, _base_db_paths
-    _db_path = path
-    _base_db_paths = [path]
+    """グローバルのDBパスを設定する（単一DB用）。"""
+    set_base_database_paths([path])
 
 
 def set_base_database_paths(paths: list[Path]) -> None:
     """複数ベースDBパスを設定する（優先順に並べる）。"""
-    global _db_path, _base_db_paths
+    global _base_db_paths
     if not paths:
         raise ValueError("paths は空にできません。")
     _base_db_paths = list(paths)
-    _db_path = paths[0]
 
 
 def get_database_path() -> Path:
-    """設定済みのDBパスを返す。未設定ならデフォルト値を使用。"""
-    if _db_path is None:
-        default_path = _get_default_database_path()
-        logger.info("DBパスが未設定のため、デフォルト値を使用: %s", default_path)
-        return default_path
-    return _db_path
+    """設定済みのDBパスを返す。未設定ならエラー。"""
+    if _base_db_paths is None or not _base_db_paths:
+        raise RuntimeError(
+            "DBパスが未設定です。ensure_db() または set_database_path() を先に呼んでください。"
+        )
+    return _base_db_paths[0]
 
 
 def get_base_database_paths() -> list[Path]:
@@ -115,16 +99,26 @@ def get_base_session_factories() -> list[sessionmaker]:
     return factories
 
 
-def init_user_db(cache_dir: Path) -> Path:
-    """ユーザーDBを初期化する。存在しなければ空DBを作成する。"""
+def init_user_db(user_db_dir: Path) -> Path:
+    """ユーザーDBを初期化する。存在しなければ空DBを作成する。
+
+    Args:
+        user_db_dir: ユーザーDB配置ディレクトリ（明示的に指定必須）
+
+    Returns:
+        Path: 初期化されたuser_tags.sqliteのパス
+    """
     global _user_db_path, _user_engine, _UserSessionLocal
-    user_db_path = cache_dir / "user_db" / "user_tags.sqlite"
+
+    user_db_path = user_db_dir / "user_tags.sqlite"
     user_db_path.parent.mkdir(parents=True, exist_ok=True)
 
     _user_db_path = user_db_path
     _user_engine = _create_engine(user_db_path)
     Base.metadata.create_all(_user_engine)
     _UserSessionLocal = sessionmaker(bind=_user_engine, autoflush=False, autocommit=False)
+
+    logger.info("User DB initialized: %s", user_db_path)
     return user_db_path
 
 

@@ -50,8 +50,7 @@ class TagStatistics:
 
         format_map = self.reader.get_format_map()
         status_map = {
-            (status.tag_id, status.format_id): status
-            for status in self.reader.list_tag_statuses()
+            (status.tag_id, status.format_id): status for status in self.reader.list_tag_statuses()
         }
         filtered_rows = []
         for usage in usage_rows:

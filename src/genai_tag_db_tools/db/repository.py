@@ -119,6 +119,7 @@ class TagReader:
                 .filter(TagStatus.tag_id == tag_id, TagStatus.format_id == format_id)
                 .one_or_none()
             )
+
     def list_tag_statuses(self, tag_id: int | None = None) -> list[TagStatus]:
         with self.session_factory() as session:
             query = session.query(TagStatus)
@@ -319,6 +320,7 @@ class TagReader:
         with self.session_factory() as session:
             return [type_obj.type_name for type_obj in session.query(TagTypeName).all()]
 
+
 class TagRepository:
     """Write-only tag repository."""
 
@@ -427,9 +429,7 @@ class TagRepository:
             existing_by_tag = session.query(Tag).filter(Tag.tag == tag).one_or_none()
             if existing_by_tag:
                 if existing_by_tag.tag_id != tag_id:
-                    raise ValueError(
-                        f"tag='{tag}' already exists with tag_id={existing_by_tag.tag_id}"
-                    )
+                    raise ValueError(f"tag='{tag}' already exists with tag_id={existing_by_tag.tag_id}")
                 return existing_by_tag.tag_id
 
             try:
@@ -454,6 +454,7 @@ class TagRepository:
         with self.session_factory() as session:
             existing_tags = session.query(Tag.tag, Tag.tag_id).filter(Tag.tag.in_(tag_list)).all()
             return dict(existing_tags)
+
     def update_tag_status(
         self,
         tag_id: int,
@@ -495,9 +496,7 @@ class TagRepository:
                 )
                 if not mapping:
                     msg = ErrorMessages.DB_OPERATION_FAILED.format(
-                        error_msg=(
-                            f"format_id={format_id}, type_id={type_id} not found in mapping"
-                        )
+                        error_msg=(f"format_id={format_id}, type_id={type_id} not found in mapping")
                     )
                     raise ValueError(msg)
 
@@ -596,6 +595,7 @@ class TagRepository:
             except IntegrityError as e:
                 session.rollback()
                 raise ValueError(f"DB operation failed: {e}") from e
+
 
 class MergedTagReader:
     """Read-only view merging base/user repositories."""
@@ -800,6 +800,7 @@ class MergedTagReader:
             for row in user_rows:
                 merged[row["tag_id"]] = row
         return list(merged.values())
+
     def search_tags_bulk(
         self,
         keywords: list[str],
@@ -846,7 +847,7 @@ class MergedTagReader:
             formats |= set(repo.get_tag_formats())
         if self._has_user():
             formats |= set(self.user_repo.get_tag_formats())
-        return sorted(list(formats))
+        return sorted(formats)
 
     def get_format_map(self) -> dict[int, str]:
         formats: dict[int, str] = {}
@@ -862,7 +863,7 @@ class MergedTagReader:
             languages |= set(repo.get_tag_languages())
         if self._has_user():
             languages |= set(self.user_repo.get_tag_languages())
-        return sorted(list(languages))
+        return sorted(languages)
 
     def get_tag_types(self, format_id: int) -> list[str]:
         types: set[str] = set()

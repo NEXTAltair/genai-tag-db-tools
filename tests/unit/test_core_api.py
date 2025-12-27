@@ -47,52 +47,44 @@ def _build_request(tmp_path: Path, repo_id: str, filename: str) -> EnsureDbReque
     )
 
 
-def test_ensure_db_marks_downloaded_when_manifest_changes(monkeypatch, tmp_path):
+def test_ensure_db_returns_fresh_download(monkeypatch, tmp_path):
+    """ensure_db()が新規ダウンロード時にcached=Falseを返すことを確認。"""
     payload = b"abc"
     db_path = tmp_path / "db.sqlite"
     db_path.write_bytes(payload)
 
     request = _build_request(tmp_path, "org/db", "db.sqlite")
-    spec = hf_downloader.HFDatasetSpec(repo_id="org/db", filename="db.sqlite", revision=None)
-    manifest_path = hf_downloader._manifest_path(tmp_path, spec)
-    hf_downloader._save_manifest(manifest_path, {"etag": "old", "path": str(db_path)})
 
-    def fake_ensure_db_ready(spec, *, dest_dir, token=None):
-        hf_downloader._save_manifest(
-            hf_downloader._manifest_path(dest_dir, spec),
-            {"etag": "new", "path": str(db_path)},
-        )
-        return db_path
+    def fake_download_with_offline_fallback(spec, *, token=None):
+        return db_path, False  # is_cached=False
 
-    monkeypatch.setattr(hf_downloader, "ensure_db_ready", fake_ensure_db_ready)
+    monkeypatch.setattr(
+        hf_downloader, "download_with_offline_fallback", fake_download_with_offline_fallback
+    )
 
     result = core_api.ensure_db(request)
-    assert result.downloaded is True
+    assert result.cached is False
     assert result.sha256 == _hash_bytes(payload)
     assert Path(result.db_path) == db_path
 
 
-def test_ensure_db_marks_not_downloaded_when_manifest_same(monkeypatch, tmp_path):
+def test_ensure_db_returns_cached_download(monkeypatch, tmp_path):
+    """ensure_db()がキャッシュ使用時にcached=Trueを返すことを確認。"""
     payload = b"xyz"
     db_path = tmp_path / "db.sqlite"
     db_path.write_bytes(payload)
 
     request = _build_request(tmp_path, "org/db", "db.sqlite")
-    spec = hf_downloader.HFDatasetSpec(repo_id="org/db", filename="db.sqlite", revision=None)
-    manifest_path = hf_downloader._manifest_path(tmp_path, spec)
-    hf_downloader._save_manifest(manifest_path, {"etag": "same", "path": str(db_path)})
 
-    def fake_ensure_db_ready(spec, *, dest_dir, token=None):
-        hf_downloader._save_manifest(
-            hf_downloader._manifest_path(dest_dir, spec),
-            {"etag": "same", "path": str(db_path)},
-        )
-        return db_path
+    def fake_download_with_offline_fallback(spec, *, token=None):
+        return db_path, True  # is_cached=True
 
-    monkeypatch.setattr(hf_downloader, "ensure_db_ready", fake_ensure_db_ready)
+    monkeypatch.setattr(
+        hf_downloader, "download_with_offline_fallback", fake_download_with_offline_fallback
+    )
 
     result = core_api.ensure_db(request)
-    assert result.downloaded is False
+    assert result.cached is True
     assert result.sha256 == _hash_bytes(payload)
 
 
@@ -106,7 +98,8 @@ def test_ensure_databases_requires_same_cache_dir(tmp_path):
         core_api.ensure_databases([req_a, req_b])
 
 
-def test_ensure_databases_reports_downloaded_per_spec(monkeypatch, tmp_path):
+def test_ensure_databases_returns_cached_status_per_spec(monkeypatch, tmp_path):
+    """ensure_databases()が各DBのキャッシュ状態を正しく返すことを確認。"""
     db_a = tmp_path / "a.sqlite"
     db_b = tmp_path / "b.sqlite"
     db_a.write_bytes(b"a")
@@ -114,33 +107,21 @@ def test_ensure_databases_reports_downloaded_per_spec(monkeypatch, tmp_path):
 
     req_a = _build_request(tmp_path, "org/a", "a.sqlite")
     req_b = _build_request(tmp_path, "org/b", "b.sqlite")
-    spec_a = hf_downloader.HFDatasetSpec("org/a", "a.sqlite", None)
-    spec_b = hf_downloader.HFDatasetSpec("org/b", "b.sqlite", None)
 
-    hf_downloader._save_manifest(
-        hf_downloader._manifest_path(tmp_path, spec_a),
-        {"etag": "old-a", "path": str(db_a)},
+    call_count = [0]
+    paths_and_cached = [(db_a, True), (db_b, False)]
+
+    def fake_download_with_offline_fallback(spec, *, token=None):
+        result = paths_and_cached[call_count[0]]
+        call_count[0] += 1
+        return result
+
+    monkeypatch.setattr(
+        hf_downloader, "download_with_offline_fallback", fake_download_with_offline_fallback
     )
-    hf_downloader._save_manifest(
-        hf_downloader._manifest_path(tmp_path, spec_b),
-        {"etag": "old-b", "path": str(db_b)},
-    )
-
-    def fake_ensure_databases_ready(specs, *, dest_dir, token=None):
-        hf_downloader._save_manifest(
-            hf_downloader._manifest_path(dest_dir, spec_a),
-            {"etag": "old-a", "path": str(db_a)},
-        )
-        hf_downloader._save_manifest(
-            hf_downloader._manifest_path(dest_dir, spec_b),
-            {"etag": "new-b", "path": str(db_b)},
-        )
-        return [db_a, db_b]
-
-    monkeypatch.setattr(hf_downloader, "ensure_databases_ready", fake_ensure_databases_ready)
 
     results = core_api.ensure_databases([req_a, req_b])
-    assert [r.downloaded for r in results] == [False, True]
+    assert [r.cached for r in results] == [True, False]
     assert results[0].sha256 == _hash_bytes(b"a")
     assert results[1].sha256 == _hash_bytes(b"bb")
 
@@ -151,30 +132,49 @@ def test_search_tags_filters_and_maps():
             "tag": "cat",
             "source_tag": "cat",
             "format_name": "danbooru",
+            "type_id": 1,
             "type_name": "general",
             "alias": False,
+            "deprecated": False,
+            "usage_count": 100,
+            "translations": None,
+            "format_statuses": {"danbooru": {"status": "active"}},
         },
         {
             "tag": "kitty",
             "source_tag": "kitty",
             "format_name": "danbooru",
+            "type_id": 2,
             "type_name": "artist",
             "alias": False,
             "deprecated": True,
+            "usage_count": 50,
+            "translations": None,
+            "format_statuses": {"danbooru": {"status": "active"}},
         },
         {
             "tag": "dog",
             "source_tag": "dog",
             "format_name": "e621",
+            "type_id": 2,
             "type_name": "artist",
             "alias": True,
+            "deprecated": False,
+            "usage_count": 80,
+            "translations": None,
+            "format_statuses": {"e621": {"status": "active"}},
         },
         {
             "tag": "bunny",
             "source_tag": "bunny",
             "format_name": "danbooru",
+            "type_id": 2,
             "type_name": "artist",
             "alias": False,
+            "deprecated": False,
+            "usage_count": 120,
+            "translations": None,
+            "format_statuses": {"danbooru": {"status": "active"}},
         },
     ]
     repo = DummyRepo(rows)
@@ -191,8 +191,13 @@ def test_search_tags_filters_and_maps():
             tag="bunny",
             source_tag="bunny",
             format_name="danbooru",
+            type_id=2,
             type_name="artist",
             alias=False,
+            deprecated=False,
+            usage_count=120,
+            translations=None,
+            format_statuses={"danbooru": {"status": "active"}},
         )
     ]
     assert result.total == 1

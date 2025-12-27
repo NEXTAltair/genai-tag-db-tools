@@ -82,18 +82,18 @@ def test_ensure_db_request_valid():
 def test_ensure_db_result_valid():
     result = EnsureDbResult(
         db_path="/path/to/db.sqlite",
-        downloaded=True,
+        cached=True,
         sha256="abc123",
     )
     assert result.db_path == "/path/to/db.sqlite"
-    assert result.downloaded is True
+    assert result.cached is True
     assert result.sha256 == "abc123"
 
 
 @pytest.mark.db_tools
 def test_ensure_db_result_requires_all_fields():
     with pytest.raises(ValidationError):
-        EnsureDbResult(db_path="/path/to/db.sqlite", downloaded=True)
+        EnsureDbResult(db_path="/path/to/db.sqlite", cached=True)
 
 
 @pytest.mark.db_tools

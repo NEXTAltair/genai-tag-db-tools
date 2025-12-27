@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from genai_tag_db_tools.db.repository import MergedTagReader
 from genai_tag_db_tools.io import hf_downloader
 from genai_tag_db_tools.models import (
-    DbCacheConfig,
     DbSourceRef,
     EnsureDbRequest,
     EnsureDbResult,
@@ -23,23 +20,6 @@ from genai_tag_db_tools.models import (
 )
 from genai_tag_db_tools.services.app_services import TagRegisterService
 from genai_tag_db_tools.utils.cleanup_str import TagCleaner
-
-
-@dataclass(frozen=True)
-class _ManifestSignature:
-    etag: str | None
-    path: str | None
-    downloaded_at: str | None
-
-
-def _manifest_signature(manifest: dict[str, Any] | None) -> _ManifestSignature | None:
-    if not manifest:
-        return None
-    return _ManifestSignature(
-        etag=manifest.get("etag"),
-        path=manifest.get("path"),
-        downloaded_at=manifest.get("downloaded_at"),
-    )
 
 
 def _compute_sha256(path: Path) -> str:
@@ -58,26 +38,25 @@ def _to_spec(source: DbSourceRef) -> hf_downloader.HFDatasetSpec:
     )
 
 
-def _to_cache_dir(cache: DbCacheConfig) -> Path:
-    return Path(cache.cache_dir)
-
-
 def build_downloaded_at_utc() -> str:
     return datetime.now(UTC).isoformat()
 
 
 def ensure_db(request: EnsureDbRequest) -> EnsureDbResult:
     spec = _to_spec(request.source)
-    dest_dir = _to_cache_dir(request.cache)
-    manifest_path = hf_downloader._manifest_path(dest_dir, spec)
-    before = _manifest_signature(hf_downloader._load_manifest(manifest_path))
 
-    db_path = hf_downloader.ensure_db_ready(spec, dest_dir=dest_dir, token=request.cache.token)
+    # Download (or use cache)
+    db_path, is_cached = hf_downloader.download_with_offline_fallback(spec, token=request.cache.token)
 
-    after = _manifest_signature(hf_downloader._load_manifest(manifest_path))
-    downloaded = after is not None and after != before
+    # Compute SHA256
     sha256 = _compute_sha256(db_path)
-    return EnsureDbResult(db_path=str(db_path), downloaded=downloaded, sha256=sha256)
+
+    return EnsureDbResult(
+        db_path=str(db_path),
+        sha256=sha256,
+        revision=None,  # Could extract from symlink path if needed
+        cached=is_cached,
+    )
 
 
 def ensure_databases(requests: list[EnsureDbRequest]) -> list[EnsureDbResult]:
@@ -92,29 +71,17 @@ def ensure_databases(requests: list[EnsureDbRequest]) -> list[EnsureDbResult]:
         if req.cache.token != token:
             raise ValueError("token は全てのリクエストで一致させてください")
 
-    specs = [_to_spec(req.source) for req in requests]
-    dest_dir = _to_cache_dir(requests[0].cache)
-
-    before = {
-        spec: _manifest_signature(
-            hf_downloader._load_manifest(hf_downloader._manifest_path(dest_dir, spec))
-        )
-        for spec in specs
-    }
-
-    paths = hf_downloader.ensure_databases_ready(specs, dest_dir=dest_dir, token=token)
-
     results: list[EnsureDbResult] = []
-    for spec, path in zip(specs, paths, strict=True):
-        after = _manifest_signature(
-            hf_downloader._load_manifest(hf_downloader._manifest_path(dest_dir, spec))
-        )
-        downloaded = after is not None and after != before.get(spec)
+    for req in requests:
+        spec = _to_spec(req.source)
+        db_path, is_cached = hf_downloader.download_with_offline_fallback(spec, token=token)
+
         results.append(
             EnsureDbResult(
-                db_path=str(path),
-                downloaded=downloaded,
-                sha256=_compute_sha256(path),
+                db_path=str(db_path),
+                sha256=_compute_sha256(db_path),
+                revision=None,
+                cached=is_cached,
             )
         )
 

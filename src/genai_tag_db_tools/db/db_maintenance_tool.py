@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import Any
 
 from genai_tag_db_tools.db.repository import (
-    TagRepository,
     get_default_reader,
     get_default_repository,
 )
@@ -40,9 +39,7 @@ class DatabaseMaintenanceTool:
 
             status = statuses[0]
             preferred_tag = (
-                self.reader.get_tag_by_id(status.preferred_tag_id)
-                if status.preferred_tag_id
-                else None
+                self.reader.get_tag_by_id(status.preferred_tag_id) if status.preferred_tag_id else None
             )
             format_name = self.reader.get_format_name(format_id)
 

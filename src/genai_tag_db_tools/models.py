@@ -23,11 +23,15 @@ class DbCacheConfig(BaseModel):
     """DBキャッシュ設定。
 
     Args:
-        cache_dir: SQLiteの保存先ディレクトリ。
-        token: HFアクセストークン（必要な場合のみ）。
+        cache_dir: ユーザーDB配置ディレクトリ（user_tags.sqlite保存先）
+        token: HFアクセストークン（必要な場合のみ）
+
+    Note:
+        HF標準キャッシュの場所は HF_HOME 環境変数で制御されます。
+        cache_dir はユーザーDBの保存先として使用されます。
     """
 
-    cache_dir: str = Field(..., examples=["/path/to/tag_db_cache"])
+    cache_dir: str = Field(..., examples=["/path/to/user_db_dir"], description="ユーザーDB配置ディレクトリ")
     token: str | None = Field(default=None, description="HFアクセストークン")
 
 
@@ -47,14 +51,21 @@ class EnsureDbResult(BaseModel):
     """DB準備結果。
 
     Args:
-        db_path: ローカルSQLiteの実体パス。
-        downloaded: 今回新規ダウンロードしたか。
+        db_path: ローカルSQLiteの実体パス（HFキャッシュ内のsymlink）。
         sha256: 取得ファイルのSHA256。
+        revision: 解決されたリビジョン（コミットハッシュ）。
+        cached: オフラインモードでキャッシュを使用したか。
+
+    Note:
+        `downloaded` フィールドは削除されました。
+        HF Hub は新規ダウンロード/キャッシュヒットの区別を提供しないため、
+        このフラグを正確に判定できません。
     """
 
     db_path: str = Field(..., description="ローカルSQLiteの実体パス")
-    downloaded: bool = Field(..., description="今回新規ダウンロードしたか")
     sha256: str = Field(..., description="取得ファイルのSHA256")
+    revision: str | None = Field(default=None, description="解決されたリビジョン")
+    cached: bool = Field(default=False, description="キャッシュのみ使用したか")
 
 
 class TagSearchRequest(BaseModel):
