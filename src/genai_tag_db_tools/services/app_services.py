@@ -280,7 +280,7 @@ class TagRegisterService(GuiServiceBase):
                 type_id=type_id,
             )
 
-            return TagRegisterResult(created=created)
+            return TagRegisterResult(created=created, tag_id=tag_id)
 
         except Exception as e:
             self.logger.error("タグ登録中にエラー発甁E %s", e)

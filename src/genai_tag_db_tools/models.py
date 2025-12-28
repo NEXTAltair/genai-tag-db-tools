@@ -114,11 +114,12 @@ class TagIdRef(BaseModel):
 
 
 class TagRecordPublic(BaseModel):
-    """検索結果の1行（外部向け / IDなし）。
+    """検索結果の1行（外部向け / tag_id 含む）。
 
     Args:
         tag: 表示用の正規タグ。
         source_tag: ソースタグ（あれば）。
+        tag_id: タグID。
         format_name: フォーマット名。
         type_name: タイプ名。
         alias: エイリアスかどうか。
@@ -126,6 +127,7 @@ class TagRecordPublic(BaseModel):
 
     tag: str = Field(..., description="表示用の正規タグ")
     source_tag: str | None = Field(default=None, description="ソースタグ")
+    tag_id: int = Field(..., description="タグID")
     format_name: str | None = Field(default=None, description="フォーマット名")
     type_id: int | None = Field(default=None, description="タイプID")
     type_name: str | None = Field(default=None, description="タイプ名")
@@ -217,9 +219,11 @@ class TagRegisterResult(BaseModel):
 
     Args:
         created: 新規作成かどうか。
+        tag_id: 登録されたタグID。
     """
 
     created: bool = Field(..., description="新規作成かどうか")
+    tag_id: int = Field(..., description="登録されたタグID")
 
 
 class TagStatisticsResult(BaseModel):

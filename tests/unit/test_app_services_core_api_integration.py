@@ -70,6 +70,7 @@ class TestTagSearchServiceCoreApiIntegration:
                 TagRecordPublic(
                     tag="girl",
                     source_tag="1girl",
+                    tag_id=1,
                     format_name="danbooru",
                     type_name="general",
                     alias=False,

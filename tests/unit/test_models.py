@@ -125,12 +125,14 @@ def test_tag_record_public_valid():
     record = TagRecordPublic(
         tag="cat",
         source_tag="cat",
+        tag_id=123,
         format_name="danbooru",
         type_name="general",
         alias=False,
     )
     assert record.tag == "cat"
     assert record.source_tag == "cat"
+    assert record.tag_id == 123
     assert record.format_name == "danbooru"
     assert record.type_name == "general"
     assert record.alias is False
@@ -138,8 +140,9 @@ def test_tag_record_public_valid():
 
 @pytest.mark.db_tools
 def test_tag_record_public_minimal():
-    record = TagRecordPublic(tag="cat")
+    record = TagRecordPublic(tag="cat", tag_id=123)
     assert record.tag == "cat"
+    assert record.tag_id == 123
     assert record.source_tag is None
     assert record.format_name is None
     assert record.type_name is None
@@ -150,8 +153,8 @@ def test_tag_record_public_minimal():
 def test_tag_search_result_valid():
     result = TagSearchResult(
         items=[
-            TagRecordPublic(tag="cat"),
-            TagRecordPublic(tag="dog"),
+            TagRecordPublic(tag="cat", tag_id=1),
+            TagRecordPublic(tag="dog", tag_id=2),
         ],
         total=2,
     )
@@ -161,7 +164,7 @@ def test_tag_search_result_valid():
 
 @pytest.mark.db_tools
 def test_tag_search_result_total_optional():
-    result = TagSearchResult(items=[TagRecordPublic(tag="cat")])
+    result = TagSearchResult(items=[TagRecordPublic(tag="cat", tag_id=1)])
     assert len(result.items) == 1
     assert result.total is None
 
@@ -216,8 +219,9 @@ def test_tag_register_request_with_all_fields():
 
 @pytest.mark.db_tools
 def test_tag_register_result_valid():
-    result = TagRegisterResult(created=True)
+    result = TagRegisterResult(created=True, tag_id=123)
     assert result.created is True
+    assert result.tag_id == 123
 
 
 @pytest.mark.db_tools

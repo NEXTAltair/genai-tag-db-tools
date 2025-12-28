@@ -106,6 +106,7 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
         TagRecordPublic(
             tag=row["tag"],
             source_tag=row["source_tag"],
+            tag_id=row["tag_id"],
             format_name=format_name,
             type_id=row["type_id"],
             type_name=row["type_name"],

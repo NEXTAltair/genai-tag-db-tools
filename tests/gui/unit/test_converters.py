@@ -25,6 +25,7 @@ class TestSearchResultToDataFrame:
         """Single search result item should convert correctly."""
         tag_record = TagRecordPublic(
             tag="cat",
+            tag_id=1,
             translations={"ja": ["猫"], "en": ["cat"]},
             format_statuses={"danbooru": {"type": "general", "usage_count": 100}},
         )
@@ -43,11 +44,13 @@ class TestSearchResultToDataFrame:
         items = [
             TagRecordPublic(
                 tag="cat",
+                tag_id=1,
                 translations={"ja": ["猫"]},
                 format_statuses={"danbooru": {"type": "general"}},
             ),
             TagRecordPublic(
                 tag="dog",
+                tag_id=2,
                 translations={"ja": ["犬"]},
                 format_statuses={"e621": {"type": "species"}},
             ),
@@ -61,7 +64,7 @@ class TestSearchResultToDataFrame:
 
     def test_none_values_converted_to_empty_dict(self):
         """None translations and format_statuses should convert to empty dict."""
-        tag_record = TagRecordPublic(tag="test", translations=None, format_statuses=None)
+        tag_record = TagRecordPublic(tag="test", tag_id=1, translations=None, format_statuses=None)
         result = TagSearchResult(items=[tag_record], total=1)
 
         df = search_result_to_dataframe(result)

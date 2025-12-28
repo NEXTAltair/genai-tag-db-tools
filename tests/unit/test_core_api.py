@@ -78,6 +78,7 @@ def test_search_tags_filters_and_maps():
         {
             "tag": "cat",
             "source_tag": "cat",
+            "tag_id": 1,
             "format_name": "danbooru",
             "type_id": 1,
             "type_name": "general",
@@ -90,6 +91,7 @@ def test_search_tags_filters_and_maps():
         {
             "tag": "kitty",
             "source_tag": "kitty",
+            "tag_id": 2,
             "format_name": "danbooru",
             "type_id": 2,
             "type_name": "artist",
@@ -102,6 +104,7 @@ def test_search_tags_filters_and_maps():
         {
             "tag": "dog",
             "source_tag": "dog",
+            "tag_id": 3,
             "format_name": "e621",
             "type_id": 2,
             "type_name": "artist",
@@ -114,6 +117,7 @@ def test_search_tags_filters_and_maps():
         {
             "tag": "bunny",
             "source_tag": "bunny",
+            "tag_id": 4,
             "format_name": "danbooru",
             "type_id": 2,
             "type_name": "artist",
@@ -137,6 +141,7 @@ def test_search_tags_filters_and_maps():
         TagRecordPublic(
             tag="bunny",
             source_tag="bunny",
+            tag_id=4,
             format_name="danbooru",
             type_id=2,
             type_name="artist",
