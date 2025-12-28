@@ -286,7 +286,7 @@ class TagReader:
     def get_format_map(self) -> dict[int, str]:
         with self.session_factory() as session:
             rows = session.query(TagFormat.format_id, TagFormat.format_name).all()
-            return dict(rows)
+            return {row[0]: row[1] for row in rows}
 
     def get_tag_languages(self) -> list[str]:
         with self.session_factory() as session:
@@ -406,7 +406,7 @@ class TagRepository:
         records = new_df.select(["source_tag", "tag"]).to_dicts()
         with self.session_factory() as session:
             try:
-                session.bulk_insert_mappings(Tag, records)
+                session.bulk_insert_mappings(Tag.__mapper__, records)  # type: ignore[arg-type]
                 session.commit()
             except IntegrityError as e:
                 session.rollback()
@@ -453,7 +453,7 @@ class TagRepository:
     def _fetch_existing_tags_as_map(self, tag_list: list[str]) -> dict[str, int]:
         with self.session_factory() as session:
             existing_tags = session.query(Tag.tag, Tag.tag_id).filter(Tag.tag.in_(tag_list)).all()
-            return dict(existing_tags)
+            return {row[0]: row[1] for row in existing_tags}
 
     def update_tag_status(
         self,
@@ -633,6 +633,7 @@ class MergedTagReader:
 
     def get_tag_id_by_name(self, keyword: str, partial: bool = False) -> int | None:
         if self._has_user():
+            assert self.user_repo is not None
             user_id = self.user_repo.get_tag_id_by_name(keyword, partial=partial)
             if user_id is not None:
                 return user_id
@@ -644,6 +645,7 @@ class MergedTagReader:
 
     def get_tag_by_id(self, tag_id: int) -> Tag | None:
         if self._has_user():
+            assert self.user_repo is not None
             tag = self.user_repo.get_tag_by_id(tag_id)
             if tag is not None:
                 return tag
@@ -659,6 +661,7 @@ class MergedTagReader:
             for tag in repo.list_tags():
                 merged[tag.tag_id] = tag
         if self._has_user():
+            assert self.user_repo is not None
             for tag in self.user_repo.list_tags():
                 merged[tag.tag_id] = tag
         return list(merged.values())
@@ -673,6 +676,7 @@ class MergedTagReader:
 
     def get_tag_status(self, tag_id: int, format_id: int) -> TagStatus | None:
         if self._has_user():
+            assert self.user_repo is not None
             status = self.user_repo.get_tag_status(tag_id, format_id)
             if status is not None:
                 return status
@@ -688,12 +692,14 @@ class MergedTagReader:
             for status in repo.list_tag_statuses(tag_id=tag_id):
                 merged[(status.tag_id, status.format_id)] = status
         if self._has_user():
+            assert self.user_repo is not None
             for status in self.user_repo.list_tag_statuses(tag_id=tag_id):
                 merged[(status.tag_id, status.format_id)] = status
         return list(merged.values())
 
     def get_usage_count(self, tag_id: int, format_id: int) -> int | None:
         if self._has_user():
+            assert self.user_repo is not None
             count = self.user_repo.get_usage_count(tag_id, format_id)
             if count is not None:
                 return count
@@ -711,6 +717,7 @@ class MergedTagReader:
             for row in repo.list_usage_counts(tag_id=tag_id, format_id=format_id):
                 merged[(row.tag_id, row.format_id)] = row
         if self._has_user():
+            assert self.user_repo is not None
             for row in self.user_repo.list_usage_counts(tag_id=tag_id, format_id=format_id):
                 merged[(row.tag_id, row.format_id)] = row
         return list(merged.values())
