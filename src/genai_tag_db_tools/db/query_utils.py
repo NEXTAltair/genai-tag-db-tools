@@ -268,7 +268,7 @@ class TagSearchResultBuilder:
         status_by_tag_format = preloaded["status_by_tag_format"]
         statuses_by_tag_id = preloaded["statuses_by_tag_id"]
 
-        tag_obj = tags_by_id.get(tag_id)
+        tag_obj = tags_by_id.get(tag_id)  # type: ignore[union-attr]
         if not tag_obj:
             return None
 

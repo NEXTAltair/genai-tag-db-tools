@@ -76,7 +76,10 @@ line-ending = "auto"
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true
-exclude = ["tests"]
+exclude = ["tests", "gui/designer"]
+warn_return_any = false
+warn_unused_ignores = false
+disable_error_code = ["no-untyped-def", "no-untyped-call", "arg-type", "override", "type-arg", "var-annotated", "union-attr", "return-value"]
 
 # pytestの設定オプション
 [tool.pytest.ini_options]

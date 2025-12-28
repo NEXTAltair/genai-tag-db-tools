@@ -1,8 +1,9 @@
 import logging
 from pathlib import Path
+from typing import Any
 
-from sqlalchemy import StaticPool, create_engine, event
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import Engine, StaticPool, create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
 
 from genai_tag_db_tools.db.schema import Base
 
@@ -47,13 +48,13 @@ def get_base_database_paths() -> list[Path]:
     return [get_database_path()]
 
 
-def enable_foreign_keys(dbapi_connection, connection_record) -> None:
+def enable_foreign_keys(dbapi_connection: Any, connection_record: Any) -> None:
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
 
 
-def _create_engine(db_path: Path):
+def _create_engine(db_path: Path) -> Engine:
     engine = create_engine(
         f"sqlite:///{db_path.absolute()}",
         connect_args={"check_same_thread": False},
@@ -64,7 +65,7 @@ def _create_engine(db_path: Path):
     return engine
 
 
-def create_session_factory(db_path: Path):
+def create_session_factory(db_path: Path) -> sessionmaker[Session]:
     """指定DBパスからセッションファクトリを作成する。"""
     engine = _create_engine(db_path)
     return sessionmaker(bind=engine, autoflush=False, autocommit=False)
@@ -82,16 +83,16 @@ def init_engine(path: Path | None = None) -> None:
     _SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False)
 
 
-def get_session_factory():
+def get_session_factory() -> sessionmaker[Session]:
     """Session factoryを返す。"""
     if _SessionLocal is None:
         raise RuntimeError("セッションが未初期化です。init_engine() を先に呼んでください。")
     return _SessionLocal
 
 
-def get_base_session_factories() -> list[sessionmaker]:
+def get_base_session_factories() -> list[sessionmaker[Session]]:
     """ベースDBのセッションファクトリ一覧を返す（優先順）。"""
-    factories: list[sessionmaker] = []
+    factories: list[sessionmaker[Session]] = []
     for path in get_base_database_paths():
         if not path.exists():
             raise FileNotFoundError(f"DBファイルが見つかりません: {path}")
@@ -127,14 +128,14 @@ def init_user_db(user_db_dir: Path | None = None) -> Path:
     return user_db_path
 
 
-def get_user_session_factory():
+def get_user_session_factory() -> sessionmaker[Session]:
     """ユーザーDBのSession factoryを返す。"""
     if _UserSessionLocal is None:
         raise RuntimeError("ユーザーDBが未初期化です。init_user_db() を先に呼んでください。")
     return _UserSessionLocal
 
 
-def get_user_session_factory_optional():
+def get_user_session_factory_optional() -> sessionmaker[Session] | None:
     """ユーザーDB未初期化ならNoneを返す。"""
     return _UserSessionLocal
 
