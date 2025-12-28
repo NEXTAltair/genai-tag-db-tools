@@ -86,6 +86,11 @@ class TestBuildDistributionChart:
         assert "character" in result.categories
         assert "general" in result.categories
         assert len(result.series) == 2
+        # Verify series values
+        danbooru_series = next(s for s in result.series if s.name == "danbooru")
+        e621_series = next(s for s in result.series if s.name == "e621")
+        assert danbooru_series.values == [30.0, 70.0]  # character, general
+        assert e621_series.values == [20.0, 50.0]  # character, general
 
     def test_build_distribution_chart_empty_dataframe(self):
         """Empty DataFrame should return None."""
@@ -111,7 +116,7 @@ class TestBuildUsageChart:
     """Tests for _build_usage_chart function."""
 
     def test_build_usage_chart_with_data(self):
-        """Valid DataFrame should create PieChartData."""
+        """Valid DataFrame should create BarChartData."""
         # Must include tag_id for grouping
         df = pl.DataFrame(
             [
@@ -124,10 +129,23 @@ class TestBuildUsageChart:
         result = _build_usage_chart(df)
 
         assert result is not None
-        assert result.title == "Usage by Format"
-        assert len(result.slices) == 2
-        assert any(s.label == "danbooru" and s.value == 150.0 for s in result.slices)
-        assert any(s.label == "e621" and s.value == 75.0 for s in result.slices)
+        assert result.title == "Usage Distribution (Tags by Usage Count)"
+        assert len(result.series) == 2
+        assert any(s.name == "danbooru" for s in result.series)
+        assert any(s.name == "e621" for s in result.series)
+        # Verify series values (tag counts per bucket)
+        danbooru_series = next(s for s in result.series if s.name == "danbooru")
+        e621_series = next(s for s in result.series if s.name == "e621")
+        assert len(danbooru_series.values) == 8  # 8 buckets
+        assert len(e621_series.values) == 8  # 8 buckets
+        # Find bucket indices dynamically from categories
+        bucket_10_99_idx = result.categories.index("10-99")
+        bucket_100_999_idx = result.categories.index("100-999")
+        # danbooru: 1 tag in 10-99 bucket (usage_count=50), 1 tag in 100-999 bucket (usage_count=100)
+        assert danbooru_series.values[bucket_10_99_idx] == 1.0
+        assert danbooru_series.values[bucket_100_999_idx] == 1.0
+        # e621: 1 tag in 10-99 bucket (usage_count=75)
+        assert e621_series.values[bucket_10_99_idx] == 1.0
 
     def test_build_usage_chart_empty_dataframe(self):
         """Empty DataFrame should return None."""
@@ -152,6 +170,9 @@ class TestBuildLanguageChart:
         assert len(result.categories) >= 1
         assert len(result.series) == 1
         assert result.series[0].name == "languages"  # Actual name from implementation
+        # Verify series values (language counts: en=2, ja=2, de=1)
+        assert len(result.series[0].values) == len(result.categories)
+        assert sum(result.series[0].values) == 5.0  # Total language occurrences
 
     def test_build_language_chart_empty_dataframe(self):
         """Empty DataFrame should return None."""
@@ -169,7 +190,7 @@ class TestBuildStatisticsView:
         """Complete data should create full TagStatisticsView."""
         general_stats = {"total_tags": 500, "alias_tags": 50, "non_alias_tags": 450}
 
-        # Must include tag_id for usage chart and top_tags
+        # Must include tag_id for usage chart
         usage_df = pl.DataFrame(
             [
                 {"tag_id": 1, "format_name": "danbooru", "usage_count": 100},
@@ -193,7 +214,6 @@ class TestBuildStatisticsView:
         assert result.distribution is not None
         assert result.usage is not None
         assert result.language is not None
-        assert len(result.top_tags) >= 0
 
     def test_build_statistics_view_empty_dataframes(self):
         """Empty DataFrames should result in None charts."""

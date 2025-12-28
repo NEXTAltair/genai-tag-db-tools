@@ -53,8 +53,12 @@ class DummyStatistics:
     def __init__(self, session: Any = None) -> None:
         pass
 
-    def get_general_stats(self) -> dict[str, Any]:
-        return {"total_tags": 100, "total_aliases": 10}
+    def get_general_stats(self):
+        from genai_tag_db_tools.models import GeneralStatsResult
+
+        return GeneralStatsResult(
+            total_tags=100, alias_tags=10, non_alias_tags=90, format_counts={"test": 50}
+        )
 
     def get_usage_stats(self) -> pl.DataFrame:
         return pl.DataFrame([{"tag": "cat", "count": 50}])
@@ -117,8 +121,10 @@ def test_tag_core_service_convert_tag(monkeypatch):
 
 @pytest.mark.db_tools
 def test_tag_search_service_get_tag_formats(qtbot):
+    from unittest.mock import Mock
+
     searcher = DummySearcher()
-    service = TagSearchService(searcher=searcher)
+    service = TagSearchService(searcher=searcher, merged_reader=Mock())
 
     formats = service.get_tag_formats()
 
@@ -127,8 +133,10 @@ def test_tag_search_service_get_tag_formats(qtbot):
 
 @pytest.mark.db_tools
 def test_tag_search_service_get_tag_languages(qtbot):
+    from unittest.mock import Mock
+
     searcher = DummySearcher()
-    service = TagSearchService(searcher=searcher)
+    service = TagSearchService(searcher=searcher, merged_reader=Mock())
 
     languages = service.get_tag_languages()
 
@@ -137,8 +145,10 @@ def test_tag_search_service_get_tag_languages(qtbot):
 
 @pytest.mark.db_tools
 def test_tag_search_service_get_tag_types(qtbot):
+    from unittest.mock import Mock
+
     searcher = DummySearcher()
-    service = TagSearchService(searcher=searcher)
+    service = TagSearchService(searcher=searcher, merged_reader=Mock())
 
     types = service.get_tag_types("danbooru")
 
@@ -147,8 +157,10 @@ def test_tag_search_service_get_tag_types(qtbot):
 
 @pytest.mark.db_tools
 def test_tag_search_service_get_tag_types_none_format(qtbot):
+    from unittest.mock import Mock
+
     searcher = DummySearcher()
-    service = TagSearchService(searcher=searcher)
+    service = TagSearchService(searcher=searcher, merged_reader=Mock())
 
     types = service.get_tag_types(None)
 
@@ -157,13 +169,11 @@ def test_tag_search_service_get_tag_types_none_format(qtbot):
 
 @pytest.mark.db_tools
 def test_tag_search_service_search_tags(qtbot, monkeypatch):
-    searcher = DummySearcher()
-    service = TagSearchService(searcher=searcher)
+    from unittest.mock import Mock
 
-    monkeypatch.setattr(
-        "genai_tag_db_tools.services.app_services.get_default_reader",
-        lambda: object(),
-    )
+    searcher = DummySearcher()
+    service = TagSearchService(searcher=searcher, merged_reader=Mock())
+
     monkeypatch.setattr(
         "genai_tag_db_tools.core_api.search_tags",
         lambda *_args, **_kwargs: {"items": [{"tag": "cat", "tag_id": 1}], "total": 1},
@@ -182,27 +192,27 @@ def test_tag_search_service_search_tags(qtbot, monkeypatch):
 
 @pytest.mark.db_tools
 def test_tag_search_service_emits_error_on_exception(qtbot, monkeypatch):
-    """Test that searching for non-existent keyword returns empty results."""
-    service = TagSearchService()
+    """Test that search_tags emits error signal and raises exception on failure."""
+    from unittest.mock import Mock
 
-    monkeypatch.setattr(
-        "genai_tag_db_tools.services.app_services.get_default_reader",
-        lambda: object(),
-    )
+    searcher = DummySearcher()
+    service = TagSearchService(searcher=searcher, merged_reader=Mock())
+
+    # Mock to raise an error
     monkeypatch.setattr(
         "genai_tag_db_tools.core_api.search_tags",
-        lambda *_args, **_kwargs: {"items": [], "total": 0},
-    )
-    monkeypatch.setattr(
-        "genai_tag_db_tools.gui.converters.search_result_to_dataframe",
-        lambda _result: pl.DataFrame([]),
+        Mock(side_effect=RuntimeError("Test error"))
     )
 
-    # Non-existent keyword should return empty DataFrame, not raise error
-    result = service.search_tags("nonexistent_keyword_xyz_abcdef_12345")
+    error_signals = []
+    service.error_occurred.connect(lambda msg: error_signals.append(msg))
 
-    assert isinstance(result, pl.DataFrame)
-    assert result.height == 0  # Empty results
+    # Should emit error signal and raise exception
+    with pytest.raises(RuntimeError, match="Test error"):
+        service.search_tags("test")
+
+    assert len(error_signals) == 1
+    assert "Test error" in error_signals[0]
 
 
 @pytest.mark.db_tools
@@ -254,21 +264,32 @@ def test_tag_cleaner_service_convert_prompt_unknown_format(monkeypatch):
 
 
 @pytest.mark.db_tools
-def test_tag_statistics_service_get_general_stats(qtbot):
-    service = TagStatisticsService()
+def test_tag_statistics_service_get_general_stats(qtbot, monkeypatch):
+    monkeypatch.setattr("genai_tag_db_tools.services.app_services.TagStatistics", DummyStatistics)
+    # Mock core_api to raise FileNotFoundError, forcing fallback to legacy
+    def mock_get_statistics(_reader):
+        raise FileNotFoundError("Mock DB not found")
+
+    monkeypatch.setattr("genai_tag_db_tools.core_api.get_statistics", mock_get_statistics)
+    # Inject mock merged_reader to avoid DB initialization
+    service = TagStatisticsService(merged_reader=object())
 
     stats = service.get_general_stats()
 
     assert isinstance(stats, dict)
     assert "total_tags" in stats
-    assert "total_aliases" in stats
+    assert "alias_tags" in stats
     assert stats["total_tags"] > 0
 
 
 @pytest.mark.db_tools
 def test_tag_statistics_service_get_usage_stats(qtbot, monkeypatch):
     monkeypatch.setattr("genai_tag_db_tools.services.app_services.TagStatistics", DummyStatistics)
-    service = TagStatisticsService()
+    def mock_get_statistics(_reader):
+        raise FileNotFoundError("Mock DB not found")
+
+    monkeypatch.setattr("genai_tag_db_tools.core_api.get_statistics", mock_get_statistics)
+    service = TagStatisticsService(merged_reader=object())
 
     usage = service.get_usage_stats()
 
@@ -280,7 +301,11 @@ def test_tag_statistics_service_get_usage_stats(qtbot, monkeypatch):
 @pytest.mark.db_tools
 def test_tag_statistics_service_get_type_distribution(qtbot, monkeypatch):
     monkeypatch.setattr("genai_tag_db_tools.services.app_services.TagStatistics", DummyStatistics)
-    service = TagStatisticsService()
+    def mock_get_statistics(_reader):
+        raise FileNotFoundError("Mock DB not found")
+
+    monkeypatch.setattr("genai_tag_db_tools.core_api.get_statistics", mock_get_statistics)
+    service = TagStatisticsService(merged_reader=object())
 
     dist = service.get_type_distribution()
 
@@ -292,7 +317,11 @@ def test_tag_statistics_service_get_type_distribution(qtbot, monkeypatch):
 @pytest.mark.db_tools
 def test_tag_statistics_service_get_translation_stats(qtbot, monkeypatch):
     monkeypatch.setattr("genai_tag_db_tools.services.app_services.TagStatistics", DummyStatistics)
-    service = TagStatisticsService()
+    def mock_get_statistics(_reader):
+        raise FileNotFoundError("Mock DB not found")
+
+    monkeypatch.setattr("genai_tag_db_tools.core_api.get_statistics", mock_get_statistics)
+    service = TagStatisticsService(merged_reader=object())
 
     trans = service.get_translation_stats()
 
@@ -302,15 +331,20 @@ def test_tag_statistics_service_get_translation_stats(qtbot, monkeypatch):
 
 
 @pytest.mark.db_tools
-def test_tag_statistics_service_emits_error_on_exception(qtbot):
-    """Test that get_general_stats returns real database statistics."""
-    service = TagStatisticsService()
+def test_tag_statistics_service_get_general_stats_fallback(qtbot, monkeypatch):
+    """Test that get_general_stats falls back to legacy TagStatistics on core_api error."""
+    monkeypatch.setattr("genai_tag_db_tools.services.app_services.TagStatistics", DummyStatistics)
+    # Mock core_api to raise FileNotFoundError, forcing fallback to legacy
+    def mock_get_statistics(_reader):
+        raise FileNotFoundError("Mock DB not found")
 
-    # Should return stats from either core_api or legacy fallback
+    monkeypatch.setattr("genai_tag_db_tools.core_api.get_statistics", mock_get_statistics)
+    # Inject mock merged_reader to avoid DB initialization
+    service = TagStatisticsService(merged_reader=object())
+
     stats = service.get_general_stats()
 
-    # Verify basic structure
     assert isinstance(stats, dict)
     assert "total_tags" in stats
-    assert "total_aliases" in stats
-    assert stats["total_tags"] > 0  # Real database has data
+    assert "alias_tags" in stats
+    assert stats["total_tags"] > 0

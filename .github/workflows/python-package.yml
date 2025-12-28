@@ -50,6 +50,7 @@ jobs:
 
     - name: Test with pytest
       env:
+        CI: true
         QT_QPA_PLATFORM: offscreen
         QTWEBENGINE_DISABLE_SANDBOX: 1
         HF_HUB_OFFLINE: 1
