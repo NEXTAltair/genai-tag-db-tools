@@ -31,10 +31,10 @@ class DataFrameTableModel(QAbstractTableModel):
             return 0
         return len(self._columns)
 
-    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):  # type: ignore[assignment]
         if not index.isValid():
             return None
-        if role not in (Qt.DisplayRole, Qt.ToolTipRole):
+        if role not in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ToolTipRole):
             return None
         try:
             column = self._columns[index.column()]
