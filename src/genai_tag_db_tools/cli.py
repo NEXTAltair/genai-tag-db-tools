@@ -68,6 +68,7 @@ def _dump(obj: object) -> None:
 
         def model_dump(self) -> dict[str, Any]: ...
 
+    payload: dict[str, Any] | list[Any] | object
     if hasattr(obj, "model_dump"):
         payload = cast(HasModelDump, obj).model_dump()
     elif isinstance(obj, list):
@@ -91,7 +92,7 @@ def _set_db_paths(base_db_paths: Iterable[str] | None, user_db_dir: str | None) 
 
 def _build_register_service() -> TagRegisterService:
     repo = get_default_repository()
-    return TagRegisterService(repo)
+    return TagRegisterService(parent=None, repository=repo)
 
 
 def cmd_ensure_dbs(args: argparse.Namespace) -> None:
