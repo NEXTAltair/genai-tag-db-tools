@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -216,12 +215,12 @@ class TestBuildRegisterService:
         TagRegisterServiceはQObject継承のためQObject親が必要。
         実際のCLI実行ではcmd_register内でのみ呼ばれ、Qt環境で動作する前提。
         """
-        from genai_tag_db_tools.cli import _build_register_service
-        from genai_tag_db_tools.services.app_services import TagRegisterService
-
         # FIXME: Issue #TBD参照 - CLI非Qt環境での動作検証が必要
         # 現状はQt環境前提の設計のため、Mockで代替
         from unittest.mock import MagicMock, patch
+
+        from genai_tag_db_tools.cli import _build_register_service
+        from genai_tag_db_tools.services.app_services import TagRegisterService
 
         with patch("genai_tag_db_tools.cli.get_default_repository") as mock_repo:
             mock_repo.return_value = MagicMock()

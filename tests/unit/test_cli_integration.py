@@ -52,6 +52,7 @@ class TestCmdSearch:
                 TagRecordPublic(
                     tag="test_tag",
                     source_tag=None,
+                    tag_id=1,
                     format_name="danbooru",
                     type_id=1,
                     type_name="general",
@@ -142,6 +143,7 @@ class TestCmdRegister:
         mock_result = TagRecordPublic(
             tag="new_tag",
             source_tag=None,
+            tag_id=2,
             format_name="custom",
             type_id=1,
             type_name="general",
@@ -206,6 +208,7 @@ class TestCmdRegister:
         mock_result = TagRecordPublic(
             tag="translated_tag",
             source_tag=None,
+            tag_id=3,
             format_name="custom",
             type_id=1,
             type_name="general",
