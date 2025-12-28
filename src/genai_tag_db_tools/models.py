@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from genai_tag_db_tools.db.schema import Tag, TagStatus, TagTranslation
 
 
 class DbSourceRef(BaseModel):
@@ -249,3 +252,27 @@ class GeneralStatsResult(BaseModel):
     alias_tags: int = Field(..., description="エイリアスタグ数")
     non_alias_tags: int = Field(..., description="非エイリアスタグ数")
     format_counts: dict[str, int] = Field(..., description="フォーマット別タグ数")
+
+
+class PreloadedData(BaseModel):
+    """Preloaded data for tag search result building.
+
+    Args:
+        format_name_by_id: Format ID to name mapping.
+        type_name_by_key: (format_id, type_id) to type name mapping.
+        usage_by_key: (tag_id, format_id) to usage count mapping.
+        tags_by_id: Tag ID to Tag object mapping.
+        trans_by_tag_id: Tag ID to translations mapping.
+        status_by_tag_format: (tag_id, format_id) to status mapping.
+        statuses_by_tag_id: Tag ID to status list mapping.
+    """
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    format_name_by_id: dict[int, str]
+    type_name_by_key: dict[tuple[int, int], str]
+    usage_by_key: dict[tuple[int, int], int]
+    tags_by_id: dict[int, Tag]
+    trans_by_tag_id: dict[int, list[TagTranslation]]
+    status_by_tag_format: dict[tuple[int, int], TagStatus]
+    statuses_by_tag_id: dict[int, list[TagStatus]]

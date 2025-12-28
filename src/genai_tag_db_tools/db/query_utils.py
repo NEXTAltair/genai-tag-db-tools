@@ -1,5 +1,7 @@
 from logging import Logger
+from typing import TypedDict
 
+from sqlalchemy.orm import Session
 from sqlalchemy.sql import or_
 
 from genai_tag_db_tools.db.schema import (
@@ -11,7 +13,18 @@ from genai_tag_db_tools.db.schema import (
     TagTypeName,
     TagUsageCounts,
 )
-from genai_tag_db_tools.models import TagSearchRow
+from genai_tag_db_tools.models import PreloadedData, TagSearchRow
+
+
+class StatusInfo(TypedDict):
+    """Status information for a tag."""
+
+    usage_count: int
+    is_alias: bool
+    resolved_type_name: str
+    resolved_type_id: int | None
+    preferred_tag_id: int
+    deprecated: bool
 
 
 def normalize_search_keyword(keyword: str, partial: bool) -> tuple[str, bool]:
@@ -32,7 +45,7 @@ def normalize_search_keyword(keyword: str, partial: bool) -> tuple[str, bool]:
 class TagSearchQueryBuilder:
     """Build search tag_id sets based on filter conditions."""
 
-    def __init__(self, session) -> None:
+    def __init__(self, session: Session) -> None:
         self.session = session
 
     def initial_tag_ids(self, keyword: str, use_like: bool) -> set[int]:
@@ -188,10 +201,10 @@ class TagSearchQueryBuilder:
 class TagSearchPreloader:
     """Preload related tag data to avoid N+1 queries during search."""
 
-    def __init__(self, session) -> None:
+    def __init__(self, session: Session) -> None:
         self.session = session
 
-    def load(self, tag_ids: set[int]) -> dict[str, object]:
+    def load(self, tag_ids: set[int]) -> PreloadedData:
         initial_status_rows = self.session.query(TagStatus).filter(TagStatus.tag_id.in_(tag_ids)).all()
         preferred_ids = {
             row.preferred_tag_id for row in initial_status_rows if row.preferred_tag_id is not None
@@ -231,18 +244,15 @@ class TagSearchPreloader:
             status_by_tag_format[(status.tag_id, status.format_id)] = status
             statuses_by_tag_id.setdefault(status.tag_id, []).append(status)
 
-        return {
-            "preferred_ids": preferred_ids,
-            "status_tag_ids": status_tag_ids,
-            "status_rows": status_rows,
-            "format_name_by_id": format_name_by_id,
-            "type_name_by_key": type_name_by_key,
-            "usage_by_key": usage_by_key,
-            "tags_by_id": tags_by_id,
-            "trans_by_tag_id": trans_by_tag_id,
-            "status_by_tag_format": status_by_tag_format,
-            "statuses_by_tag_id": statuses_by_tag_id,
-        }
+        return PreloadedData(
+            format_name_by_id=format_name_by_id,
+            type_name_by_key=type_name_by_key,
+            usage_by_key=usage_by_key,
+            tags_by_id=tags_by_id,
+            trans_by_tag_id=trans_by_tag_id,
+            status_by_tag_format=status_by_tag_format,
+            statuses_by_tag_id=statuses_by_tag_id,
+        )
 
 
 class TagSearchResultBuilder:
@@ -259,21 +269,16 @@ class TagSearchResultBuilder:
         self.resolve_preferred = resolve_preferred
         self.logger = logger
 
-    def build_row(self, tag_id: int, preloaded: dict[str, object]) -> TagSearchRow | None:
-        format_name_by_id = preloaded["format_name_by_id"]
-        type_name_by_key = preloaded["type_name_by_key"]
-        usage_by_key = preloaded["usage_by_key"]
-        tags_by_id = preloaded["tags_by_id"]
-        trans_by_tag_id = preloaded["trans_by_tag_id"]
-        status_by_tag_format = preloaded["status_by_tag_format"]
-        statuses_by_tag_id = preloaded["statuses_by_tag_id"]
-
-        tag_obj = tags_by_id.get(tag_id)  # type: ignore[union-attr]
+    def build_row(self, tag_id: int, preloaded: PreloadedData) -> TagSearchRow | None:
+        tag_obj = preloaded.tags_by_id.get(tag_id)
         if not tag_obj:
             return None
 
         status_info = self._resolve_status_info(
-            tag_id, status_by_tag_format, type_name_by_key, usage_by_key
+            tag_id,
+            preloaded.status_by_tag_format,
+            preloaded.type_name_by_key,
+            preloaded.usage_by_key,
         )
         if status_info is None:
             return None
@@ -281,16 +286,16 @@ class TagSearchResultBuilder:
         resolved_tag_id, tag_obj = self._resolve_preferred_tag(
             tag_id,
             status_info["preferred_tag_id"],
-            tags_by_id,
+            preloaded.tags_by_id,
             tag_obj,
         )
-        trans_dict = self._build_translations(resolved_tag_id, trans_by_tag_id)
+        trans_dict = self._build_translations(resolved_tag_id, preloaded.trans_by_tag_id)
         format_statuses = self._build_format_statuses(
             resolved_tag_id,
-            statuses_by_tag_id,
-            format_name_by_id,
-            usage_by_key,
-            type_name_by_key,
+            preloaded.statuses_by_tag_id,
+            preloaded.format_name_by_id,
+            preloaded.usage_by_key,
+            preloaded.type_name_by_key,
         )
 
         return {
@@ -312,7 +317,7 @@ class TagSearchResultBuilder:
         status_by_tag_format: dict[tuple[int, int], TagStatus],
         type_name_by_key: dict[tuple[int, int], str],
         usage_by_key: dict[tuple[int, int], int],
-    ) -> dict[str, object] | None:
+    ) -> StatusInfo | None:
         usage_count = 0
         is_alias = False
         resolved_type_name = ""
