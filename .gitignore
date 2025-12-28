@@ -94,9 +94,9 @@ raw_data/
 .cache/
 transformers_cache/
 
-# Model files
-models/
-!models/README.md
+# Model files (only root-level models directory for ML model files)
+/models/
+!/models/README.md
 *.onnx
 *.pt
 *.pth
