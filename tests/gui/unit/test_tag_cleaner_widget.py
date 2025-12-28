@@ -1,4 +1,4 @@
-"""TagCleanerWidget のチE��ト！Eytest-qt ベ�Eス�E�E""
+"""TagCleanerWidget のテストEytest-qt ベース"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from genai_tag_db_tools.services.app_services import TagCleanerService
 
 
 class MockTagCleanerService(TagCleanerService):
-    """TagCleanerService のモチE��"""
+    """TagCleanerService のモック"""
 
     def __init__(self):
         self.mock_get_tag_formats = MagicMock(return_value=["danbooru", "e621"])
@@ -56,7 +56,7 @@ def test_tag_cleaner_widget_set_service(qtbot, tag_cleaner_widget):
 
 @pytest.mark.db_tools
 def test_tag_cleaner_widget_showEvent_initializes_ui(qtbot, tag_cleaner_widget):
-    """showEvent() で UI が�E期化されめE""
+    """showEvent() で UI が初期化される"""
     tag_cleaner_widget.show()
     qtbot.waitExposed(tag_cleaner_widget)
 
@@ -75,7 +75,7 @@ def test_tag_cleaner_widget_initialize_ui_populates_formats(qtbot, tag_cleaner_w
 
 @pytest.mark.db_tools
 def test_tag_cleaner_widget_convert_button_executes_conversion(qtbot, tag_cleaner_widget):
-    """変換ボタンクリチE��で変換が実行される"""
+    """変換ボタンクリックで変換が実行される"""
     tag_cleaner_widget._initialize_ui()
     tag_cleaner_widget.plainTextEditPrompt.setPlainText("cat, dog")
     tag_cleaner_widget.comboBoxFormat.setCurrentText("danbooru")
@@ -88,7 +88,7 @@ def test_tag_cleaner_widget_convert_button_executes_conversion(qtbot, tag_cleane
 
 @pytest.mark.db_tools
 def test_tag_cleaner_widget_convert_button_handles_no_service(qtbot, tag_cleaner_widget):
-    """変換ボタンクリチE��でサービスがなぁE��合�Eエラー処琁E""
+    """変換ボタンクリックでサービスがない場合エラー処理される"""
     tag_cleaner_widget._cleaner_service = None
     tag_cleaner_widget.plainTextEditPrompt.setPlainText("cat, dog")
 
@@ -99,7 +99,7 @@ def test_tag_cleaner_widget_convert_button_handles_no_service(qtbot, tag_cleaner
 
 @pytest.mark.db_tools
 def test_tag_cleaner_widget_initialize_legacy_method(qtbot, tag_cleaner_widget):
-    """initialize() legacy メソチE��が動作すめE""
+    """initialize() legacy メソッドが動作する"""
     new_service = MockTagCleanerService()
 
     tag_cleaner_widget.initialize(new_service)

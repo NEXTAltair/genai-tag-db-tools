@@ -115,7 +115,7 @@ class TagStatistics:
 
         rows = []
         for t_id, translations in by_tag.items():
-            lang_set = {tr.language for tr in translations}
+            lang_set = {tr.language for tr in translations if tr.language}
             rows.append(
                 {
                     "tag_id": t_id,
@@ -131,7 +131,7 @@ if __name__ == "__main__":
 
     general = stats.get_general_stats()
     print("総合統計")
-    for k, v in general.items():
+    for k, v in general.model_dump().items():
         print(f"  {k}: {v}")
     print()
 

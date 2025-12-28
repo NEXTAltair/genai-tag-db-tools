@@ -35,7 +35,7 @@ class TagCleanerWidget(QWidget, Ui_TagCleanerWidget):
         formats = self._cleaner_service.get_tag_formats()
         self.comboBoxFormat.clear()
         self.comboBoxFormat.addItems(formats)
-        default_index = self.comboBoxFormat.findText("danbooru", Qt.MatchFixedString)
+        default_index = self.comboBoxFormat.findText("danbooru", Qt.MatchFlag.MatchFixedString)
         if default_index >= 0:
             self.comboBoxFormat.setCurrentIndex(default_index)
 

@@ -36,7 +36,7 @@ class GuiServiceBase(QObject):
         self.logger.info("Closing %s", self.__class__.__name__)
         # Signal
         try:
-            self.disconnect()
+            self.disconnect()  # type: ignore[call-overload]
         except TypeError:
             # No connections to disconnect
             pass
@@ -257,7 +257,7 @@ class TagRegisterService(GuiServiceBase):
             tag_id = self._repo.create_tag(source_tag, tag)
             created = existing_id is None
 
-            preferred_tag_id = tag_id
+            preferred_tag_id: int | None = tag_id
             if request.alias:
                 if not request.preferred_tag:
                     raise ValueError("alias=True の場合 preferred_tag が必須です")
@@ -268,6 +268,9 @@ class TagRegisterService(GuiServiceBase):
             if request.translations:
                 for tr in request.translations:
                     self._repo.add_or_update_translation(tag_id, tr.language, tr.translation)
+
+            if preferred_tag_id is None:
+                raise ValueError("preferred_tag_id が未設定でぁE")
 
             self._repo.update_tag_status(
                 tag_id=tag_id,
@@ -414,10 +417,10 @@ class TagStatisticsService(GuiServiceBase):
             from genai_tag_db_tools.gui.converters import statistics_result_to_dict
 
             result = core_api.get_statistics(self._get_merged_reader())
-            stats = statistics_result_to_dict(result)
+            stats: dict[str, Any] = statistics_result_to_dict(result)
         except FileNotFoundError as e:
             self.logger.warning("core_api statistics failed, falling back to legacy: %s", e)
-            stats = self._stats.get_general_stats()
+            stats = self._stats.get_general_stats().model_dump()
 
         if "format_counts" not in stats:
             try:

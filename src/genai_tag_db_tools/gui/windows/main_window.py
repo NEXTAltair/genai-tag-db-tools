@@ -58,10 +58,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             self.progress_dialog.setValue(0)
 
             # サービスとウィジェットは初期化完了後に設定
-            self.tag_search_service = None
-            self.tag_cleaner_service = None
-            self.tag_register_service = None
-            self.tag_statistics_service = None
+            self.tag_search_service: TagSearchService | None = None
+            self.tag_cleaner_service: TagCleanerService | None = None
+            self.tag_register_service: TagRegisterService | None = None
+            self.tag_statistics_service: TagStatisticsService | None = None
 
             # データベース初期化を開始
             self.db_init_service.initialize_databases()

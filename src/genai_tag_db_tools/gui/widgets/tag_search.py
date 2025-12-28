@@ -41,9 +41,9 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         self.setupUi(self)
 
         self.logger = logging.getLogger(self.__class__.__name__)
-        self._service = service
+        self._service: TagSearchService | None = service
         self._initialized = False
-        self._raw_df = None
+        self._raw_df: pl.DataFrame | None = None
 
         self.customSlider = LogScaleRangeSlider()
         layout = QVBoxLayout(self.usageCountSlider)
@@ -51,14 +51,14 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         layout.addWidget(self.customSlider)
 
         self._results_model = DataFrameTableModel()
-        self._results_view = None
-        self._results_splitter = None
-        self._translation_label = None
-        self._translation_language_combo = None
-        self._translation_list = None
-        self._result_format_label = None
-        self._result_format_combo = None
-        self._result_count_label = None
+        self._results_view: QTableView | None = None
+        self._results_splitter: QSplitter | None = None
+        self._translation_label: QLabel | None = None
+        self._translation_language_combo: QComboBox | None = None
+        self._translation_list: QListWidget | None = None
+        self._result_format_label: QLabel | None = None
+        self._result_format_combo: QComboBox | None = None
+        self._result_count_label: QLabel | None = None
         self._setup_results_view()
 
         self._connect_signals()
@@ -88,18 +88,20 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
             )
 
     def _setup_results_view(self) -> None:
-        self._results_view = QTableView(self.tabList)
-        self._results_view.setModel(self._results_model)
-        self._results_view.setSortingEnabled(True)
-        self._results_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self._results_view.setAlternatingRowColors(True)
-        self._results_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        self._results_view.verticalHeader().setVisible(False)
+        results_view = QTableView(self.tabList)
+        results_view.setModel(self._results_model)
+        results_view.setSortingEnabled(True)
+        results_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        results_view.setAlternatingRowColors(True)
+        results_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        results_view.verticalHeader().setVisible(False)
+        self._results_view = results_view
 
-        self._results_splitter = QSplitter(self.tabList)
-        self._results_splitter.setOrientation(Qt.Orientation.Horizontal)
+        results_splitter = QSplitter(self.tabList)
+        results_splitter.setOrientation(Qt.Orientation.Horizontal)
+        self._results_splitter = results_splitter
 
-        detail_panel = QWidget(self._results_splitter)
+        detail_panel = QWidget(results_splitter)
         detail_layout = QVBoxLayout(detail_panel)
         detail_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -124,17 +126,17 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         detail_layout.addWidget(self._translation_list)
         detail_layout.addStretch(1)
 
-        self._results_splitter.addWidget(self._results_view)
-        self._results_splitter.addWidget(detail_panel)
-        self._results_splitter.setStretchFactor(0, 3)
-        self._results_splitter.setStretchFactor(1, 1)
+        results_splitter.addWidget(results_view)
+        results_splitter.addWidget(detail_panel)
+        results_splitter.setStretchFactor(0, 3)
+        results_splitter.setStretchFactor(1, 1)
 
         self._setup_results_filter_bar()
-        self.verticalLayout.replaceWidget(self.tableWidgetResults, self._results_splitter)
+        self.verticalLayout.replaceWidget(self.tableWidgetResults, results_splitter)
         self.tableWidgetResults.setParent(None)
         self.tableWidgetResults.deleteLater()
 
-        selection_model = self._results_view.selectionModel()
+        selection_model = results_view.selectionModel()
         if selection_model:
             selection_model.selectionChanged.connect(self._on_results_selection_changed)
 
@@ -161,6 +163,8 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         self.verticalLayout.insertWidget(0, filter_bar)
 
     def initialize_ui(self) -> None:
+        if self._service is None:
+            return
         self.comboBoxFormat.clear()
         self.comboBoxFormat.addItem(self.tr("All"))
         for fmt in self._service.get_tag_formats():
@@ -199,18 +203,20 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
 
     def _build_query(self) -> TagSearchQuery:
         min_usage, max_usage = self.customSlider.get_range()
-        if min_usage == 0:
-            min_usage = None
-        if max_usage >= 100_000:
-            max_usage = None
+        min_usage_opt: int | None = min_usage
+        max_usage_opt: int | None = max_usage
+        if min_usage_opt == 0:
+            min_usage_opt = None
+        if max_usage_opt is not None and max_usage_opt >= 100_000:
+            max_usage_opt = None
         return TagSearchQuery(
             keyword=self.lineEditKeyword.text().strip(),
             partial=self.radioButtonPartial.isChecked(),
             format_name=normalize_choice(self.comboBoxFormat.currentText()),
             type_name=normalize_choice(self.comboBoxType.currentText()),
             language=normalize_choice(self.comboBoxLanguage.currentText()),
-            min_usage=min_usage,
-            max_usage=max_usage,
+            min_usage=min_usage_opt,
+            max_usage=max_usage_opt,
             alias=None,
         )
 
@@ -312,9 +318,14 @@ class TagSearchWidget(QWidget, Ui_TagSearchWidget):
         if self._results_model.rowCount(None) == 0:
             self._clear_translation_details()
             return
+        if self._results_view is None:
+            return
         index = self._results_model.index(0, 0)
         self._results_view.setCurrentIndex(index)
-        self._results_view.selectionModel().select(
+        selection_model = self._results_view.selectionModel()
+        if selection_model is None:
+            return
+        selection_model.select(
             index,
             QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows,
         )
