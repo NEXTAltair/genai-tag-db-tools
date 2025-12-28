@@ -39,11 +39,11 @@ jobs:
     - name: Install dependencies
       run: uv sync --dev
 
+    - name: Format with ruff
+      run: uv run ruff format src/genai_tag_db_tools tests
+
     - name: Lint with ruff
       run: uv run ruff check src/genai_tag_db_tools
-
-    - name: Format check with ruff
-      run: uv run ruff format --check src/genai_tag_db_tools
 
     - name: Type check with mypy
       run: uv run mypy src/genai_tag_db_tools

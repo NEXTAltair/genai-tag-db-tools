@@ -61,10 +61,19 @@ def _build_cache_config(args: argparse.Namespace) -> DbCacheConfig:
 
 
 def _dump(obj: object) -> None:
+    from typing import Any, Protocol, cast
+
+    class HasModelDump(Protocol):
+        """Pydantic BaseModel like object with model_dump method."""
+
+        def model_dump(self) -> dict[str, Any]: ...
+
     if hasattr(obj, "model_dump"):
-        payload = obj.model_dump()
+        payload = cast(HasModelDump, obj).model_dump()
     elif isinstance(obj, list):
-        payload = [item.model_dump() if hasattr(item, "model_dump") else item for item in obj]
+        payload = [
+            cast(HasModelDump, item).model_dump() if hasattr(item, "model_dump") else item for item in obj
+        ]
     else:
         payload = obj
 
