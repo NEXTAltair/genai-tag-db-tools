@@ -34,6 +34,10 @@ def _seed_format_and_type(session: Session, *, format_id: int = 1, type_id: int 
 
 
 def test_search_tags_filters_by_format_type_language(session_factory: Callable[[], Session]) -> None:
+    from genai_tag_db_tools.db.schema import Tag, TagStatus, TagTranslation  # noqa: F401
+    from genai_tag_db_tools.models import PreloadedData
+
+    PreloadedData.model_rebuild()
     reader = TagReader(session_factory)
     merged_reader = MergedTagReader(base_repo=reader)
     repo = TagRepository(session_factory, reader=merged_reader)
@@ -95,6 +99,10 @@ def test_get_formats_languages_types(session_factory: Callable[[], Session]) -> 
 def test_search_tags_resolve_preferred_replaces_tag_and_translations(
     session_factory: Callable[[], Session],
 ) -> None:
+    from genai_tag_db_tools.db.schema import Tag, TagStatus, TagTranslation  # noqa: F401
+    from genai_tag_db_tools.models import PreloadedData
+
+    PreloadedData.model_rebuild()
     reader = TagReader(session_factory)
     merged_reader = MergedTagReader(base_repo=reader)
     repo = TagRepository(session_factory, reader=merged_reader)

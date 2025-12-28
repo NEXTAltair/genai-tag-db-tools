@@ -186,7 +186,7 @@ def test_main_window_with_custom_cache_dir(qtbot, mock_db_init_service):
     window = MainWindow(cache_dir=cache_dir)
     qtbot.addWidget(window)
 
-    # DbInitializationService が cache_dir 引数付きで呼ばれたことを確認
+    # DbInitializationService が user_db_dir 引数付きで呼ばれたことを確認
     from genai_tag_db_tools.gui.windows.main_window import DbInitializationService
 
-    DbInitializationService.assert_called_with(cache_dir=cache_dir, parent=window)
+    DbInitializationService.assert_called_with(user_db_dir=cache_dir, parent=window)

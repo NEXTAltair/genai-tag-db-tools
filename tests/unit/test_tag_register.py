@@ -7,7 +7,10 @@ from genai_tag_db_tools.utils.cleanup_str import TagCleaner
 
 @pytest.mark.db_tools
 def test_normalize_tags_fills_missing_fields():
-    register = TagRegister(repository=None)
+    class DummyRepo:
+        pass
+
+    register = TagRegister(repository=DummyRepo())
     df = pl.DataFrame(
         {
             "source_tag": ["", "orig_tag"],

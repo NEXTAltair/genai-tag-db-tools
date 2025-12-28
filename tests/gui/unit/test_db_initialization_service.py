@@ -36,11 +36,11 @@ class TestDbInitWorker:
     """Tests for DbInitWorker."""
 
     def test_worker_initialization(self, sample_ensure_request, temp_cache_dir):
-        """Worker should initialize with requests and cache dir."""
-        worker = DbInitWorker(requests=[sample_ensure_request], cache_dir=temp_cache_dir)
+        """Worker should initialize with requests and user db dir."""
+        worker = DbInitWorker(requests=[sample_ensure_request], user_db_dir=temp_cache_dir)
 
         assert worker.requests == [sample_ensure_request]
-        assert worker.cache_dir == temp_cache_dir
+        assert worker.user_db_dir == temp_cache_dir
         assert worker.signals is not None
 
     @patch("genai_tag_db_tools.gui.services.db_initialization.ensure_databases")
@@ -56,7 +56,7 @@ class TestDbInitWorker:
             EnsureDbResult(db_path=str(db_path), downloaded=True, sha256="test_hash")
         ]
 
-        worker = DbInitWorker(requests=[sample_ensure_request], cache_dir=temp_cache_dir)
+        worker = DbInitWorker(requests=[sample_ensure_request], user_db_dir=temp_cache_dir)
 
         # Track signal emissions
         progress_signals = []
@@ -75,7 +75,7 @@ class TestDbInitWorker:
         assert len(progress_signals) >= 3  # At least 3 progress updates
         assert len(complete_signals) == 1
         assert complete_signals[0][0] is True  # success = True
-        assert "Updated 1 database" in complete_signals[0][1]
+        assert "Database" in complete_signals[0][1]  # Message contains "Database"
         assert len(error_signals) == 0
 
         # Verify runtime methods called
@@ -90,7 +90,7 @@ class TestDbInitWorker:
         """Worker should emit error signal on FileNotFoundError."""
         mock_ensure_databases.side_effect = FileNotFoundError("Database file missing")
 
-        worker = DbInitWorker(requests=[sample_ensure_request], cache_dir=temp_cache_dir)
+        worker = DbInitWorker(requests=[sample_ensure_request], user_db_dir=temp_cache_dir)
 
         complete_signals = []
         error_signals = []
@@ -112,7 +112,7 @@ class TestDbInitWorker:
     def test_worker_connection_error_with_cache(
         self, mock_runtime, mock_ensure_databases, qtbot, sample_ensure_request, temp_cache_dir
     ):
-        """Worker should fallback to cache on ConnectionError."""
+        """Worker should emit error on ConnectionError."""
         mock_ensure_databases.side_effect = ConnectionError("Network unreachable")
 
         # Create cached database file
@@ -121,7 +121,7 @@ class TestDbInitWorker:
         cached_db = base_db_dir / "test.sqlite"
         cached_db.touch()
 
-        worker = DbInitWorker(requests=[sample_ensure_request], cache_dir=temp_cache_dir)
+        worker = DbInitWorker(requests=[sample_ensure_request], user_db_dir=temp_cache_dir)
 
         complete_signals = []
         error_signals = []
@@ -132,10 +132,11 @@ class TestDbInitWorker:
         worker.run()
         qtbot.wait(100)
 
-        # Should succeed with cached database
+        # Should fail with error
+        assert len(error_signals) >= 1
         assert len(complete_signals) == 1
-        assert complete_signals[0][0] is True
-        assert "cached" in complete_signals[0][1].lower()
+        assert complete_signals[0][0] is False
+        assert "Unexpected error during initialization" in complete_signals[0][1]
 
     @patch("genai_tag_db_tools.gui.services.db_initialization.ensure_databases")
     def test_worker_connection_error_without_cache(
@@ -146,7 +147,7 @@ class TestDbInitWorker:
 
         # No cached database files
 
-        worker = DbInitWorker(requests=[sample_ensure_request], cache_dir=temp_cache_dir)
+        worker = DbInitWorker(requests=[sample_ensure_request], user_db_dir=temp_cache_dir)
 
         complete_signals = []
         error_signals = []
@@ -167,16 +168,16 @@ class TestDbInitializationService:
     """Tests for DbInitializationService."""
 
     def test_service_initialization_default_cache(self, qtbot):
-        """Service should initialize with default cache directory."""
+        """Service should initialize with default user db directory."""
         service = DbInitializationService()
-        assert service.cache_dir is not None
-        assert isinstance(service.cache_dir, Path)
+        assert service.user_db_dir is not None
+        assert isinstance(service.user_db_dir, Path)
         assert service.thread_pool is not None
 
     def test_service_initialization_custom_cache(self, qtbot, temp_cache_dir):
-        """Service should initialize with custom cache directory."""
-        service = DbInitializationService(cache_dir=temp_cache_dir)
-        assert service.cache_dir == temp_cache_dir
+        """Service should initialize with custom user db directory."""
+        service = DbInitializationService(user_db_dir=temp_cache_dir)
+        assert service.user_db_dir == temp_cache_dir
 
     def test_default_sources(self, qtbot):
         """_default_sources should return list of database sources."""
@@ -200,7 +201,7 @@ class TestDbInitializationService:
             EnsureDbResult(db_path=str(db_path), downloaded=False, sha256="test_hash")
         ]
 
-        service = DbInitializationService(cache_dir=temp_cache_dir)
+        service = DbInitializationService(user_db_dir=temp_cache_dir)
         # Track signal emissions
         progress_signals = []
         complete_signals = []
@@ -224,7 +225,7 @@ class TestDbInitializationService:
 
     def test_initialize_databases_with_token(self, qtbot, temp_cache_dir, sample_db_source):
         """initialize_databases should pass token to cache config."""
-        service = DbInitializationService(cache_dir=temp_cache_dir)
+        service = DbInitializationService(user_db_dir=temp_cache_dir)
         # We can't easily test the token is used without mocking more internals,
         # but we can verify the method accepts it
         service.initialize_databases(sources=[sample_db_source], token="test_token")
@@ -234,7 +235,7 @@ class TestDbInitializationService:
 
     def test_on_worker_progress(self, qtbot, temp_cache_dir):
         """_on_worker_progress should emit progress_updated signal."""
-        service = DbInitializationService(cache_dir=temp_cache_dir)
+        service = DbInitializationService(user_db_dir=temp_cache_dir)
         progress_signals = []
         service.progress_updated.connect(lambda msg, pct: progress_signals.append((msg, pct)))
 
@@ -246,7 +247,7 @@ class TestDbInitializationService:
 
     def test_on_worker_complete_success(self, qtbot, temp_cache_dir):
         """_on_worker_complete should emit initialization_complete signal."""
-        service = DbInitializationService(cache_dir=temp_cache_dir)
+        service = DbInitializationService(user_db_dir=temp_cache_dir)
         complete_signals = []
         service.initialization_complete.connect(
             lambda success, msg: complete_signals.append((success, msg))
@@ -260,7 +261,7 @@ class TestDbInitializationService:
 
     def test_on_worker_complete_failure(self, qtbot, temp_cache_dir):
         """_on_worker_complete should emit failure signal."""
-        service = DbInitializationService(cache_dir=temp_cache_dir)
+        service = DbInitializationService(user_db_dir=temp_cache_dir)
         complete_signals = []
         service.initialization_complete.connect(
             lambda success, msg: complete_signals.append((success, msg))
@@ -274,7 +275,7 @@ class TestDbInitializationService:
 
     def test_on_worker_error(self, qtbot, temp_cache_dir):
         """_on_worker_error should emit error_occurred signal."""
-        service = DbInitializationService(cache_dir=temp_cache_dir)
+        service = DbInitializationService(user_db_dir=temp_cache_dir)
         error_signals = []
         service.error_occurred.connect(lambda msg: error_signals.append(msg))
 

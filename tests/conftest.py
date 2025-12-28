@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Generator
+from collections.abc import Generator
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -15,8 +16,7 @@ def pytest_configure(config: pytest.Config) -> None:
     """Configure pytest markers and environment"""
     config.addinivalue_line("markers", "db_tools: genai-tag-db-tools specific tests")
     config.addinivalue_line(
-        "markers",
-        "requires_real_db: Tests requiring real database download (skipped in CI, run locally)"
+        "markers", "requires_real_db: Tests requiring real database download (skipped in CI, run locally)"
     )
 
     # Enable headless mode for GUI tests in CI/container environments
@@ -25,7 +25,9 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 @pytest.fixture(autouse=True, scope="function")
-def reset_runtime_for_real_db(request: pytest.FixtureRequest, tmp_path: Path) -> Generator[None, None, None]:
+def reset_runtime_for_real_db(
+    request: pytest.FixtureRequest, tmp_path: Path
+) -> Generator[None, None, None]:
     """Reset runtime state for real DB tests (CI: skip, Local: run with DB download)."""
     from genai_tag_db_tools.db import runtime
 

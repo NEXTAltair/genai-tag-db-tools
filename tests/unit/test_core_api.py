@@ -45,8 +45,6 @@ def _build_request(tmp_path: Path, repo_id: str, filename: str) -> EnsureDbReque
     )
 
 
-
-
 def test_ensure_databases_returns_cached_status_per_spec(monkeypatch, tmp_path):
     """ensure_databases()が各DBのキャッシュ状態を正しく返すことを確認。"""
     db_a = tmp_path / "a.sqlite"

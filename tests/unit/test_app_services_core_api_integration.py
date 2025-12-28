@@ -159,14 +159,16 @@ class TestTagStatisticsServiceCoreApiIntegration:
         """FileNotFoundError should trigger fallback to legacy statistics."""
         mock_session = MagicMock()
 
+        from genai_tag_db_tools.models import GeneralStatsResult
+
         with patch("genai_tag_db_tools.services.app_services.TagStatistics") as mock_stats_class:
             mock_stats = MagicMock()
-            mock_stats.get_general_stats.return_value = {
-                "total_tags": 100,
-                "total_aliases": 10,
-                "total_formats": 2,
-                "total_types": 5,
-            }
+            mock_stats.get_general_stats.return_value = GeneralStatsResult(
+                total_tags=100,
+                alias_tags=10,
+                non_alias_tags=90,
+                format_counts={"test": 50},
+            )
             mock_stats_class.return_value = mock_stats
 
             service = TagStatisticsService(session=mock_session)

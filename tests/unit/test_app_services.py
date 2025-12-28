@@ -200,8 +200,7 @@ def test_tag_search_service_emits_error_on_exception(qtbot, monkeypatch):
 
     # Mock to raise an error
     monkeypatch.setattr(
-        "genai_tag_db_tools.core_api.search_tags",
-        Mock(side_effect=RuntimeError("Test error"))
+        "genai_tag_db_tools.core_api.search_tags", Mock(side_effect=RuntimeError("Test error"))
     )
 
     error_signals = []
@@ -266,6 +265,7 @@ def test_tag_cleaner_service_convert_prompt_unknown_format(monkeypatch):
 @pytest.mark.db_tools
 def test_tag_statistics_service_get_general_stats(qtbot, monkeypatch):
     monkeypatch.setattr("genai_tag_db_tools.services.app_services.TagStatistics", DummyStatistics)
+
     # Mock core_api to raise FileNotFoundError, forcing fallback to legacy
     def mock_get_statistics(_reader):
         raise FileNotFoundError("Mock DB not found")
@@ -285,6 +285,7 @@ def test_tag_statistics_service_get_general_stats(qtbot, monkeypatch):
 @pytest.mark.db_tools
 def test_tag_statistics_service_get_usage_stats(qtbot, monkeypatch):
     monkeypatch.setattr("genai_tag_db_tools.services.app_services.TagStatistics", DummyStatistics)
+
     def mock_get_statistics(_reader):
         raise FileNotFoundError("Mock DB not found")
 
@@ -301,6 +302,7 @@ def test_tag_statistics_service_get_usage_stats(qtbot, monkeypatch):
 @pytest.mark.db_tools
 def test_tag_statistics_service_get_type_distribution(qtbot, monkeypatch):
     monkeypatch.setattr("genai_tag_db_tools.services.app_services.TagStatistics", DummyStatistics)
+
     def mock_get_statistics(_reader):
         raise FileNotFoundError("Mock DB not found")
 
@@ -317,6 +319,7 @@ def test_tag_statistics_service_get_type_distribution(qtbot, monkeypatch):
 @pytest.mark.db_tools
 def test_tag_statistics_service_get_translation_stats(qtbot, monkeypatch):
     monkeypatch.setattr("genai_tag_db_tools.services.app_services.TagStatistics", DummyStatistics)
+
     def mock_get_statistics(_reader):
         raise FileNotFoundError("Mock DB not found")
 
@@ -334,6 +337,7 @@ def test_tag_statistics_service_get_translation_stats(qtbot, monkeypatch):
 def test_tag_statistics_service_get_general_stats_fallback(qtbot, monkeypatch):
     """Test that get_general_stats falls back to legacy TagStatistics on core_api error."""
     monkeypatch.setattr("genai_tag_db_tools.services.app_services.TagStatistics", DummyStatistics)
+
     # Mock core_api to raise FileNotFoundError, forcing fallback to legacy
     def mock_get_statistics(_reader):
         raise FileNotFoundError("Mock DB not found")

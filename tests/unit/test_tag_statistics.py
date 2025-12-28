@@ -72,9 +72,9 @@ def test_general_stats_counts_aliases(session_factory: Callable[[], Session]) ->
     stats = TagStatistics(session_factory())
     general = stats.get_general_stats()
 
-    assert general["total_tags"] == 3
-    assert general["alias_tags"] == 1
-    assert general["non_alias_tags"] == 2
+    assert general.total_tags == 3
+    assert general.alias_tags == 1
+    assert general.non_alias_tags == 2
 
 
 def test_usage_stats_returns_rows(session_factory: Callable[[], Session]) -> None:

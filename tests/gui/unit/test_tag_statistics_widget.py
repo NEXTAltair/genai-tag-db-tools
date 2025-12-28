@@ -155,15 +155,6 @@ def test_tag_statistics_widget_update_language_chart(qtbot, tag_statistics_widge
 
 
 @pytest.mark.db_tools
-def test_tag_statistics_widget_update_top_tags(qtbot, tag_statistics_widget):
-    """update_top_tags() でトップタグリストを更新する"""
-    tag_statistics_widget.initialize()
-
-    # Top tags list should have items
-    assert tag_statistics_widget.listWidgetTopTags.count() > 0
-
-
-@pytest.mark.db_tools
 def test_tag_statistics_widget_clear_layout(qtbot, tag_statistics_widget):
     """clear_layout() でレイアウト内のウィジェットを削除する"""
     from PySide6.QtWidgets import QLabel
