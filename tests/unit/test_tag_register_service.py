@@ -123,17 +123,15 @@ def test_register_or_update_tag_routes_to_register_tag():
     repo = DummyRepo()
     reader = DummyReader(repo)
     service = TagRegisterService(repository=repo, reader=reader)
-    tag_info = {
-        "normalized_tag": "foo",
-        "source_tag": "foo",
-        "format_name": "danbooru",
-        "type_name": "general",
-        "use_count": 12,
-        "language": "ja",
-        "translation": "フー",
-    }
 
-    tag_id = service.register_or_update_tag(tag_info)
+    request = TagRegisterRequest(
+        tag="foo",
+        source_tag="foo",
+        format_name="danbooru",
+        type_name="general",
+    )
 
-    assert tag_id == 10
-    assert repo.usage_updates == [(10, 1, 12)]
+    result = service.register_tag(request)
+
+    assert result.tag_id == 10
+    assert result.created is True

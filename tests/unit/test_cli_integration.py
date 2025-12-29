@@ -77,6 +77,7 @@ class TestCmdSearch:
             resolve_preferred=False,
             include_aliases=False,
             include_deprecated=False,
+            exact=False,
             base_db=[str(base_db)],
             user_db_dir=None,
         )
@@ -111,6 +112,7 @@ class TestCmdSearch:
             resolve_preferred=True,
             include_aliases=True,
             include_deprecated=False,
+            exact=False,
             base_db=[str(base_db)],
             user_db_dir=None,
         )

@@ -113,7 +113,7 @@ def test_main_window_initialize_services_creates_all_services(qtbot, db_init_env
     with (
         patch("genai_tag_db_tools.gui.windows.main_window.TagSearchService") as mock_search,
         patch("genai_tag_db_tools.gui.windows.main_window.TagCleanerService") as mock_cleaner,
-        patch("genai_tag_db_tools.gui.windows.main_window.TagRegisterService") as mock_register,
+        patch("genai_tag_db_tools.gui.windows.main_window.GuiTagRegisterService") as mock_register,
         patch("genai_tag_db_tools.gui.windows.main_window.TagStatisticsService") as mock_statistics,
         patch(
             "genai_tag_db_tools.gui.windows.main_window.DbInitializationService.initialize_databases"
@@ -137,7 +137,7 @@ def test_main_window_initialize_widgets_injects_services(qtbot, db_init_env):
     with (
         patch("genai_tag_db_tools.gui.windows.main_window.TagSearchService"),
         patch("genai_tag_db_tools.gui.windows.main_window.TagCleanerService"),
-        patch("genai_tag_db_tools.gui.windows.main_window.TagRegisterService"),
+        patch("genai_tag_db_tools.gui.windows.main_window.GuiTagRegisterService"),
         patch("genai_tag_db_tools.gui.windows.main_window.TagStatisticsService"),
         patch(
             "genai_tag_db_tools.gui.windows.main_window.DbInitializationService.initialize_databases"
@@ -162,7 +162,7 @@ def test_main_window_close_event_cleans_up_resources(qtbot, db_init_env):
     with (
         patch("genai_tag_db_tools.gui.windows.main_window.TagSearchService"),
         patch("genai_tag_db_tools.gui.windows.main_window.TagCleanerService"),
-        patch("genai_tag_db_tools.gui.windows.main_window.TagRegisterService"),
+        patch("genai_tag_db_tools.gui.windows.main_window.GuiTagRegisterService"),
         patch("genai_tag_db_tools.gui.windows.main_window.TagStatisticsService"),
         patch("genai_tag_db_tools.gui.windows.main_window.runtime") as mock_runtime,
         patch(
