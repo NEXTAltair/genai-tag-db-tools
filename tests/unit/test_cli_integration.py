@@ -129,6 +129,26 @@ class TestCmdSearch:
 class TestCmdRegister:
     """Test cmd_register command."""
 
+    def _mock_default_bases(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        from genai_tag_db_tools.models import EnsureDbResult
+
+        db_paths = []
+        for filename in (
+            "genai-image-tag-db-cc4.sqlite",
+            "genai-image-tag-db-mit.sqlite",
+            "genai-image-tag-db-cc0.sqlite",
+        ):
+            path = tmp_path / filename
+            path.touch()
+            db_paths.append(path)
+
+        results = [
+            EnsureDbResult(db_path=str(path), sha256="mock", revision=None, cached=True)
+            for path in db_paths
+        ]
+
+        monkeypatch.setattr("genai_tag_db_tools.cli.ensure_databases", lambda _requests: results)
+
     @patch("genai_tag_db_tools.cli._build_register_service")
     @patch("genai_tag_db_tools.cli.register_tag")
     def test_register_basic_tag(
@@ -136,9 +156,11 @@ class TestCmdRegister:
         mock_register: MagicMock,
         mock_service: MagicMock,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """基本的なタグ登録"""
+        self._mock_default_bases(monkeypatch, tmp_path)
         # Mock response
         mock_result = TagRecordPublic(
             tag="new_tag",
@@ -202,9 +224,14 @@ class TestCmdRegister:
     @patch("genai_tag_db_tools.cli._build_register_service")
     @patch("genai_tag_db_tools.cli.register_tag")
     def test_register_with_translations(
-        self, mock_register: MagicMock, mock_service: MagicMock, tmp_path: Path
+        self,
+        mock_register: MagicMock,
+        mock_service: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """翻訳付きタグ登録"""
+        self._mock_default_bases(monkeypatch, tmp_path)
         mock_result = TagRecordPublic(
             tag="translated_tag",
             source_tag=None,

@@ -160,6 +160,26 @@ class TestBuildCacheConfig:
 class TestSetDbPaths:
     """Test _set_db_paths function."""
 
+    def _mock_default_bases(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        from genai_tag_db_tools.models import EnsureDbResult
+
+        db_paths = []
+        for filename in (
+            "genai-image-tag-db-cc4.sqlite",
+            "genai-image-tag-db-mit.sqlite",
+            "genai-image-tag-db-cc0.sqlite",
+        ):
+            path = tmp_path / filename
+            path.touch()
+            db_paths.append(path)
+
+        results = [
+            EnsureDbResult(db_path=str(path), sha256="mock", revision=None, cached=True)
+            for path in db_paths
+        ]
+
+        monkeypatch.setattr("genai_tag_db_tools.cli.ensure_databases", lambda _requests: results)
+
     def test_set_db_paths_both_specified(self, tmp_path: Path) -> None:
         """base_db_pathsとuser_db_dirの両方指定"""
         base_path1 = tmp_path / "base1.db"
@@ -189,18 +209,21 @@ class TestSetDbPaths:
         assert len(paths) == 1
         assert paths[0] == base_path
 
-    def test_set_db_paths_only_user_db(self, tmp_path: Path) -> None:
+    def test_set_db_paths_only_user_db(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """user_db_dirのみ指定"""
         user_dir = tmp_path / "user_db"
         user_dir.mkdir()
+
+        self._mock_default_bases(monkeypatch, tmp_path)
 
         _set_db_paths(None, str(user_dir))
 
         # user_db初期化確認（runtime state check）
         # Note: runtime.user_db_pathはprivateなので、副作用の確認は制限される
 
-    def test_set_db_paths_none_specified(self) -> None:
-        """両方未指定の場合（何もしない）"""
+    def test_set_db_paths_none_specified(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """両方未指定の場合（デフォルトDBを初期化）"""
+        self._mock_default_bases(monkeypatch, tmp_path)
         # エラーなく完了すればOK
         _set_db_paths(None, None)
 

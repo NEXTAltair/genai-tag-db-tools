@@ -86,6 +86,37 @@ def _set_db_paths(base_db_paths: Iterable[str] | None, user_db_dir: str | None) 
 
     if base_db_paths:
         runtime.set_base_database_paths([Path(p) for p in base_db_paths])
+    else:
+        from genai_tag_db_tools.io.hf_downloader import default_cache_dir
+
+        cache = DbCacheConfig(cache_dir=str(default_cache_dir()))
+        requests = [
+            EnsureDbRequest(
+                source=DbSourceRef(
+                    repo_id="NEXTAltair/genai-image-tag-db-CC4",
+                    filename="genai-image-tag-db-cc4.sqlite",
+                ),
+                cache=cache,
+            ),
+            EnsureDbRequest(
+                source=DbSourceRef(
+                    repo_id="NEXTAltair/genai-image-tag-db-mit",
+                    filename="genai-image-tag-db-mit.sqlite",
+                ),
+                cache=cache,
+            ),
+            EnsureDbRequest(
+                source=DbSourceRef(
+                    repo_id="NEXTAltair/genai-image-tag-db",
+                    filename="genai-image-tag-db-cc0.sqlite",
+                ),
+                cache=cache,
+            ),
+        ]
+        results = ensure_databases(requests)
+        base_paths = [Path(result.db_path) for result in results]
+        runtime.set_base_database_paths(base_paths)
+        runtime.init_engine(base_paths[0])
     if user_db_dir:
         runtime.init_user_db(Path(user_db_dir))
 
@@ -174,13 +205,7 @@ def cmd_convert(args: argparse.Namespace) -> None:
         print(converted)
 
 
-def _add_base_db_args(parser: argparse.ArgumentParser, required: bool = True) -> None:
-    parser.add_argument(
-        "--base-db",
-        action="append",
-        required=required,
-        help="Base database path. Repeat for multiple base DBs. Optional if using default cache.",
-    )
+def _add_base_db_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--user-db-dir",
         help="User database directory. Required for register.",
@@ -240,7 +265,7 @@ def main() -> None:
     convert_parser.add_argument("--format-name", required=True, help="Target format (e.g., danbooru, e621)")
     convert_parser.add_argument("--separator", default=", ", help="Tag separator (default: ', ')")
     convert_parser.add_argument("--json", action="store_true", help="Output as JSON")
-    _add_base_db_args(convert_parser, required=False)
+    _add_base_db_args(convert_parser)
     convert_parser.set_defaults(func=cmd_convert)
 
     args = parser.parse_args()
