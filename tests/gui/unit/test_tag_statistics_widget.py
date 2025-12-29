@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 import polars as pl
 import pytest
 
-from genai_tag_db_tools.gui.widgets.tag_statistics import TagStatisticsWidget
 from genai_tag_db_tools.gui.services import TagStatisticsService
+from genai_tag_db_tools.gui.widgets.tag_statistics import TagStatisticsWidget
 
 
 class MockTagStatisticsService(TagStatisticsService):

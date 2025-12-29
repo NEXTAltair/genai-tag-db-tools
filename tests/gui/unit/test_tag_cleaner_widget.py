@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from genai_tag_db_tools.gui.widgets.tag_cleaner import TagCleanerWidget
 from genai_tag_db_tools.gui.services import TagCleanerService
+from genai_tag_db_tools.gui.widgets.tag_cleaner import TagCleanerWidget
 
 
 class MockTagCleanerService(TagCleanerService):

@@ -15,8 +15,8 @@ from genai_tag_db_tools.gui.services.tag_statistics_service import (
 )
 
 __all__ = [
-    "DbInitializationService",
     "DbInitWorker",
+    "DbInitializationService",
     "GuiServiceBase",
     "GuiTagRegisterService",
     "TagCleanerService",

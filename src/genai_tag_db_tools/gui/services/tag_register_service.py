@@ -7,8 +7,6 @@ from PySide6.QtCore import QObject
 
 from genai_tag_db_tools.db.repository import (
     TagRepository,
-    get_default_reader,
-    get_default_repository,
 )
 from genai_tag_db_tools.gui.services.gui_service_base import GuiServiceBase
 from genai_tag_db_tools.services.tag_register import (

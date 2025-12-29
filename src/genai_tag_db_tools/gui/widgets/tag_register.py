@@ -30,7 +30,9 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
         self.register_service = register_service
         self._initialized = False
 
-    def set_services(self, search_service: TagSearchService, register_service: GuiTagRegisterService) -> None:
+    def set_services(
+        self, search_service: TagSearchService, register_service: GuiTagRegisterService
+    ) -> None:
         """Set service instances (initialization deferred to showEvent)."""
         self.search_service = search_service
         self.register_service = register_service

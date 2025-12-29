@@ -8,17 +8,17 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QProgressD
 
 from genai_tag_db_tools.db import runtime
 from genai_tag_db_tools.gui.designer.MainWindow_ui import Ui_MainWindow
-from genai_tag_db_tools.gui.services.db_initialization import DbInitializationService
-from genai_tag_db_tools.gui.widgets.tag_cleaner import TagCleanerWidget
-from genai_tag_db_tools.gui.widgets.tag_register import TagRegisterWidget
-from genai_tag_db_tools.gui.widgets.tag_search import TagSearchWidget
-from genai_tag_db_tools.gui.widgets.tag_statistics import TagStatisticsWidget
 from genai_tag_db_tools.gui.services import (
     GuiTagRegisterService,
     TagCleanerService,
     TagSearchService,
     TagStatisticsService,
 )
+from genai_tag_db_tools.gui.services.db_initialization import DbInitializationService
+from genai_tag_db_tools.gui.widgets.tag_cleaner import TagCleanerWidget
+from genai_tag_db_tools.gui.widgets.tag_register import TagRegisterWidget
+from genai_tag_db_tools.gui.widgets.tag_search import TagSearchWidget
+from genai_tag_db_tools.gui.widgets.tag_statistics import TagStatisticsWidget
 
 
 class MainWindow(QMainWindow, Ui_MainWindow):

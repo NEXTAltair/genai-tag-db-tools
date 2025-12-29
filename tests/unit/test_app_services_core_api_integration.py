@@ -7,8 +7,8 @@ import polars as pl
 import pytest
 from pydantic import ValidationError
 
-from genai_tag_db_tools.models import TagRecordPublic, TagSearchResult, TagStatisticsResult
 from genai_tag_db_tools.gui.services.tag_search_service import TagSearchService, TagStatisticsService
+from genai_tag_db_tools.models import TagRecordPublic, TagSearchResult, TagStatisticsResult
 
 
 class TestTagSearchServiceCoreApiIntegration:

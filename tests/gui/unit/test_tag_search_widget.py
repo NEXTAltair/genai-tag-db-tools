@@ -10,8 +10,8 @@ import pytest
 from pydantic import ValidationError
 from PySide6.QtWidgets import QMessageBox
 
-from genai_tag_db_tools.gui.widgets.tag_search import TagSearchWidget
 from genai_tag_db_tools.gui.services.tag_search_service import TagSearchService
+from genai_tag_db_tools.gui.widgets.tag_search import TagSearchWidget
 
 
 class MockTagSearchService(TagSearchService):
