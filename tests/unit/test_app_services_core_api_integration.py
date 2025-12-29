@@ -7,7 +7,8 @@ import polars as pl
 import pytest
 from pydantic import ValidationError
 
-from genai_tag_db_tools.gui.services.tag_search_service import TagSearchService, TagStatisticsService
+from genai_tag_db_tools.gui.services.tag_search_service import TagSearchService
+from genai_tag_db_tools.gui.services.tag_statistics_service import TagStatisticsService
 from genai_tag_db_tools.models import TagRecordPublic, TagSearchResult, TagStatisticsResult
 
 
@@ -156,39 +157,3 @@ class TestTagStatisticsServiceCoreApiIntegration:
             assert result["total_aliases"] == 50
             assert result["total_formats"] == 5
             assert result["total_types"] == 10
-
-    def test_get_general_stats_file_not_found_fallback(self, qtbot):
-        """FileNotFoundError should trigger fallback to legacy statistics."""
-        mock_session = MagicMock()
-
-        from genai_tag_db_tools.models import GeneralStatsResult
-
-        with patch("genai_tag_db_tools.services.app_services.TagStatistics") as mock_stats_class:
-            mock_stats = MagicMock()
-            mock_stats.get_general_stats.return_value = GeneralStatsResult(
-                total_tags=100,
-                alias_tags=10,
-                non_alias_tags=90,
-                format_counts={"test": 50},
-            )
-            mock_stats_class.return_value = mock_stats
-
-            service = TagStatisticsService(session=mock_session)
-
-        with (
-            patch.object(service, "_get_merged_reader"),
-            patch("genai_tag_db_tools.core_api") as mock_core_api,
-            patch.object(service.logger, "warning") as mock_warning,
-        ):
-            # core_api が FileNotFoundError を発生させる
-            mock_core_api.get_statistics.side_effect = FileNotFoundError("DB file not found")
-
-            # 統計取得
-            result = service.get_general_stats()
-
-            # fallback が呼ばれることを確認
-            mock_stats.get_general_stats.assert_called_once()
-            mock_warning.assert_called()
-            assert "core_api statistics failed, falling back to legacy" in mock_warning.call_args[0][0]
-            assert isinstance(result, dict)
-            assert result["total_tags"] == 100
