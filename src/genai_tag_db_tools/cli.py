@@ -123,7 +123,7 @@ def _set_db_paths(base_db_paths: Iterable[str] | None, user_db_dir: str | None) 
 
 def _build_register_service() -> TagRegisterService:
     repo = get_default_repository()
-    return TagRegisterService(parent=None, repository=repo)
+    return TagRegisterService(repository=repo)
 
 
 def cmd_ensure_dbs(args: argparse.Namespace) -> None:
