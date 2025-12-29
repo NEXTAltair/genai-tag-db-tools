@@ -85,6 +85,7 @@ class TagSearchRequest(BaseModel):
     """
 
     query: str = Field(..., description="Search query")
+    partial: bool = Field(default=True, description="Use partial matching")
     format_names: list[str] | None = Field(default=None, description="Format name filters")
     type_names: list[str] | None = Field(default=None, description="Type name filters")
     resolve_preferred: bool = Field(default=True, description="Resolve to preferred tags")

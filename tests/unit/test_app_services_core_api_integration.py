@@ -8,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from genai_tag_db_tools.models import TagRecordPublic, TagSearchResult, TagStatisticsResult
-from genai_tag_db_tools.services.app_services import TagSearchService, TagStatisticsService
+from genai_tag_db_tools.gui.services.tag_search_service import TagSearchService, TagStatisticsService
 
 
 class TestTagSearchServiceCoreApiIntegration:
@@ -48,10 +48,11 @@ class TestTagSearchServiceCoreApiIntegration:
             mock_core_api.search_tags.return_value = TagSearchResult(items=[], total=0)
 
             # usage filter?????
-            result = service.search_tags(keyword="test", min_usage=10, max_usage=100)
+            result = service.search_tags(keyword="test", min_usage=10, max_usage=100, partial=True)
 
             call_args = mock_core_api.search_tags.call_args
             request = call_args[0][1]
+            assert request.partial is True
             assert request.min_usage == 10
             assert request.max_usage == 100
             assert isinstance(result, pl.DataFrame)

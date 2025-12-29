@@ -243,7 +243,7 @@ class TestBuildRegisterService:
         from unittest.mock import MagicMock, patch
 
         from genai_tag_db_tools.cli import _build_register_service
-        from genai_tag_db_tools.services.app_services import TagRegisterService
+        from genai_tag_db_tools.services.tag_register import TagRegisterService
 
         with patch("genai_tag_db_tools.cli.get_default_repository") as mock_repo:
             mock_repo.return_value = MagicMock()

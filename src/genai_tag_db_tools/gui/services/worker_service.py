@@ -9,7 +9,7 @@ import polars as pl
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
 
 from genai_tag_db_tools.models import TagSearchRequest
-from genai_tag_db_tools.services.app_services import TagSearchService
+from genai_tag_db_tools.gui.services.tag_search_service import TagSearchService
 
 
 class WorkerSignals(QObject):

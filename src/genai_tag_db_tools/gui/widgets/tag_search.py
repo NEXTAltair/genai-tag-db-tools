@@ -27,8 +27,8 @@ from genai_tag_db_tools.gui.presenters.tag_search_presenter import (
     TagSearchQuery,
     normalize_choice,
 )
+from genai_tag_db_tools.gui.services.tag_search_service import TagSearchService
 from genai_tag_db_tools.gui.widgets.controls.log_scale_slider import LogScaleRangeSlider
-from genai_tag_db_tools.services.app_services import TagSearchService
 
 
 class TagSearchWidget(QWidget, Ui_TagSearchWidget):

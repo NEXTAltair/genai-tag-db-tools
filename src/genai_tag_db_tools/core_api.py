@@ -18,7 +18,7 @@ from genai_tag_db_tools.models import (
     TagSearchRow,
     TagStatisticsResult,
 )
-from genai_tag_db_tools.services.app_services import TagRegisterService
+from genai_tag_db_tools.services.tag_register import TagRegisterService
 from genai_tag_db_tools.utils.cleanup_str import TagCleaner
 
 
@@ -96,7 +96,7 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
 
     rows = repo.search_tags(
         request.query,
-        partial=True,
+        partial=request.partial,
         format_name=format_name,
         type_name=type_name,
         resolve_preferred=request.resolve_preferred,

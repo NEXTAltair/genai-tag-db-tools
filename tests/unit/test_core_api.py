@@ -131,12 +131,14 @@ def test_search_tags_filters_and_maps():
     repo = DummyRepo(rows)
     request = TagSearchRequest(
         query="bunny",
+        partial=False,
         format_names=["danbooru"],
         type_names=["artist"],
         include_aliases=False,
         include_deprecated=False,
     )
     result = core_api.search_tags(repo, request)
+    assert repo.calls[0]["partial"] is False
     assert result.items == [
         TagRecordPublic(
             tag="bunny",

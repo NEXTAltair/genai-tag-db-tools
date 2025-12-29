@@ -10,8 +10,8 @@ from pydantic import ValidationError
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from genai_tag_db_tools.gui.widgets.tag_register import TagRegisterWidget
-from genai_tag_db_tools.services.app_services import (
-    TagRegisterService,
+from genai_tag_db_tools.gui.services import (
+    GuiTagRegisterService,
     TagSearchService,
 )
 
@@ -19,7 +19,8 @@ from genai_tag_db_tools.services.app_services import (
 class MockTagSearchService(TagSearchService):
     """TagSearchService のモック"""
 
-    def __init__(self):
+    def __init__(self) -> None:
+        # Don't call super().__init__() to avoid DB initialization in tests
         self.mock_get_tag_formats = MagicMock(return_value=["danbooru", "e621"])
         self.mock_get_tag_languages = MagicMock(return_value=["english", "japanese"])
         self.mock_get_tag_types = MagicMock(return_value=["character", "general"])
@@ -34,16 +35,17 @@ class MockTagSearchService(TagSearchService):
         return self.mock_get_tag_types(format_name)
 
 
-class MockTagRegisterService(TagRegisterService):
-    """TagRegisterService のモック"""
+class MockTagRegisterService(GuiTagRegisterService):
+    """GuiTagRegisterService のモック"""
 
-    def __init__(self):
+    def __init__(self) -> None:
+        # Don't call super().__init__() to avoid DB initialization in tests
         self.mock_register_or_update_tag = MagicMock(return_value=123)
         self.mock_get_tag_details = MagicMock(
             return_value=pl.DataFrame([{"tag": "cat", "type": "general", "usage_count": 50}])
         )
 
-    def register_or_update_tag(self, tag_info: dict) -> int:
+    def register_or_update_tag(self, tag_info: dict[str, object]) -> int:
         return self.mock_register_or_update_tag(tag_info)
 
     def get_tag_details(self, tag_id: int) -> pl.DataFrame:

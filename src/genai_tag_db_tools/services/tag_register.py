@@ -1,9 +1,18 @@
 import logging
+from typing import TYPE_CHECKING
 
 import polars as pl
 
-from genai_tag_db_tools.db.repository import TagRepository, get_default_repository
+from genai_tag_db_tools.db.repository import (
+    TagRepository,
+    get_default_reader,
+    get_default_repository,
+)
 from genai_tag_db_tools.utils.cleanup_str import TagCleaner
+
+if TYPE_CHECKING:
+    from genai_tag_db_tools.db.repository import MergedTagReader
+    from genai_tag_db_tools.models import TagRegisterRequest, TagRegisterResult
 
 
 class TagRegister:
@@ -95,3 +104,65 @@ class TagRegister:
                     alias=True,
                     preferred_tag_id=tag_id,
                 )
+
+
+class TagRegisterService:
+    """Qt-free tag registration service for CLI/library/GUI use."""
+
+    def __init__(
+        self,
+        repository: TagRepository | None = None,
+        reader: "MergedTagReader | None" = None,
+    ):
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self._repo = repository if repository else get_default_repository()
+        self._reader = reader or get_default_reader()
+
+    def register_tag(self, request: "TagRegisterRequest") -> "TagRegisterResult":
+        """Register a tag and optional metadata via the repository.
+
+        Args:
+            request: Tag registration request.
+        Returns:
+            TagRegisterResult indicating whether the tag was created.
+        """
+        from genai_tag_db_tools.models import TagRegisterResult
+
+        tag = request.tag
+        source_tag = request.source_tag or request.tag
+        fmt_id = self._reader.get_format_id(request.format_name)
+        if fmt_id is None:
+            raise ValueError(f"format_name が無効です: {request.format_name}")
+
+        type_id = self._reader.get_type_id(request.type_name)
+        if type_id is None:
+            raise ValueError(f"type_name が無効です: {request.type_name}")
+
+        existing_id = self._reader.get_tag_id_by_name(tag, partial=False)
+        tag_id = self._repo.create_tag(source_tag, tag)
+        created = existing_id is None
+
+        preferred_tag_id: int | None = tag_id
+        if request.alias:
+            if not request.preferred_tag:
+                raise ValueError("alias=True の場合 preferred_tag が必須です")
+            preferred_tag_id = self._reader.get_tag_id_by_name(request.preferred_tag, partial=False)
+            if preferred_tag_id is None:
+                raise ValueError(f"推奨タグが見つかりません: {request.preferred_tag}")
+
+        if request.translations:
+            for tr in request.translations:
+                self._repo.add_or_update_translation(tag_id, tr.language, tr.translation)
+
+        if preferred_tag_id is None:
+            raise ValueError("preferred_tag_id が未設定です")
+
+        self._repo.update_tag_status(
+            tag_id=tag_id,
+            format_id=fmt_id,
+            alias=request.alias,
+            preferred_tag_id=preferred_tag_id,
+            type_id=type_id,
+        )
+
+        return TagRegisterResult(created=created, tag_id=tag_id)

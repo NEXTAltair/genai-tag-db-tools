@@ -9,7 +9,7 @@ import pytest
 
 from genai_tag_db_tools.gui.services.worker_service import TagSearchWorker, WorkerService
 from genai_tag_db_tools.models import TagSearchRequest
-from genai_tag_db_tools.services.app_services import TagSearchService
+from genai_tag_db_tools.gui.services.tag_search_service import TagSearchService
 
 
 @pytest.fixture

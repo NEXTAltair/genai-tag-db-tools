@@ -1,7 +1,7 @@
 import pytest
 
 from genai_tag_db_tools.models import TagRegisterRequest, TagTranslationInput
-from genai_tag_db_tools.services.app_services import TagRegisterService
+from genai_tag_db_tools.services.tag_register import TagRegisterService
 
 
 class DummyRepo:

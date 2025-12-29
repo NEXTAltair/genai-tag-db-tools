@@ -19,7 +19,7 @@ from genai_tag_db_tools.models import (
     TagSearchRequest,
     TagTranslationInput,
 )
-from genai_tag_db_tools.services.app_services import TagRegisterService
+from genai_tag_db_tools.services.tag_register import TagRegisterService
 
 
 @dataclass(frozen=True)
@@ -148,6 +148,7 @@ def cmd_search(args: argparse.Namespace) -> None:
     repo = get_default_reader()
     request = TagSearchRequest(
         query=args.query,
+        partial=not args.exact,
         format_names=args.format_name or None,
         type_names=args.type_name or None,
         resolve_preferred=args.resolve_preferred,
@@ -236,6 +237,11 @@ def main() -> None:
     search_parser.add_argument("--resolve-preferred", action="store_true")
     search_parser.add_argument("--include-aliases", action="store_true")
     search_parser.add_argument("--include-deprecated", action="store_true")
+    search_parser.add_argument(
+        "--exact",
+        action="store_true",
+        help="Use exact matching (partial match is default).",
+    )
     _add_base_db_args(search_parser)
     search_parser.set_defaults(func=cmd_search)
 

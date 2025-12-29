@@ -13,9 +13,9 @@ from genai_tag_db_tools.gui.widgets.tag_cleaner import TagCleanerWidget
 from genai_tag_db_tools.gui.widgets.tag_register import TagRegisterWidget
 from genai_tag_db_tools.gui.widgets.tag_search import TagSearchWidget
 from genai_tag_db_tools.gui.widgets.tag_statistics import TagStatisticsWidget
-from genai_tag_db_tools.services.app_services import (
+from genai_tag_db_tools.gui.services import (
+    GuiTagRegisterService,
     TagCleanerService,
-    TagRegisterService,
     TagSearchService,
     TagStatisticsService,
 )
@@ -60,7 +60,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             # サービスとウィジェットは初期化完了後に設定
             self.tag_search_service: TagSearchService | None = None
             self.tag_cleaner_service: TagCleanerService | None = None
-            self.tag_register_service: TagRegisterService | None = None
+            self.tag_register_service: GuiTagRegisterService | None = None
             self.tag_statistics_service: TagStatisticsService | None = None
 
             # データベース初期化を開始
@@ -131,7 +131,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         """サービスを初期化する(DB初期化完了後に呼ばれる)。"""
         self.tag_search_service = TagSearchService()
         self.tag_cleaner_service = TagCleanerService()
-        self.tag_register_service = TagRegisterService()
+        self.tag_register_service = GuiTagRegisterService()
         self.tag_statistics_service = TagStatisticsService()
         self.logger.info("Services initialized successfully")
 

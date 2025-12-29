@@ -7,13 +7,14 @@ from unittest.mock import MagicMock
 import pytest
 
 from genai_tag_db_tools.gui.widgets.tag_cleaner import TagCleanerWidget
-from genai_tag_db_tools.services.app_services import TagCleanerService
+from genai_tag_db_tools.gui.services import TagCleanerService
 
 
 class MockTagCleanerService(TagCleanerService):
     """TagCleanerService のモック"""
 
-    def __init__(self):
+    def __init__(self) -> None:
+        # Don't call super().__init__() to avoid DB initialization in tests
         self.mock_get_tag_formats = MagicMock(return_value=["danbooru", "e621"])
         self.mock_convert_prompt = MagicMock(return_value="converted, tags")
 

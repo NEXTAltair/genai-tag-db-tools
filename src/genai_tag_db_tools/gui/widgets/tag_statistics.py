@@ -19,7 +19,7 @@ from genai_tag_db_tools.gui.presenters.tag_statistics_presenter import (
     TagStatisticsView,
     build_statistics_view,
 )
-from genai_tag_db_tools.services.app_services import TagStatisticsService
+from genai_tag_db_tools.gui.services import TagStatisticsService
 
 
 class TagStatisticsWidget(QWidget, Ui_TagStatisticsWidget):

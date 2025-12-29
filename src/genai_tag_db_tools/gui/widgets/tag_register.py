@@ -10,8 +10,8 @@ from genai_tag_db_tools.gui.presenters.tag_register_presenter import (
     build_tag_info,
     format_tag_details,
 )
-from genai_tag_db_tools.services.app_services import (
-    TagRegisterService,
+from genai_tag_db_tools.gui.services import (
+    GuiTagRegisterService,
     TagSearchService,
 )
 
@@ -21,7 +21,7 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
         self,
         parent: QWidget | None = None,
         search_service: TagSearchService | None = None,
-        register_service: TagRegisterService | None = None,
+        register_service: GuiTagRegisterService | None = None,
     ):
         super().__init__(parent)
         self.setupUi(self)
@@ -30,7 +30,7 @@ class TagRegisterWidget(QWidget, Ui_TagRegisterWidget):
         self.register_service = register_service
         self._initialized = False
 
-    def set_services(self, search_service: TagSearchService, register_service: TagRegisterService) -> None:
+    def set_services(self, search_service: TagSearchService, register_service: GuiTagRegisterService) -> None:
         """Set service instances (initialization deferred to showEvent)."""
         self.search_service = search_service
         self.register_service = register_service

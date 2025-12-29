@@ -5,7 +5,7 @@ from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import QWidget
 
 from genai_tag_db_tools.gui.designer.TagCleanerWidget_ui import Ui_TagCleanerWidget
-from genai_tag_db_tools.services.app_services import TagCleanerService
+from genai_tag_db_tools.gui.services import TagCleanerService
 
 
 class TagCleanerWidget(QWidget, Ui_TagCleanerWidget):

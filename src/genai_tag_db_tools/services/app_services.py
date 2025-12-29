@@ -136,7 +136,7 @@ class TagSearchService(GuiServiceBase):
         max_usage: int | None = None,
         alias: bool | None = None,
     ) -> pl.DataFrame:
-        """タグ検索を行い、Polars DataFrameで返す (core_api統合版)、E
+        """タグ検索を行い、Polars DataFrameで返す (core_api統合版)、検索結果をフィルタリングして返す
         Args:
             keyword: Search keyword.
             partial: Whether to use partial matching.
@@ -160,6 +160,7 @@ class TagSearchService(GuiServiceBase):
 
             request_kwargs = {
                 "query": keyword,
+                "partial": partial,
                 "format_names": format_names,
                 "type_names": type_names,
                 "resolve_preferred": True,
@@ -191,7 +192,7 @@ class TagSearchService(GuiServiceBase):
 
 
 class TagCleanerService(GuiServiceBase):
-    """GUIの一括変換など簡易�E琁E��まとめるサービス"""
+    """GUIの一括変換など簡易変換まとめるサービス"""
 
     def __init__(self, parent: QObject | None = None, core: TagCoreService | None = None):
         super().__init__(parent)

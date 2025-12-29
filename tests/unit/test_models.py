@@ -100,6 +100,7 @@ def test_ensure_db_result_requires_all_fields():
 def test_tag_search_request_defaults():
     request = TagSearchRequest(query="cat")
     assert request.query == "cat"
+    assert request.partial is True
     assert request.format_names is None
     assert request.type_names is None
     assert request.resolve_preferred is True
