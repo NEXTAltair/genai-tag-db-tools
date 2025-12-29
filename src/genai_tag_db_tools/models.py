@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypedDict
+from typing import TypedDict
 
 from pydantic import BaseModel, Field
 
-if TYPE_CHECKING:
-    from genai_tag_db_tools.db.schema import Tag, TagStatus, TagTranslation
+from genai_tag_db_tools.db.schema import Tag, TagStatus, TagTranslation
 
 
 class DbSourceRef(BaseModel):
@@ -280,3 +279,6 @@ class PreloadedData(BaseModel):
     trans_by_tag_id: dict[int, list[TagTranslation]]
     status_by_tag_format: dict[tuple[int, int], TagStatus]
     statuses_by_tag_id: dict[int, list[TagStatus]]
+
+
+PreloadedData.model_rebuild()
