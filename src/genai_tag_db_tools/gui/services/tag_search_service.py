@@ -12,6 +12,7 @@ from genai_tag_db_tools.services.tag_search import TagSearcher
 if TYPE_CHECKING:
     from genai_tag_db_tools.db.repository import MergedTagReader
 
+
 class TagSearchService(GuiServiceBase):
     """GUI向け検索サービス(TagSearcher を利用)"""
 

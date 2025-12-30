@@ -596,6 +596,93 @@ class TagRepository:
                 session.rollback()
                 raise ValueError(f"DB operation failed: {e}") from e
 
+    def create_format_if_not_exists(self, format_name: str, description: str | None = None) -> int:
+        """Create a TagFormat if it doesn't exist, return format_id.
+
+        Args:
+            format_name: Name of the format (e.g., "Lorairo", "danbooru")
+            description: Optional description
+
+        Returns:
+            format_id of the existing or newly created format
+        """
+        from genai_tag_db_tools.db.schema import TagFormat
+
+        with self.session_factory() as session:
+            # Check if format already exists
+            format_obj = session.query(TagFormat).filter(TagFormat.format_name == format_name).one_or_none()
+            if format_obj:
+                return format_obj.format_id
+
+            # Create new format
+            new_format = TagFormat(format_name=format_name, description=description)
+            session.add(new_format)
+            session.commit()
+            session.refresh(new_format)
+            self.logger.info(f"Created new TagFormat: {format_name} (ID: {new_format.format_id})")
+            return new_format.format_id
+
+    def create_type_name_if_not_exists(self, type_name: str, description: str | None = None) -> int:
+        """Create a TagTypeName if it doesn't exist, return type_name_id.
+
+        Args:
+            type_name: Name of the type (e.g., "unknown", "character")
+            description: Optional description
+
+        Returns:
+            type_name_id of the existing or newly created type name
+        """
+        from genai_tag_db_tools.db.schema import TagTypeName
+
+        with self.session_factory() as session:
+            # Check if type name already exists
+            type_obj = session.query(TagTypeName).filter(TagTypeName.type_name == type_name).one_or_none()
+            if type_obj:
+                return type_obj.type_name_id
+
+            # Create new type name
+            new_type = TagTypeName(type_name=type_name, description=description)
+            session.add(new_type)
+            session.commit()
+            session.refresh(new_type)
+            self.logger.info(f"Created new TagTypeName: {type_name} (ID: {new_type.type_name_id})")
+            return new_type.type_name_id
+
+    def create_type_format_mapping_if_not_exists(
+        self, format_id: int, type_id: int, type_name_id: int, description: str | None = None
+    ) -> None:
+        """Create a TagTypeFormatMapping if it doesn't exist.
+
+        Args:
+            format_id: Format ID
+            type_id: Type ID (within the format)
+            type_name_id: Type name ID (references TagTypeName)
+            description: Optional description
+        """
+        from genai_tag_db_tools.db.schema import TagTypeFormatMapping
+
+        with self.session_factory() as session:
+            # Check if mapping already exists
+            mapping = (
+                session.query(TagTypeFormatMapping)
+                .filter(
+                    TagTypeFormatMapping.format_id == format_id, TagTypeFormatMapping.type_id == type_id
+                )
+                .one_or_none()
+            )
+            if mapping:
+                return
+
+            # Create new mapping
+            new_mapping = TagTypeFormatMapping(
+                format_id=format_id, type_id=type_id, type_name_id=type_name_id, description=description
+            )
+            session.add(new_mapping)
+            session.commit()
+            self.logger.info(
+                f"Created new TagTypeFormatMapping: format_id={format_id}, type_id={type_id}, type_name_id={type_name_id}"
+            )
+
 
 class MergedTagReader:
     """Read-only view merging base/user repositories."""
