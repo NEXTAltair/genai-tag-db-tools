@@ -1,15 +1,11 @@
 from collections.abc import Callable
 from datetime import datetime
 from logging import getLogger
-from typing import TYPE_CHECKING
 
 import polars as pl
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-
-if TYPE_CHECKING:
-    from genai_tag_db_tools.db.repository import MergedTagReader
 
 from genai_tag_db_tools.db.query_utils import (
     TagSearchPreloader,
