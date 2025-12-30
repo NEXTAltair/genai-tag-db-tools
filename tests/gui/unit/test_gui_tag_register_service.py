@@ -1,13 +1,13 @@
 """GuiTagRegisterService unit tests - Qt Signal emission and error handling"""
 
-from unittest.mock import MagicMock, Mock
+from unittest.mock import Mock
 
 import pytest
 from PySide6.QtCore import QObject
 from pytestqt.qt_compat import qt_api
 
 from genai_tag_db_tools.gui.services.tag_register_service import GuiTagRegisterService
-from genai_tag_db_tools.models import TagRegisterRequest, TagRegisterResult, TagTranslationInput
+from genai_tag_db_tools.models import TagRegisterRequest
 
 
 class DummyRepo:
@@ -160,9 +160,7 @@ class TestGuiTagRegisterService:
         # Verify
         assert tag_id == 10
 
-    def test_register_or_update_tag_empty_tag_raises_error(
-        self, service: GuiTagRegisterService, qtbot
-    ):
+    def test_register_or_update_tag_empty_tag_raises_error(self, service: GuiTagRegisterService, qtbot):
         """register_or_update_tag raises ValueError for empty tag"""
         error_spy = qt_api.QtTest.QSignalSpy(service.error_occurred)
 
@@ -178,9 +176,7 @@ class TestGuiTagRegisterService:
         # Verify error signal emitted
         assert error_spy.count() == 1
 
-    def test_register_or_update_tag_empty_source_raises_error(
-        self, service: GuiTagRegisterService, qtbot
-    ):
+    def test_register_or_update_tag_empty_source_raises_error(self, service: GuiTagRegisterService, qtbot):
         """register_or_update_tag raises ValueError for empty source_tag"""
         error_spy = qt_api.QtTest.QSignalSpy(service.error_occurred)
 
@@ -211,9 +207,7 @@ class TestGuiTagRegisterService:
         assert row["total_usage_count"] == 100
         assert row["translations"] == {"ja": "テストタグ"}
 
-    def test_get_tag_details_nonexistent_tag_returns_empty(
-        self, service: GuiTagRegisterService, qtbot
-    ):
+    def test_get_tag_details_nonexistent_tag_returns_empty(self, service: GuiTagRegisterService, qtbot):
         """get_tag_details returns empty DataFrame for nonexistent tag"""
         # Execute
         result_df = service.get_tag_details(tag_id=999)
@@ -246,3 +240,57 @@ class TestGuiTagRegisterService:
         """GuiTagRegisterService wraps CoreTagRegisterService"""
         assert hasattr(service, "_core")
         assert service._core is not None
+
+    def test_register_or_update_tag_legacy_path_without_type(self, service: GuiTagRegisterService, qtbot):
+        """register_or_update_tag legacy path without format/type"""
+        tag_info = {
+            "normalized_tag": "legacy_tag",
+            "source_tag": "legacy_tag",
+        }
+
+        # Execute
+        tag_id = service.register_or_update_tag(tag_info)
+
+        # Verify tag creation through legacy path
+        assert tag_id == 10
+        assert service._repo.created_tags == [("legacy_tag", "legacy_tag")]
+
+    def test_register_or_update_tag_with_usage_count(self, service: GuiTagRegisterService, qtbot):
+        """register_or_update_tag updates usage count when provided"""
+        tag_info = {
+            "normalized_tag": "popular_tag",
+            "source_tag": "popular_tag",
+            "format_name": "danbooru",
+            "type_name": "character",
+            "use_count": 150,
+        }
+
+        # Execute
+        tag_id = service.register_or_update_tag(tag_info)
+
+        # Verify usage count was updated
+        assert tag_id == 10
+        assert service._repo.usage_updates == [(10, 1, 150)]
+
+    def test_register_or_update_tag_tag_id_not_found_raises_error(
+        self, service: GuiTagRegisterService, qtbot
+    ):
+        """register_or_update_tag raises ValueError when tag_id not found after registration"""
+        error_spy = qt_api.QtTest.QSignalSpy(service.error_occurred)
+
+        # Mock reader to return None for get_tag_id_by_name
+        service._reader.get_tag_id_by_name = Mock(return_value=None)
+
+        tag_info = {
+            "normalized_tag": "missing_tag",
+            "source_tag": "missing_tag",
+            "format_name": "danbooru",
+            "type_name": "character",
+        }
+
+        # Execute and expect exception
+        with pytest.raises(ValueError, match="登録後にタグIDが見つかりません"):
+            service.register_or_update_tag(tag_info)
+
+        # Verify error signal emitted
+        assert error_spy.count() == 1
