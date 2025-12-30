@@ -139,8 +139,11 @@ class TagRegisterService:
             fmt_id = self._reader.get_format_id(request.format_name)
         except ValueError:
             # Format doesn't exist, create it
+            # Pass reader to avoid format_id collision with base DBs
             fmt_id = self._repo.create_format_if_not_exists(
-                format_name=request.format_name, description=f"Auto-created format: {request.format_name}"
+                format_name=request.format_name,
+                description=f"Auto-created format: {request.format_name}",
+                reader=self._reader,
             )
             self.logger.info(f"Auto-created format_name: {request.format_name} (ID: {fmt_id})")
 

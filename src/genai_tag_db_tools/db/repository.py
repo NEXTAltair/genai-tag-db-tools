@@ -1,11 +1,15 @@
 from collections.abc import Callable
 from datetime import datetime
 from logging import getLogger
+from typing import TYPE_CHECKING
 
 import polars as pl
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+    from genai_tag_db_tools.db.repository import MergedTagReader
 
 from genai_tag_db_tools.db.query_utils import (
     TagSearchPreloader,
@@ -596,12 +600,15 @@ class TagRepository:
                 session.rollback()
                 raise ValueError(f"DB operation failed: {e}") from e
 
-    def create_format_if_not_exists(self, format_name: str, description: str | None = None) -> int:
+    def create_format_if_not_exists(
+        self, format_name: str, description: str | None = None, reader: "MergedTagReader | None" = None
+    ) -> int:
         """Create a TagFormat if it doesn't exist, return format_id.
 
         Args:
             format_name: Name of the format (e.g., "Lorairo", "danbooru")
             description: Optional description
+            reader: Optional MergedTagReader to check base DB format_ids and avoid collisions
 
         Returns:
             format_id of the existing or newly created format
@@ -614,8 +621,28 @@ class TagRepository:
             if format_obj:
                 return format_obj.format_id
 
+            # Determine next format_id to avoid collision with base DBs
+            next_format_id = None
+            if reader is not None:
+                # Get all format_ids from base DBs
+                base_format_map = {}
+                for base_repo in reader._iter_base_repos():
+                    base_format_map.update(base_repo.get_format_map())
+
+                if base_format_map:
+                    max_base_format_id = max(base_format_map.keys())
+                    next_format_id = max_base_format_id + 1
+                    self.logger.info(
+                        f"Allocating format_id={next_format_id} for '{format_name}' "
+                        f"(max base DB format_id: {max_base_format_id})"
+                    )
+
             # Create new format
-            new_format = TagFormat(format_name=format_name, description=description)
+            new_format = TagFormat(
+                format_id=next_format_id,  # None uses auto-increment, explicit value prevents collision
+                format_name=format_name,
+                description=description,
+            )
             session.add(new_format)
             session.commit()
             session.refresh(new_format)
