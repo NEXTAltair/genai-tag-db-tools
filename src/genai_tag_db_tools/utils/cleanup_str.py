@@ -57,7 +57,7 @@ CAPTION_REPLACEMENTS = [
 
 
 class TagCleaner:
-    def __init__(self):
+    def __init__(self) -> None:
         self.tag_searcher = TagSearcher()
 
     @cache
