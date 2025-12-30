@@ -79,24 +79,24 @@ def test_format_id_collision_avoidance(
     result = service.register_tag(request)
     assert result.created is True
 
-    # Verify user DB created format_id=2 (not 1, avoiding collision)
+    # Verify user DB created format_id=1000 (1000+ reserved for user DB)
     user_formats = user_reader.get_format_map()
-    assert 2 in user_formats
-    assert user_formats[2] == "Lorairo"
+    assert 1000 in user_formats
+    assert user_formats[1000] == "Lorairo"
     assert 1 not in user_formats  # User DB should not have format_id=1
 
     # Verify MergedTagReader correctly merges both formats
     merged_formats = reader.get_format_map()
     assert 1 in merged_formats
     assert merged_formats[1] == "danbooru"
-    assert 2 in merged_formats
-    assert merged_formats[2] == "Lorairo"
+    assert 1000 in merged_formats
+    assert merged_formats[1000] == "Lorairo"
 
     # Verify format_id lookups work correctly
     assert reader.get_format_id("danbooru") == 1
-    assert reader.get_format_id("Lorairo") == 2
+    assert reader.get_format_id("Lorairo") == 1000
     assert reader.get_format_name(1) == "danbooru"
-    assert reader.get_format_name(2) == "Lorairo"
+    assert reader.get_format_name(1000) == "Lorairo"
 
 
 def test_format_id_multiple_base_dbs():
@@ -141,16 +141,16 @@ def test_format_id_multiple_base_dbs():
     )
     service.register_tag(request)
 
-    # Verify user DB allocated format_id=6 (max base format_id + 1)
+    # Verify user DB allocated format_id=1000 (1000+ reserved for user DB)
     user_formats = user_reader.get_format_map()
-    assert 6 in user_formats
-    assert user_formats[6] == "Lorairo"
+    assert 1000 in user_formats
+    assert user_formats[1000] == "Lorairo"
 
     # Verify merged view
     merged_formats = reader.get_format_map()
     assert merged_formats[1] == "danbooru"
     assert merged_formats[5] == "e621"
-    assert merged_formats[6] == "Lorairo"
+    assert merged_formats[1000] == "Lorairo"
 
 
 def test_format_creation_without_reader_uses_auto_increment():

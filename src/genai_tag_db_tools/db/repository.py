@@ -30,6 +30,9 @@ from genai_tag_db_tools.db.schema import (
 from genai_tag_db_tools.models import TagSearchRow
 from genai_tag_db_tools.utils.messages import ErrorMessages
 
+# Reserve format_id range 1-999 for base DBs, 1000+ for user DBs
+USER_DB_FORMAT_ID_OFFSET = 1000
+
 
 class TagReader:
     """Read-only tag database access."""
@@ -608,10 +611,14 @@ class TagRepository:
         Args:
             format_name: Name of the format (e.g., "Lorairo", "danbooru")
             description: Optional description
-            reader: Optional MergedTagReader to check base DB format_ids and avoid collisions
+            reader: Optional MergedTagReader to enable user DB format_id reservation (1000+)
 
         Returns:
             format_id of the existing or newly created format
+
+        Note:
+            When reader is provided, user DB uses format_id >= 1000 to avoid collision
+            with base DB (which uses 1-999). This ensures environment-independent behavior.
         """
         from genai_tag_db_tools.db.schema import TagFormat
 
@@ -621,21 +628,21 @@ class TagRepository:
             if format_obj:
                 return format_obj.format_id
 
-            # Determine next format_id to avoid collision with base DBs
+            # Determine next format_id for user DB
             next_format_id = None
             if reader is not None:
-                # Get all format_ids from base DBs
-                base_format_map = {}
-                for base_repo in reader._iter_base_repos():
-                    base_format_map.update(base_repo.get_format_map())
-
-                if base_format_map:
-                    max_base_format_id = max(base_format_map.keys())
-                    next_format_id = max_base_format_id + 1
-                    self.logger.info(
-                        f"Allocating format_id={next_format_id} for '{format_name}' "
-                        f"(max base DB format_id: {max_base_format_id})"
-                    )
+                # User DB uses 1000+ range to avoid collision with base DB (1-999)
+                # Query existing formats in user DB to find next available ID
+                existing_formats = session.query(TagFormat.format_id).all()
+                if existing_formats:
+                    existing_format_ids = [f.format_id for f in existing_formats]
+                    next_format_id = max(existing_format_ids) + 1
+                else:
+                    # First user format starts at 1000
+                    next_format_id = USER_DB_FORMAT_ID_OFFSET
+                self.logger.info(
+                    f"Allocating format_id={next_format_id} for '{format_name}' in user DB (1000+ range)"
+                )
 
             # Create new format
             new_format = TagFormat(

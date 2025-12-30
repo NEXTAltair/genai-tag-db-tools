@@ -122,25 +122,25 @@ class TestGuiTagRegisterService:
         # Verify no error signal emitted
         assert error_spy.count() == 0
 
-    def test_register_tag_error_emits_signal(self, service: GuiTagRegisterService, qtbot):
-        """register_tag error emits error_occurred signal"""
-        # Setup signal spy
+    def test_register_tag_auto_creates_unknown_format(self, service: GuiTagRegisterService, qtbot):
+        """register_tag auto-creates unknown format with format_id >= 1000"""
+        # Setup error signal spy
         error_spy = qt_api.QtTest.QSignalSpy(service.error_occurred)
 
-        # Invalid request (missing format_name will cause error)
+        # Request with unknown format (will be auto-created)
         request = TagRegisterRequest(
             tag="test_tag",
             source_tag="test_tag",
-            format_name="invalid_format",
+            format_name="new_custom_format",
             type_name="character",
         )
 
-        # Execute and expect exception
-        with pytest.raises(ValueError):
-            service.register_tag(request)
+        # Execute (should succeed with auto-creation)
+        result = service.register_tag(request)
+        assert result.created is True
 
-        # Verify error signal emitted
-        assert error_spy.count() == 1
+        # Verify no error signal emitted
+        assert error_spy.count() == 0
 
     def test_register_or_update_tag_success(self, service: GuiTagRegisterService, qtbot):
         """register_or_update_tag succeeds with valid input"""
