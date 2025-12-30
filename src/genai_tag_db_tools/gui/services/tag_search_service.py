@@ -8,13 +8,9 @@ from PySide6.QtCore import QObject
 from genai_tag_db_tools.db.repository import get_default_reader
 from genai_tag_db_tools.gui.services.gui_service_base import GuiServiceBase
 from genai_tag_db_tools.services.tag_search import TagSearcher
-from genai_tag_db_tools.gui.services.tag_statistics_service import TagStatisticsService
 
 if TYPE_CHECKING:
     from genai_tag_db_tools.db.repository import MergedTagReader
-
-__all__ = ["TagSearchService", "TagStatisticsService"]
-
 
 class TagSearchService(GuiServiceBase):
     """GUI向け検索サービス(TagSearcher を利用)"""
