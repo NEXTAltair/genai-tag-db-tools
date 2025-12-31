@@ -263,6 +263,63 @@ def get_format_type_names(repo: MergedTagReader, format_id: int) -> list[str]:
     return repo.get_tag_types(format_id)
 
 
+def get_unknown_type_tags(repo: MergedTagReader, format_id: int) -> list[TagRecordPublic]:
+    """指定されたformat_idでtype_name="unknown"のタグ一覧を取得します。
+
+    Args:
+        repo: MergedTagReader インスタンス
+        format_id: Format ID
+
+    Returns:
+        list[TagRecordPublic]: unknown typeタグのリスト
+
+    Example:
+        >>> from genai_tag_db_tools import get_unknown_type_tags
+        >>> from genai_tag_db_tools.db.runtime import get_default_reader
+        >>> reader = get_default_reader()
+        >>> unknown_tags = get_unknown_type_tags(reader, format_id=1000)
+        >>> print(f"Found {len(unknown_tags)} unknown type tags")
+    """
+    tag_ids = repo.get_unknown_type_tag_ids(format_id)
+    if not tag_ids:
+        return []
+
+    # Get format_name for this format_id
+    format_name = repo.get_format_name(format_id)
+
+    # Get tag details for each tag_id
+    results: list[TagRecordPublic] = []
+    for tag_id in tag_ids:
+        tag = repo.get_tag_by_id(tag_id)
+        if not tag:
+            continue
+
+        tag_status = repo.get_tag_status(tag_id, format_id)
+        if not tag_status:
+            continue
+
+        # Get type_name (should be "unknown")
+        type_name = repo.get_type_name_by_format_type_id(format_id, tag_status.type_id)
+
+        results.append(
+            TagRecordPublic(
+                tag=tag.tag,
+                source_tag=tag.source_tag,
+                tag_id=tag.tag_id,
+                format_name=format_name,
+                type_id=tag_status.type_id,
+                type_name=type_name or "unknown",
+                alias=tag_status.alias,
+                deprecated=tag_status.deprecated,
+                usage_count=None,
+                translations=[],
+                format_statuses={},
+            )
+        )
+
+    return results
+
+
 def update_tags_type_batch(repo_writer, tag_updates: list, format_id: int) -> None:
     """複数のタグのtype_idを一括更新します。
 

@@ -293,3 +293,100 @@ def test_update_tags_type_batch_auto_increments_type_ids(
         type_ids = {status1.type_id, status2.type_id, status3.type_id}
         assert len(type_ids) == 3  # All different
         assert type_ids == {0, 1, 2}  # Sequential allocation
+
+
+def test_get_unknown_type_tag_ids_returns_empty_when_no_unknown_type(
+    session_factory: Callable[[], Session]
+) -> None:
+    """Test that get_unknown_type_tag_ids returns empty list when no unknown type exists."""
+    from genai_tag_db_tools.db.schema import TagFormat
+
+    reader = TagReader(session_factory)
+
+    with session_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Test"))
+        session.commit()
+
+    # No unknown type exists
+    result = reader.get_unknown_type_tag_ids(format_id=1000)
+    assert result == []
+
+
+def test_get_unknown_type_tag_ids_returns_tags_with_unknown_type(
+    session_factory: Callable[[], Session]
+) -> None:
+    """Test that get_unknown_type_tag_ids returns tags with type_name='unknown'."""
+    from genai_tag_db_tools.db.schema import (
+        Tag,
+        TagFormat,
+        TagStatus,
+        TagTypeFormatMapping,
+        TagTypeName,
+    )
+
+    reader = TagReader(session_factory)
+
+    with session_factory() as session:
+        # Create format and unknown type
+        session.add(TagFormat(format_id=1000, format_name="Test"))
+        session.add(TagTypeName(type_name_id=1, type_name="unknown"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+
+        # Create tags with unknown type
+        session.add(Tag(tag_id=10, tag="tag1", source_tag="tag1"))
+        session.add(Tag(tag_id=11, tag="tag2", source_tag="tag2"))
+        session.add(TagStatus(tag_id=10, format_id=1000, type_id=0, alias=False, preferred_tag_id=10))
+        session.add(TagStatus(tag_id=11, format_id=1000, type_id=0, alias=False, preferred_tag_id=11))
+
+        # Create tag with different type
+        session.add(Tag(tag_id=12, tag="tag3", source_tag="tag3"))
+        session.add(TagTypeName(type_name_id=2, type_name="character"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=1, type_name_id=2))
+        session.add(TagStatus(tag_id=12, format_id=1000, type_id=1, alias=False, preferred_tag_id=12))
+
+        session.commit()
+
+    # Get unknown type tags
+    result = reader.get_unknown_type_tag_ids(format_id=1000)
+    assert sorted(result) == [10, 11]
+
+
+def test_get_unknown_type_tag_ids_handles_multiple_formats(
+    session_factory: Callable[[], Session]
+) -> None:
+    """Test that get_unknown_type_tag_ids filters by format_id correctly."""
+    from genai_tag_db_tools.db.schema import (
+        Tag,
+        TagFormat,
+        TagStatus,
+        TagTypeFormatMapping,
+        TagTypeName,
+    )
+
+    reader = TagReader(session_factory)
+
+    with session_factory() as session:
+        # Create two formats with unknown type
+        session.add(TagFormat(format_id=1000, format_name="Test1"))
+        session.add(TagFormat(format_id=2000, format_name="Test2"))
+        session.add(TagTypeName(type_name_id=1, type_name="unknown"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+        session.add(TagTypeFormatMapping(format_id=2000, type_id=0, type_name_id=1))
+
+        # Create tags for format 1000
+        session.add(Tag(tag_id=10, tag="tag1", source_tag="tag1"))
+        session.add(TagStatus(tag_id=10, format_id=1000, type_id=0, alias=False, preferred_tag_id=10))
+
+        # Create tags for format 2000
+        session.add(Tag(tag_id=20, tag="tag2", source_tag="tag2"))
+        session.add(TagStatus(tag_id=20, format_id=2000, type_id=0, alias=False, preferred_tag_id=20))
+
+        session.commit()
+
+    # Get unknown type tags for format 1000 only
+    result_1000 = reader.get_unknown_type_tag_ids(format_id=1000)
+    assert result_1000 == [10]
+
+    # Get unknown type tags for format 2000 only
+    result_2000 = reader.get_unknown_type_tag_ids(format_id=2000)
+    assert result_2000 == [20]

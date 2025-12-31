@@ -306,6 +306,42 @@ class TagReader:
             )
         return [row[0] for row in rows]
 
+    def get_unknown_type_tag_ids(self, format_id: int) -> list[int]:
+        """Get all tag_ids with type_name="unknown" for the specified format.
+
+        Args:
+            format_id: Format ID to filter tags
+
+        Returns:
+            list[int]: List of tag_ids with unknown type
+        """
+        with self.session_factory() as session:
+            # Get type_name_id for "unknown"
+            unknown_type = session.query(TagTypeName).filter(TagTypeName.type_name == "unknown").one_or_none()
+            if not unknown_type:
+                return []
+
+            # Get type_id for this format
+            mapping = (
+                session.query(TagTypeFormatMapping)
+                .filter(
+                    TagTypeFormatMapping.format_id == format_id,
+                    TagTypeFormatMapping.type_name_id == unknown_type.type_name_id,
+                )
+                .one_or_none()
+            )
+            if not mapping:
+                return []
+
+            # Get all tag_ids with this type_id in this format
+            tag_statuses = (
+                session.query(TagStatus.tag_id)
+                .filter(TagStatus.format_id == format_id, TagStatus.type_id == mapping.type_id)
+                .all()
+            )
+
+            return [status[0] for status in tag_statuses]
+
     def get_type_mapping_map(self) -> dict[tuple[int, int], str]:
         with self.session_factory() as session:
             rows = (
@@ -1124,6 +1160,22 @@ class MergedTagReader:
         if self._has_user():
             types |= set(self.user_repo.get_tag_types(format_id))
         return list(types)
+
+    def get_unknown_type_tag_ids(self, format_id: int) -> list[int]:
+        """Get all tag_ids with type_name="unknown" for the specified format.
+
+        Args:
+            format_id: Format ID to filter tags
+
+        Returns:
+            list[int]: List of tag_ids with unknown type
+        """
+        tag_ids: set[int] = set()
+        for repo in self._iter_base_repos():
+            tag_ids |= set(repo.get_unknown_type_tag_ids(format_id))
+        if self._has_user():
+            tag_ids |= set(self.user_repo.get_unknown_type_tag_ids(format_id))
+        return list(tag_ids)
 
     def get_type_mapping_map(self) -> dict[tuple[int, int], str]:
         mapping: dict[tuple[int, int], str] = {}
