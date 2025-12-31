@@ -220,3 +220,75 @@ def get_tag_formats(repo: MergedTagReader) -> list[str]:
         list[str]: フォーマット名リスト（例: ["danbooru", "e621", ...]）
     """
     return repo.get_tag_formats()
+
+
+def get_all_type_names(repo: MergedTagReader) -> list[str]:
+    """全てのtype_name一覧を取得します。
+
+    Args:
+        repo: MergedTagReader インスタンス
+
+    Returns:
+        list[str]: type_name リスト（例: ["character", "general", "meta", ...]）
+
+    Example:
+        >>> from genai_tag_db_tools import get_all_type_names
+        >>> from genai_tag_db_tools.db.runtime import get_default_reader
+        >>> reader = get_default_reader()
+        >>> all_types = get_all_type_names(reader)
+        >>> print(all_types)
+        ["character", "general", "meta", "unknown"]
+    """
+    return repo.get_all_types()
+
+
+def get_format_type_names(repo: MergedTagReader, format_id: int) -> list[str]:
+    """指定されたformat_idで利用可能なtype_name一覧を取得します。
+
+    Args:
+        repo: MergedTagReader インスタンス
+        format_id: Format ID
+
+    Returns:
+        list[str]: 指定formatで利用可能なtype_nameリスト
+
+    Example:
+        >>> from genai_tag_db_tools import get_format_type_names
+        >>> from genai_tag_db_tools.db.runtime import get_default_reader
+        >>> reader = get_default_reader()
+        >>> format_types = get_format_type_names(reader, format_id=1000)
+        >>> print(format_types)
+        ["unknown", "character", "general"]
+    """
+    return repo.get_tag_types(format_id)
+
+
+def update_tags_type_batch(repo_writer, tag_updates: list, format_id: int) -> None:
+    """複数のタグのtype_idを一括更新します。
+
+    この関数は、指定されたタグリストに対してtype_nameからtype_idへの変換と更新を
+    一括で行います。type_nameが未登録の場合は自動的に作成され、format内でのtype_idも
+    自動採番されます。全ての更新は単一トランザクション内で実行されるため、
+    途中でエラーが発生した場合は全てロールバックされます。
+
+    Args:
+        repo_writer: TagRepository インスタンス（書き込み権限が必要）
+        tag_updates: TagTypeUpdate オブジェクトのリスト
+        format_id: Format ID
+
+    Raises:
+        ValueError: 無効なformat_idまたはtag_idが指定された場合
+        Exception: トランザクションが失敗した場合
+
+    Example:
+        >>> from genai_tag_db_tools import update_tags_type_batch
+        >>> from genai_tag_db_tools.models import TagTypeUpdate
+        >>> from genai_tag_db_tools.db.runtime import get_default_repository
+        >>> repo = get_default_repository()
+        >>> updates = [
+        ...     TagTypeUpdate(tag_id=123, type_name="character"),
+        ...     TagTypeUpdate(tag_id=456, type_name="general"),
+        ... ]
+        >>> update_tags_type_batch(repo, updates, format_id=1000)
+    """
+    repo_writer.update_tags_type_batch(tag_updates, format_id)

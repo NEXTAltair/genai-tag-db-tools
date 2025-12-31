@@ -226,6 +226,18 @@ class TagRegisterResult(BaseModel):
     tag_id: int = Field(..., description="登録されたタグID")
 
 
+class TagTypeUpdate(BaseModel):
+    """タグtype更新リクエスト。
+
+    Args:
+        tag_id: 更新対象のタグID。
+        type_name: 新しいtype名（例: "character", "general", "meta"）。
+    """
+
+    tag_id: int = Field(..., description="更新対象のタグID")
+    type_name: str = Field(..., description="新しいtype名")
+
+
 class TagStatisticsResult(BaseModel):
     """統計サマリ。
 

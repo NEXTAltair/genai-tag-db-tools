@@ -713,6 +713,134 @@ class TagRepository:
                 f"Created new TagTypeFormatMapping: format_id={format_id}, type_id={type_id}, type_name_id={type_name_id}"
             )
 
+    def get_next_type_id(self, format_id: int) -> int:
+        """Get the next available type_id for a given format.
+
+        This method queries the existing TagTypeFormatMapping entries for the specified
+        format_id and returns max(type_id) + 1. If no mappings exist for the format,
+        it returns 0.
+
+        Args:
+            format_id: Format ID to get the next type_id for
+
+        Returns:
+            Next available type_id (0 if no mappings exist for this format)
+
+        Example:
+            >>> repo = TagRepository()
+            >>> next_id = repo.get_next_type_id(format_id=1000)
+            >>> # Returns 0 if no type mappings exist for format 1000
+            >>> # Returns max(type_id) + 1 if mappings exist
+        """
+        from genai_tag_db_tools.db.schema import TagTypeFormatMapping
+        from sqlalchemy import func
+
+        with self.session_factory() as session:
+            max_type_id = (
+                session.query(func.max(TagTypeFormatMapping.type_id))
+                .filter(TagTypeFormatMapping.format_id == format_id)
+                .scalar()
+            )
+
+            if max_type_id is None:
+                return 0
+
+            return max_type_id + 1
+
+    def update_tags_type_batch(
+        self,
+        tag_updates: list,  # list[TagTypeUpdate] - avoid circular import
+        format_id: int,
+    ) -> None:
+        """Update type_id for multiple tags in a single transaction.
+
+        This method processes a batch of tag type updates, automatically creating
+        type_name and TagTypeFormatMapping entries as needed. All updates are
+        performed within a single transaction for atomicity.
+
+        Args:
+            tag_updates: List of TagTypeUpdate objects containing tag_id and type_name
+            format_id: Format ID for the tags being updated
+
+        Raises:
+            ValueError: If format_id or any tag_id is invalid
+            Exception: If transaction fails and needs to be rolled back
+
+        Example:
+            >>> from genai_tag_db_tools.models import TagTypeUpdate
+            >>> repo = TagRepository()
+            >>> updates = [
+            ...     TagTypeUpdate(tag_id=123, type_name="character"),
+            ...     TagTypeUpdate(tag_id=456, type_name="general"),
+            ... ]
+            >>> repo.update_tags_type_batch(updates, format_id=1000)
+        """
+        from genai_tag_db_tools.db.schema import TagTypeFormatMapping
+
+        if not tag_updates:
+            return
+
+        with self.session_factory() as session:
+            try:
+                # Cache for type_name -> type_id mapping (format-specific)
+                type_name_to_type_id: dict[str, int] = {}
+
+                for update in tag_updates:
+                    tag_id = update.tag_id
+                    type_name = update.type_name
+
+                    # Step 1: Get or create type_name_id
+                    type_name_id = self.create_type_name_if_not_exists(type_name)
+
+                    # Step 2: Get or create format-specific type_id
+                    if type_name not in type_name_to_type_id:
+                        # Query existing mapping
+                        mapping = (
+                            session.query(TagTypeFormatMapping)
+                            .filter(
+                                TagTypeFormatMapping.format_id == format_id,
+                                TagTypeFormatMapping.type_name_id == type_name_id,
+                            )
+                            .first()
+                        )
+
+                        if mapping:
+                            # Use existing type_id
+                            type_name_to_type_id[type_name] = mapping.type_id
+                        else:
+                            # Create new mapping with auto-incremented type_id
+                            next_type_id = self.get_next_type_id(format_id)
+                            self.create_type_format_mapping_if_not_exists(
+                                format_id=format_id,
+                                type_id=next_type_id,
+                                type_name_id=type_name_id,
+                            )
+                            type_name_to_type_id[type_name] = next_type_id
+                            self.logger.info(
+                                f"Created new type mapping: format_id={format_id}, "
+                                f"type_id={next_type_id}, type_name={type_name}"
+                            )
+
+                    # Step 3: Update tag status with new type_id
+                    type_id = type_name_to_type_id[type_name]
+                    self.update_tag_status(
+                        tag_id=tag_id,
+                        format_id=format_id,
+                        alias=False,
+                        preferred_tag_id=tag_id,
+                        type_id=type_id,
+                    )
+
+                session.commit()
+                self.logger.info(
+                    f"Updated {len(tag_updates)} tags with new type assignments for format_id={format_id}"
+                )
+
+            except Exception as e:
+                session.rollback()
+                self.logger.error(f"Failed to update tag types in batch: {e}", exc_info=True)
+                raise
+
 
 class MergedTagReader:
     """Read-only view merging base/user repositories."""
