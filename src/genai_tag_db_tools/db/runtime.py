@@ -100,7 +100,7 @@ def get_base_session_factories() -> list[sessionmaker[Session]]:
     return factories
 
 
-def init_user_db(user_db_dir: Path | None = None) -> Path:
+def init_user_db(user_db_dir: Path | None = None, *, format_name: str | None = None) -> Path:
     """ユーザーDBを初期化する。存在しなければ空DBを作成する。
 
     Args:
@@ -124,8 +124,39 @@ def init_user_db(user_db_dir: Path | None = None) -> Path:
     Base.metadata.create_all(_user_engine)
     _UserSessionLocal = sessionmaker(bind=_user_engine, autoflush=False, autocommit=False)
 
+    _initialize_default_user_mappings(_UserSessionLocal, format_name=format_name)
+
     logger.info("User DB initialized: %s", user_db_path)
     return user_db_path
+
+
+def _initialize_default_user_mappings(
+    session_factory: sessionmaker[Session], *, format_name: str | None
+) -> None:
+    """Ensure default format/type mappings exist for user DB."""
+    from genai_tag_db_tools.db.repository import TagRepository, TagReader
+
+    repo = TagRepository(session_factory=session_factory, reader=None)
+    reader = TagReader(session_factory=session_factory)
+
+    format_id = 1000
+    resolved_format_name = format_name or "tag-db"
+    type_name = "unknown"
+
+    # Ensure format and type exist.
+    repo.create_format_if_not_exists(
+        format_name=resolved_format_name,
+        description="Default user format",
+    )
+    type_name_id = repo.create_type_name_if_not_exists(type_name=type_name)
+
+    # Ensure format mapping for unknown uses type_id=0.
+    repo.create_type_format_mapping_if_not_exists(
+        format_id=format_id,
+        type_id=0,
+        type_name_id=type_name_id,
+        description=f"Default mapping for {resolved_format_name}/{type_name}",
+    )
 
 
 def get_user_session_factory() -> sessionmaker[Session]:

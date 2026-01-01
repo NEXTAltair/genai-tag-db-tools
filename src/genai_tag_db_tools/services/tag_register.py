@@ -122,7 +122,7 @@ class TagRegisterService:
         """Register a tag and optional metadata via the repository.
 
         Automatically creates format_name and type_name if they don't exist.
-        For unknown type_name, creates it with ID=1 if it doesn't exist.
+        For unknown type_name, uses type_id=0 by default.
 
         Args:
             request: Tag registration request.
@@ -158,8 +158,8 @@ class TagRegisterService:
             )
 
             # Create the mapping (format_id + type_id + type_name_id)
-            # Use type_id=1 for the first type in this format
-            type_id = 1  # Default for unknown/first type
+            # Use type_id=0 for the default unknown type in this format
+            type_id = 0
             self._repo.create_type_format_mapping_if_not_exists(
                 format_id=fmt_id,
                 type_id=type_id,
