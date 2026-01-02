@@ -51,8 +51,6 @@ src/genai_tag_db_tools/data/migrations/
 # Database files (exclude production databases, keep essential ones)
 *.db
 *.db.*
-tags_v*_*.db
-!src/genai_tag_db_tools/data/tags_v4.db  # Keep main distribution database
 !src/genai_tag_db_tools/data/schema_template.db  # Keep schema template
 !tests/resources/*.db  # Keep test databases
 

@@ -27,7 +27,6 @@ CONTRIBUTING* text eol=lf
 *.db filter=lfs diff=lfs merge=lfs -text
 *.sqlite binary
 *.sqlite3 binary
-# Important: tags_v4.db is tracked for distribution
 # This database contains pre-built tag data that users can extend
 *.jpg binary
 *.jpeg binary
