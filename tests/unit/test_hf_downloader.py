@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from genai_tag_db_tools.db.runtime import get_database_path
+from genai_tag_db_tools.db.runtime import get_base_database_paths
 from genai_tag_db_tools.io.hf_downloader import (
     HFDatasetSpec,
     default_cache_dir,
@@ -113,4 +113,4 @@ def test_ensure_db_ready_sets_runtime(monkeypatch, tmp_path: Path):
     result = ensure_db_ready(spec)
 
     assert result == fake_db
-    assert get_database_path() == fake_db
+    assert get_base_database_paths()[0] == fake_db
