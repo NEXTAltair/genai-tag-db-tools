@@ -87,6 +87,8 @@ class TagTypeFormatMapping(Base):
         viewonly=True,
     )
 
+    __table_args__ = (UniqueConstraint("format_id", "type_name_id", name="uq_format_typename"),)
+
 
 class TagStatus(Base):
     __tablename__ = "TAG_STATUS"
