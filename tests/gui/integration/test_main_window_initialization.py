@@ -29,7 +29,11 @@ def db_init_env(monkeypatch, tmp_path):
         EnsureDbResult(db_path=str(path), sha256="mock", revision=None, cached=True) for path in db_paths
     ]
 
-    monkeypatch.setattr(db_initialization, "ensure_databases", lambda requests: results)
+    monkeypatch.setattr(
+        db_initialization,
+        "initialize_databases",
+        lambda **_kwargs: results,
+    )
 
     def run_sync(self, runnable):
         runnable.run()

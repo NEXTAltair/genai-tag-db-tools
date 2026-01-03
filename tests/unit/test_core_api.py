@@ -171,3 +171,168 @@ def test_register_tag_delegates():
     result = core_api.register_tag(service, request)
     assert service.called_with == request
     assert result.created is True
+
+
+def test_initialize_databases_with_format_name(tmp_path, monkeypatch):
+    """Test initialize_databases() with custom format_name parameter."""
+    from unittest.mock import Mock
+
+    # Create dummy DB files
+    db_cc4 = tmp_path / "genai-image-tag-db-cc4.sqlite"
+    db_mit = tmp_path / "genai-image-tag-db-mit.sqlite"
+    db_cc0 = tmp_path / "genai-image-tag-db-cc0.sqlite"
+    db_cc4.write_bytes(b"cc4")
+    db_mit.write_bytes(b"mit")
+    db_cc0.write_bytes(b"cc0")
+
+    # Mock HuggingFace download to return the dummy files
+    call_count = [0]
+    paths = [db_cc4, db_mit, db_cc0]
+
+    def fake_download(spec, *, token=None):
+        path = paths[call_count[0]]
+        call_count[0] += 1
+        return (path, False)
+
+    monkeypatch.setattr(hf_downloader, "download_with_offline_fallback", fake_download)
+
+    # Mock runtime functions
+    mock_set_paths = Mock()
+    mock_init_engine = Mock()
+    mock_init_user = Mock(return_value=tmp_path / "user_tags.sqlite")
+
+    monkeypatch.setattr("genai_tag_db_tools.db.runtime.set_base_database_paths", mock_set_paths)
+    monkeypatch.setattr("genai_tag_db_tools.db.runtime.init_engine", mock_init_engine)
+    monkeypatch.setattr("genai_tag_db_tools.db.runtime.init_user_db", mock_init_user)
+
+    # Execute
+    results = core_api.initialize_databases(
+        user_db_dir=tmp_path,
+        format_name="TestApp",
+    )
+
+    # Verify format_name was passed through
+    mock_init_user.assert_called_once_with(tmp_path, format_name="TestApp")
+    assert len(results) == 3  # Default 3 databases
+
+
+def test_initialize_databases_init_user_db_default_behavior(tmp_path, monkeypatch):
+    """Test init_user_db defaults to False when user_db_dir is None."""
+    from unittest.mock import Mock
+
+    # Create dummy DB files
+    db_cc4 = tmp_path / "genai-image-tag-db-cc4.sqlite"
+    db_mit = tmp_path / "genai-image-tag-db-mit.sqlite"
+    db_cc0 = tmp_path / "genai-image-tag-db-cc0.sqlite"
+    db_cc4.write_bytes(b"cc4")
+    db_mit.write_bytes(b"mit")
+    db_cc0.write_bytes(b"cc0")
+
+    # Mock HuggingFace download
+    call_count = [0]
+    paths = [db_cc4, db_mit, db_cc0]
+
+    def fake_download(spec, *, token=None):
+        path = paths[call_count[0]]
+        call_count[0] += 1
+        return (path, False)
+
+    monkeypatch.setattr(hf_downloader, "download_with_offline_fallback", fake_download)
+
+    # Mock runtime functions
+    mock_set_paths = Mock()
+    mock_init_engine = Mock()
+    mock_init_user = Mock()
+
+    monkeypatch.setattr("genai_tag_db_tools.db.runtime.set_base_database_paths", mock_set_paths)
+    monkeypatch.setattr("genai_tag_db_tools.db.runtime.init_engine", mock_init_engine)
+    monkeypatch.setattr("genai_tag_db_tools.db.runtime.init_user_db", mock_init_user)
+
+    # Execute with user_db_dir=None (default init_user_db should be False)
+    results = core_api.initialize_databases(user_db_dir=None)
+
+    # Verify init_user_db was NOT called
+    mock_init_user.assert_not_called()
+    assert len(results) == 3
+
+
+def test_initialize_databases_init_user_db_explicit_true(tmp_path, monkeypatch):
+    """Test init_user_db can be explicitly set to True even when user_db_dir is None."""
+    from unittest.mock import Mock
+
+    # Create dummy DB files
+    db_cc4 = tmp_path / "genai-image-tag-db-cc4.sqlite"
+    db_mit = tmp_path / "genai-image-tag-db-mit.sqlite"
+    db_cc0 = tmp_path / "genai-image-tag-db-cc0.sqlite"
+    db_cc4.write_bytes(b"cc4")
+    db_mit.write_bytes(b"mit")
+    db_cc0.write_bytes(b"cc0")
+
+    # Mock HuggingFace download
+    call_count = [0]
+    paths = [db_cc4, db_mit, db_cc0]
+
+    def fake_download(spec, *, token=None):
+        path = paths[call_count[0]]
+        call_count[0] += 1
+        return (path, False)
+
+    monkeypatch.setattr(hf_downloader, "download_with_offline_fallback", fake_download)
+
+    # Mock runtime functions
+    mock_set_paths = Mock()
+    mock_init_engine = Mock()
+    mock_init_user = Mock()
+    mock_default_cache = Mock(return_value=tmp_path)
+
+    monkeypatch.setattr("genai_tag_db_tools.db.runtime.set_base_database_paths", mock_set_paths)
+    monkeypatch.setattr("genai_tag_db_tools.db.runtime.init_engine", mock_init_engine)
+    monkeypatch.setattr("genai_tag_db_tools.db.runtime.init_user_db", mock_init_user)
+    monkeypatch.setattr("genai_tag_db_tools.io.hf_downloader.default_cache_dir", mock_default_cache)
+
+    # Execute with user_db_dir=None but init_user_db=True
+    results = core_api.initialize_databases(user_db_dir=None, init_user_db=True)
+
+    # Verify init_user_db WAS called with default cache dir
+    mock_init_user.assert_called_once()
+    assert len(results) == 3
+
+
+def test_initialize_databases_init_user_db_explicit_false(tmp_path, monkeypatch):
+    """Test init_user_db can be explicitly set to False even when user_db_dir is provided."""
+    from unittest.mock import Mock
+
+    # Create dummy DB files
+    db_cc4 = tmp_path / "genai-image-tag-db-cc4.sqlite"
+    db_mit = tmp_path / "genai-image-tag-db-mit.sqlite"
+    db_cc0 = tmp_path / "genai-image-tag-db-cc0.sqlite"
+    db_cc4.write_bytes(b"cc4")
+    db_mit.write_bytes(b"mit")
+    db_cc0.write_bytes(b"cc0")
+
+    # Mock HuggingFace download
+    call_count = [0]
+    paths = [db_cc4, db_mit, db_cc0]
+
+    def fake_download(spec, *, token=None):
+        path = paths[call_count[0]]
+        call_count[0] += 1
+        return (path, False)
+
+    monkeypatch.setattr(hf_downloader, "download_with_offline_fallback", fake_download)
+
+    # Mock runtime functions
+    mock_set_paths = Mock()
+    mock_init_engine = Mock()
+    mock_init_user = Mock()
+
+    monkeypatch.setattr("genai_tag_db_tools.db.runtime.set_base_database_paths", mock_set_paths)
+    monkeypatch.setattr("genai_tag_db_tools.db.runtime.init_engine", mock_init_engine)
+    monkeypatch.setattr("genai_tag_db_tools.db.runtime.init_user_db", mock_init_user)
+
+    # Execute with user_db_dir=tmp_path but init_user_db=False
+    results = core_api.initialize_databases(user_db_dir=tmp_path, init_user_db=False)
+
+    # Verify init_user_db was NOT called
+    mock_init_user.assert_not_called()
+    assert len(results) == 3

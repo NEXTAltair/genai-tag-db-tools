@@ -178,9 +178,9 @@ class TestSetDbPaths:
             for path in db_paths
         ]
 
-        monkeypatch.setattr("genai_tag_db_tools.cli.ensure_databases", lambda _requests: results)
+        monkeypatch.setattr("genai_tag_db_tools.cli.initialize_databases", lambda **_kwargs: results)
 
-    def test_set_db_paths_both_specified(self, tmp_path: Path) -> None:
+    def test_set_db_paths_both_specified(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """base_db_pathsとuser_db_dirの両方指定"""
         base_path1 = tmp_path / "base1.db"
         base_path2 = tmp_path / "base2.db"
@@ -189,6 +189,8 @@ class TestSetDbPaths:
         base_path1.touch()
         base_path2.touch()
         user_dir.mkdir()
+
+        monkeypatch.setattr(runtime, "init_user_db", lambda _path: None)
 
         _set_db_paths([str(base_path1), str(base_path2)], str(user_dir))
 

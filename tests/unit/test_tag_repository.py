@@ -94,7 +94,7 @@ def test_get_next_type_id_returns_zero_for_empty_format(session_factory: Callabl
 
 def test_get_next_type_id_returns_incremented_value(session_factory: Callable[[], Session]) -> None:
     """Test that get_next_type_id returns max(type_id) + 1 when mappings exist."""
-    from genai_tag_db_tools.db.schema import TagFormat, TagTypeName, TagTypeFormatMapping
+    from genai_tag_db_tools.db.schema import TagFormat, TagTypeFormatMapping, TagTypeName
 
     repo = TagRepository(session_factory)
 
@@ -116,10 +116,10 @@ def test_get_next_type_id_returns_incremented_value(session_factory: Callable[[]
 
 
 def test_get_next_type_id_handles_multiple_formats_independently(
-    session_factory: Callable[[], Session]
+    session_factory: Callable[[], Session],
 ) -> None:
     """Test that get_next_type_id handles multiple formats independently."""
-    from genai_tag_db_tools.db.schema import TagFormat, TagTypeName, TagTypeFormatMapping
+    from genai_tag_db_tools.db.schema import TagFormat, TagTypeFormatMapping, TagTypeName
 
     repo = TagRepository(session_factory)
 
@@ -145,10 +145,10 @@ def test_get_next_type_id_handles_multiple_formats_independently(
 
 
 def test_update_tags_type_batch_creates_type_names_and_mappings(
-    session_factory: Callable[[], Session]
+    session_factory: Callable[[], Session],
 ) -> None:
     """Test that update_tags_type_batch creates type_names and mappings as needed."""
-    from genai_tag_db_tools.db.schema import TagFormat, Tag, TagStatus
+    from genai_tag_db_tools.db.schema import Tag, TagFormat, TagStatus
     from genai_tag_db_tools.models import TagTypeUpdate
 
     repo = TagRepository(session_factory)
@@ -158,12 +158,8 @@ def test_update_tags_type_batch_creates_type_names_and_mappings(
         session.add(TagFormat(format_id=1000, format_name="Test"))
         session.add(Tag(tag_id=1, tag="witch", source_tag="witch"))
         session.add(Tag(tag_id=2, tag="mage", source_tag="mage"))
-        session.add(
-            TagStatus(tag_id=1, format_id=1000, type_id=0, alias=False, preferred_tag_id=1)
-        )
-        session.add(
-            TagStatus(tag_id=2, format_id=1000, type_id=0, alias=False, preferred_tag_id=2)
-        )
+        session.add(TagStatus(tag_id=1, format_id=1000, type_id=0, alias=False, preferred_tag_id=1))
+        session.add(TagStatus(tag_id=2, format_id=1000, type_id=0, alias=False, preferred_tag_id=2))
         session.commit()
 
     # Update tags with new type_names
@@ -195,16 +191,14 @@ def test_update_tags_type_batch_creates_type_names_and_mappings(
         assert status2.type_id in [0, 1]
 
 
-def test_update_tags_type_batch_reuses_existing_type_ids(
-    session_factory: Callable[[], Session]
-) -> None:
+def test_update_tags_type_batch_reuses_existing_type_ids(session_factory: Callable[[], Session]) -> None:
     """Test that update_tags_type_batch reuses existing type_ids for same type_name."""
     from genai_tag_db_tools.db.schema import (
-        TagFormat,
         Tag,
+        TagFormat,
         TagStatus,
-        TagTypeName,
         TagTypeFormatMapping,
+        TagTypeName,
     )
     from genai_tag_db_tools.models import TagTypeUpdate
 
@@ -218,12 +212,8 @@ def test_update_tags_type_batch_reuses_existing_type_ids(
 
         session.add(Tag(tag_id=1, tag="witch", source_tag="witch"))
         session.add(Tag(tag_id=2, tag="mage", source_tag="mage"))
-        session.add(
-            TagStatus(tag_id=1, format_id=1000, type_id=999, alias=False, preferred_tag_id=1)
-        )
-        session.add(
-            TagStatus(tag_id=2, format_id=1000, type_id=999, alias=False, preferred_tag_id=2)
-        )
+        session.add(TagStatus(tag_id=1, format_id=1000, type_id=999, alias=False, preferred_tag_id=1))
+        session.add(TagStatus(tag_id=2, format_id=1000, type_id=999, alias=False, preferred_tag_id=2))
         session.commit()
 
     # Update both tags with same type_name
@@ -250,11 +240,9 @@ def test_update_tags_type_batch_handles_empty_list(session_factory: Callable[[],
     repo.update_tags_type_batch([], format_id=1000)
 
 
-def test_update_tags_type_batch_auto_increments_type_ids(
-    session_factory: Callable[[], Session]
-) -> None:
+def test_update_tags_type_batch_auto_increments_type_ids(session_factory: Callable[[], Session]) -> None:
     """Test that update_tags_type_batch auto-increments type_ids for multiple type_names."""
-    from genai_tag_db_tools.db.schema import TagFormat, Tag, TagStatus
+    from genai_tag_db_tools.db.schema import Tag, TagFormat, TagStatus
     from genai_tag_db_tools.models import TagTypeUpdate
 
     repo = TagRepository(session_factory)
@@ -265,15 +253,9 @@ def test_update_tags_type_batch_auto_increments_type_ids(
         session.add(Tag(tag_id=1, tag="witch", source_tag="witch"))
         session.add(Tag(tag_id=2, tag="mage", source_tag="mage"))
         session.add(Tag(tag_id=3, tag="warrior", source_tag="warrior"))
-        session.add(
-            TagStatus(tag_id=1, format_id=1000, type_id=0, alias=False, preferred_tag_id=1)
-        )
-        session.add(
-            TagStatus(tag_id=2, format_id=1000, type_id=0, alias=False, preferred_tag_id=2)
-        )
-        session.add(
-            TagStatus(tag_id=3, format_id=1000, type_id=0, alias=False, preferred_tag_id=3)
-        )
+        session.add(TagStatus(tag_id=1, format_id=1000, type_id=0, alias=False, preferred_tag_id=1))
+        session.add(TagStatus(tag_id=2, format_id=1000, type_id=0, alias=False, preferred_tag_id=2))
+        session.add(TagStatus(tag_id=3, format_id=1000, type_id=0, alias=False, preferred_tag_id=3))
         session.commit()
 
     # Update tags with 3 different type_names
@@ -296,7 +278,7 @@ def test_update_tags_type_batch_auto_increments_type_ids(
 
 
 def test_get_unknown_type_tag_ids_returns_empty_when_no_unknown_type(
-    session_factory: Callable[[], Session]
+    session_factory: Callable[[], Session],
 ) -> None:
     """Test that get_unknown_type_tag_ids returns empty list when no unknown type exists."""
     from genai_tag_db_tools.db.schema import TagFormat
@@ -313,7 +295,7 @@ def test_get_unknown_type_tag_ids_returns_empty_when_no_unknown_type(
 
 
 def test_get_unknown_type_tag_ids_returns_tags_with_unknown_type(
-    session_factory: Callable[[], Session]
+    session_factory: Callable[[], Session],
 ) -> None:
     """Test that get_unknown_type_tag_ids returns tags with type_name='unknown'."""
     from genai_tag_db_tools.db.schema import (
@@ -351,9 +333,7 @@ def test_get_unknown_type_tag_ids_returns_tags_with_unknown_type(
     assert sorted(result) == [10, 11]
 
 
-def test_get_unknown_type_tag_ids_handles_multiple_formats(
-    session_factory: Callable[[], Session]
-) -> None:
+def test_get_unknown_type_tag_ids_handles_multiple_formats(session_factory: Callable[[], Session]) -> None:
     """Test that get_unknown_type_tag_ids filters by format_id correctly."""
     from genai_tag_db_tools.db.schema import (
         Tag,

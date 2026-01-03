@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from genai_tag_db_tools.core_api import (
     ensure_databases,
     get_statistics,
+    initialize_databases,
     register_tag,
     search_tags,
 )
@@ -87,36 +88,11 @@ def _set_db_paths(base_db_paths: Iterable[str] | None, user_db_dir: str | None) 
     if base_db_paths:
         runtime.set_base_database_paths([Path(p) for p in base_db_paths])
     else:
-        from genai_tag_db_tools.io.hf_downloader import default_cache_dir
-
-        cache = DbCacheConfig(cache_dir=str(default_cache_dir()))
-        requests = [
-            EnsureDbRequest(
-                source=DbSourceRef(
-                    repo_id="NEXTAltair/genai-image-tag-db-CC4",
-                    filename="genai-image-tag-db-cc4.sqlite",
-                ),
-                cache=cache,
-            ),
-            EnsureDbRequest(
-                source=DbSourceRef(
-                    repo_id="NEXTAltair/genai-image-tag-db-mit",
-                    filename="genai-image-tag-db-mit.sqlite",
-                ),
-                cache=cache,
-            ),
-            EnsureDbRequest(
-                source=DbSourceRef(
-                    repo_id="NEXTAltair/genai-image-tag-db",
-                    filename="genai-image-tag-db-cc0.sqlite",
-                ),
-                cache=cache,
-            ),
-        ]
-        results = ensure_databases(requests)
-        base_paths = [Path(result.db_path) for result in results]
-        runtime.set_base_database_paths(base_paths)
-        runtime.init_engine(base_paths[0])
+        initialize_databases(
+            user_db_dir=user_db_dir,
+            init_user_db=bool(user_db_dir),
+        )
+        return
     if user_db_dir:
         runtime.init_user_db(Path(user_db_dir))
 

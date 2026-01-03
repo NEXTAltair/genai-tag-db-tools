@@ -12,9 +12,8 @@ from typing import Protocol
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
 
-from genai_tag_db_tools.core_api import ensure_databases
-from genai_tag_db_tools.db import runtime
-from genai_tag_db_tools.models import DbCacheConfig, DbSourceRef, EnsureDbRequest
+from genai_tag_db_tools.core_api import initialize_databases
+from genai_tag_db_tools.models import DbSourceRef
 
 logger = logging.getLogger(__name__)
 
@@ -61,18 +60,20 @@ class DbInitWorker(QRunnable):
 
     def __init__(
         self,
-        requests: list[EnsureDbRequest],
+        sources: list[DbSourceRef] | None,
         user_db_dir: Path,
+        token: str | None,
     ):
         """初期化。
 
         Args:
-            requests: データベース準備リクエストのリスト
+            sources: DB sources list
             user_db_dir: ユーザーDB配置ディレクトリ（明示的に指定）
         """
         super().__init__()
-        self.requests = requests
+        self.sources = sources
         self.user_db_dir = user_db_dir
+        self.token = token
         self.signals = self.Signals()
 
     def run(self) -> None:
@@ -81,19 +82,20 @@ class DbInitWorker(QRunnable):
             self.signals.progress.emit("Checking for database updates...", 10)
 
             # HFからデータベースをダウンロード/更新確認
-            results = ensure_databases(self.requests)
+            results = initialize_databases(
+                user_db_dir=self.user_db_dir,
+                sources=self.sources,
+                token=self.token,
+                init_user_db=True,
+            )
 
             self.signals.progress.emit("Database files ready, initializing...", 50)
 
             # ベースDBパスを設定
-            base_paths = [Path(result.db_path) for result in results]
-            runtime.set_base_database_paths(base_paths)
 
             # ベースエンジン初期化
-            runtime.init_engine(base_paths[0])
 
             self.signals.progress.emit("Initializing user database...", 70)
-            runtime.init_user_db(self.user_db_dir)  # Use explicit parameter
 
             self.signals.progress.emit("Database initialization complete", 100)
 
@@ -157,46 +159,14 @@ class DbInitializationService(QObject):
         sources: list[DbSourceRef] | None = None,
         token: str | None = None,
     ) -> None:
-        """データベースの初期化を非同期で開始する。
-
-        Args:
-            sources: データベースソースのリスト（Noneの場合はデフォルト）
-            token: Hugging Faceアクセストークン
-        """
-        if sources is None:
-            sources = self._default_sources()
-
-        cache_config = DbCacheConfig(
-            cache_dir=str(self.user_db_dir),  # Repurposed as user_db_dir
-            token=token,
-        )
-
-        requests = [EnsureDbRequest(source=source, cache=cache_config) for source in sources]
-
-        worker = DbInitWorker(requests, self.user_db_dir)  # Pass explicit path
+        """Initialize databases asynchronously (GUI)."""
+        worker = DbInitWorker(sources, self.user_db_dir, token)  # Pass explicit path
         worker.signals.progress.connect(self._on_worker_progress)
         worker.signals.complete.connect(self._on_worker_complete)
         worker.signals.error.connect(self._on_worker_error)
 
         self.thread_pool.start(worker)
         logger.info("Database initialization started asynchronously")
-
-    def _default_sources(self) -> list[DbSourceRef]:
-        """デフォルトのデータベースソース一覧を取得。"""
-        return [
-            DbSourceRef(
-                repo_id="NEXTAltair/genai-image-tag-db-CC4",
-                filename="genai-image-tag-db-cc4.sqlite",
-            ),
-            DbSourceRef(
-                repo_id="NEXTAltair/genai-image-tag-db-mit",
-                filename="genai-image-tag-db-mit.sqlite",
-            ),
-            DbSourceRef(
-                repo_id="NEXTAltair/genai-image-tag-db",
-                filename="genai-image-tag-db-cc0.sqlite",
-            ),
-        ]
 
     @Slot(str, int)
     def _on_worker_progress(self, message: str, progress: int) -> None:

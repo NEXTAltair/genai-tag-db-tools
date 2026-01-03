@@ -4,9 +4,11 @@ import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
+from genai_tag_db_tools.db import runtime
 from genai_tag_db_tools.db.repository import MergedTagReader
 from genai_tag_db_tools.io import hf_downloader
 from genai_tag_db_tools.models import (
+    DbCacheConfig,
     DbSourceRef,
     EnsureDbRequest,
     EnsureDbResult,
@@ -42,6 +44,23 @@ def build_downloaded_at_utc() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _default_sources() -> list[DbSourceRef]:
+    return [
+        DbSourceRef(
+            repo_id="NEXTAltair/genai-image-tag-db",
+            filename="genai-image-tag-db-cc0.sqlite",
+        ),
+        DbSourceRef(
+            repo_id="NEXTAltair/genai-image-tag-db-mit",
+            filename="genai-image-tag-db-mit.sqlite",
+        ),
+        DbSourceRef(
+            repo_id="NEXTAltair/genai-image-tag-db-CC4",
+            filename="genai-image-tag-db-cc4.sqlite",
+        ),
+    ]
+
+
 def ensure_databases(requests: list[EnsureDbRequest]) -> list[EnsureDbResult]:
     if not requests:
         raise ValueError("requests は空にできません")
@@ -59,6 +78,46 @@ def ensure_databases(requests: list[EnsureDbRequest]) -> list[EnsureDbResult]:
                 cached=is_cached,
             )
         )
+
+    return results
+
+
+def initialize_databases(
+    user_db_dir: Path | str | None = None,
+    sources: list[DbSourceRef] | None = None,
+    token: str | None = None,
+    *,
+    init_user_db: bool | None = None,
+    format_name: str | None = None,
+) -> list[EnsureDbResult]:
+    """Download base DBs (if needed) and initialize runtime.
+
+    Args:
+        user_db_dir: User DB directory (user_tags.sqlite). If None, defaults to OS cache dir
+            when init_user_db is True.
+        sources: Optional list of DbSourceRef. If None, default sources are used.
+        token: Hugging Face access token (optional).
+        init_user_db: Whether to initialize the user DB. Defaults to True when user_db_dir
+            is provided, otherwise False.
+        format_name: Format name for user DB (e.g., "Lorairo", "MyApp").
+            If None, defaults to "tag-db".
+    """
+    resolved_user_db_dir = Path(user_db_dir) if user_db_dir is not None else None
+    if init_user_db is None:
+        init_user_db = resolved_user_db_dir is not None
+
+    cache_dir = resolved_user_db_dir or hf_downloader.default_cache_dir()
+    cache = DbCacheConfig(cache_dir=str(cache_dir), token=token)
+    requested_sources = sources or _default_sources()
+    requests = [EnsureDbRequest(source=source, cache=cache) for source in requested_sources]
+
+    results = ensure_databases(requests)
+    base_paths = [Path(result.db_path) for result in results]
+    runtime.set_base_database_paths(base_paths)
+    runtime.init_engine(base_paths[0])
+
+    if init_user_db:
+        runtime.init_user_db(cache_dir, format_name=format_name)
 
     return results
 

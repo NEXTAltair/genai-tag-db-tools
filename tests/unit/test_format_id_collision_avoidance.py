@@ -9,8 +9,8 @@ from sqlalchemy.pool import StaticPool
 
 from genai_tag_db_tools.db.repository import MergedTagReader, TagReader, TagRepository
 from genai_tag_db_tools.db.schema import Base, TagFormat
-from genai_tag_db_tools.services.tag_register import TagRegisterService
 from genai_tag_db_tools.models import TagRegisterRequest
+from genai_tag_db_tools.services.tag_register import TagRegisterService
 
 pytestmark = pytest.mark.db_tools
 
@@ -120,7 +120,9 @@ def test_format_id_multiple_base_dbs():
     reader2 = TagReader(factory2)
 
     # Create user DB
-    user_engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    user_engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
     Base.metadata.create_all(user_engine)
     user_factory = sessionmaker(bind=user_engine, autoflush=False, autocommit=False)
     user_reader = TagReader(user_factory)  # Reader for user DB

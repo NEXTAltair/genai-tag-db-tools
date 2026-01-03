@@ -149,7 +149,7 @@ class TestCmdRegister:
             for path in db_paths
         ]
 
-        monkeypatch.setattr("genai_tag_db_tools.cli.ensure_databases", lambda _requests: results)
+        monkeypatch.setattr("genai_tag_db_tools.cli.initialize_databases", lambda **_kwargs: results)
 
     @patch("genai_tag_db_tools.cli._build_register_service")
     @patch("genai_tag_db_tools.cli.register_tag")

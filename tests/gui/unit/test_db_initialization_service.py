@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from genai_tag_db_tools.gui.services.db_initialization import DbInitializationService, DbInitWorker
-from genai_tag_db_tools.models import DbCacheConfig, DbSourceRef, EnsureDbRequest, EnsureDbResult
+from genai_tag_db_tools.models import DbSourceRef, EnsureDbResult
 
 
 @pytest.fixture
@@ -25,38 +25,35 @@ def sample_db_source():
     return DbSourceRef(repo_id="test/repo", filename="test.sqlite")
 
 
-@pytest.fixture
-def sample_ensure_request(temp_cache_dir, sample_db_source):
-    """Create sample ensure database request."""
-    cache_config = DbCacheConfig(cache_dir=str(temp_cache_dir), token=None)
-    return EnsureDbRequest(source=sample_db_source, cache=cache_config)
-
-
 class TestDbInitWorker:
     """Tests for DbInitWorker."""
 
-    def test_worker_initialization(self, sample_ensure_request, temp_cache_dir):
-        """Worker should initialize with requests and user db dir."""
-        worker = DbInitWorker(requests=[sample_ensure_request], user_db_dir=temp_cache_dir)
+    def test_worker_initialization(self, sample_db_source, temp_cache_dir):
+        """Worker should initialize with sources and user db dir."""
+        worker = DbInitWorker(sources=[sample_db_source], user_db_dir=temp_cache_dir, token=None)
 
-        assert worker.requests == [sample_ensure_request]
+        assert worker.sources == [sample_db_source]
         assert worker.user_db_dir == temp_cache_dir
+        assert worker.token is None
         assert worker.signals is not None
 
-    @patch("genai_tag_db_tools.gui.services.db_initialization.ensure_databases")
-    @patch("genai_tag_db_tools.gui.services.db_initialization.runtime")
+    @patch("genai_tag_db_tools.gui.services.db_initialization.initialize_databases")
     def test_worker_successful_initialization(
-        self, mock_runtime, mock_ensure_databases, qtbot, sample_ensure_request, temp_cache_dir
+        self, mock_initialize, qtbot, sample_db_source, temp_cache_dir
     ):
         """Worker should emit complete signal on successful initialization."""
-        # Mock ensure_databases to return success
+        # Mock initialize_databases to return success
         db_path = temp_cache_dir / "test.sqlite"
         db_path.touch()
-        mock_ensure_databases.return_value = [
-            EnsureDbResult(db_path=str(db_path), downloaded=True, sha256="test_hash")
+        mock_initialize.return_value = [
+            EnsureDbResult(db_path=str(db_path), sha256="test_hash", revision=None, cached=False)
         ]
 
-        worker = DbInitWorker(requests=[sample_ensure_request], user_db_dir=temp_cache_dir)
+        worker = DbInitWorker(
+            sources=[sample_db_source],
+            user_db_dir=temp_cache_dir,
+            token=None,
+        )
 
         # Track signal emissions
         progress_signals = []
@@ -78,19 +75,23 @@ class TestDbInitWorker:
         assert "Database" in complete_signals[0][1]  # Message contains "Database"
         assert len(error_signals) == 0
 
-        # Verify runtime methods called
-        mock_runtime.set_base_database_paths.assert_called_once()
-        mock_runtime.init_engine.assert_called_once()
-        mock_runtime.init_user_db.assert_called_once_with(temp_cache_dir)
+        mock_initialize.assert_called_once_with(
+            user_db_dir=temp_cache_dir,
+            sources=[sample_db_source],
+            token=None,
+            init_user_db=True,
+        )
 
-    @patch("genai_tag_db_tools.gui.services.db_initialization.ensure_databases")
-    def test_worker_file_not_found_error(
-        self, mock_ensure_databases, qtbot, sample_ensure_request, temp_cache_dir
-    ):
+    @patch("genai_tag_db_tools.gui.services.db_initialization.initialize_databases")
+    def test_worker_file_not_found_error(self, mock_initialize, qtbot, sample_db_source, temp_cache_dir):
         """Worker should emit error signal on FileNotFoundError."""
-        mock_ensure_databases.side_effect = FileNotFoundError("Database file missing")
+        mock_initialize.side_effect = FileNotFoundError("Database file missing")
 
-        worker = DbInitWorker(requests=[sample_ensure_request], user_db_dir=temp_cache_dir)
+        worker = DbInitWorker(
+            sources=[sample_db_source],
+            user_db_dir=temp_cache_dir,
+            token=None,
+        )
 
         complete_signals = []
         error_signals = []
@@ -107,21 +108,18 @@ class TestDbInitWorker:
         assert len(complete_signals) == 1
         assert complete_signals[0][0] is False  # success = False
 
-    @patch("genai_tag_db_tools.gui.services.db_initialization.ensure_databases")
-    @patch("genai_tag_db_tools.gui.services.db_initialization.runtime")
+    @patch("genai_tag_db_tools.gui.services.db_initialization.initialize_databases")
     def test_worker_connection_error_with_cache(
-        self, mock_runtime, mock_ensure_databases, qtbot, sample_ensure_request, temp_cache_dir
+        self, mock_initialize, qtbot, sample_db_source, temp_cache_dir
     ):
         """Worker should emit error on ConnectionError."""
-        mock_ensure_databases.side_effect = ConnectionError("Network unreachable")
+        mock_initialize.side_effect = ConnectionError("Network unreachable")
 
-        # Create cached database file
-        base_db_dir = temp_cache_dir / "base_dbs"
-        base_db_dir.mkdir()
-        cached_db = base_db_dir / "test.sqlite"
-        cached_db.touch()
-
-        worker = DbInitWorker(requests=[sample_ensure_request], user_db_dir=temp_cache_dir)
+        worker = DbInitWorker(
+            sources=[sample_db_source],
+            user_db_dir=temp_cache_dir,
+            token=None,
+        )
 
         complete_signals = []
         error_signals = []
@@ -138,16 +136,18 @@ class TestDbInitWorker:
         assert complete_signals[0][0] is False
         assert "Unexpected error during initialization" in complete_signals[0][1]
 
-    @patch("genai_tag_db_tools.gui.services.db_initialization.ensure_databases")
+    @patch("genai_tag_db_tools.gui.services.db_initialization.initialize_databases")
     def test_worker_connection_error_without_cache(
-        self, mock_ensure_databases, qtbot, sample_ensure_request, temp_cache_dir
+        self, mock_initialize, qtbot, sample_db_source, temp_cache_dir
     ):
         """Worker should fail if no cache available on ConnectionError."""
-        mock_ensure_databases.side_effect = ConnectionError("Network unreachable")
+        mock_initialize.side_effect = ConnectionError("Network unreachable")
 
-        # No cached database files
-
-        worker = DbInitWorker(requests=[sample_ensure_request], user_db_dir=temp_cache_dir)
+        worker = DbInitWorker(
+            sources=[sample_db_source],
+            user_db_dir=temp_cache_dir,
+            token=None,
+        )
 
         complete_signals = []
         error_signals = []
@@ -179,26 +179,14 @@ class TestDbInitializationService:
         service = DbInitializationService(user_db_dir=temp_cache_dir)
         assert service.user_db_dir == temp_cache_dir
 
-    def test_default_sources(self, qtbot):
-        """_default_sources should return list of database sources."""
-        service = DbInitializationService()
-        sources = service._default_sources()
-
-        assert isinstance(sources, list)
-        assert len(sources) >= 1
-        assert all(isinstance(s, DbSourceRef) for s in sources)
-
-    @patch("genai_tag_db_tools.gui.services.db_initialization.ensure_databases")
-    @patch("genai_tag_db_tools.gui.services.db_initialization.runtime")
-    def test_initialize_databases_async(
-        self, mock_runtime, mock_ensure_databases, qtbot, temp_cache_dir, sample_db_source
-    ):
+    @patch("genai_tag_db_tools.gui.services.db_initialization.initialize_databases")
+    def test_initialize_databases_async(self, mock_initialize, qtbot, temp_cache_dir, sample_db_source):
         """initialize_databases should start async initialization."""
         # Mock successful database ensure
         db_path = temp_cache_dir / "test.sqlite"
         db_path.touch()
-        mock_ensure_databases.return_value = [
-            EnsureDbResult(db_path=str(db_path), downloaded=False, sha256="test_hash")
+        mock_initialize.return_value = [
+            EnsureDbResult(db_path=str(db_path), sha256="test_hash", revision=None, cached=False)
         ]
 
         service = DbInitializationService(user_db_dir=temp_cache_dir)
@@ -211,7 +199,6 @@ class TestDbInitializationService:
             lambda success, msg: complete_signals.append((success, msg))
         )
 
-        # Start initialization
         service.initialize_databases(sources=[sample_db_source])
 
         # Wait for worker to complete

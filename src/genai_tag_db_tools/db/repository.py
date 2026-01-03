@@ -317,7 +317,9 @@ class TagReader:
         """
         with self.session_factory() as session:
             # Get type_name_id for "unknown"
-            unknown_type = session.query(TagTypeName).filter(TagTypeName.type_name == "unknown").one_or_none()
+            unknown_type = (
+                session.query(TagTypeName).filter(TagTypeName.type_name == "unknown").one_or_none()
+            )
             if not unknown_type:
                 return []
 
@@ -768,8 +770,9 @@ class TagRepository:
             >>> # Returns 0 if no type mappings exist for format 1000
             >>> # Returns max(type_id) + 1 if mappings exist
         """
-        from genai_tag_db_tools.db.schema import TagTypeFormatMapping
         from sqlalchemy import func
+
+        from genai_tag_db_tools.db.schema import TagTypeFormatMapping
 
         with self.session_factory() as session:
             max_type_id = (
