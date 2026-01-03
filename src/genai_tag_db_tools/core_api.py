@@ -371,7 +371,7 @@ def get_unknown_type_tags(repo: MergedTagReader, format_id: int) -> list[TagReco
                 alias=tag_status.alias,
                 deprecated=tag_status.deprecated,
                 usage_count=None,
-                translations=[],
+                translations={},
                 format_statuses={},
             )
         )
