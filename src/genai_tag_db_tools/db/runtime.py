@@ -134,10 +134,9 @@ def _initialize_default_user_mappings(
     session_factory: sessionmaker[Session], *, format_name: str | None
 ) -> None:
     """Ensure default format/type mappings exist for user DB."""
-    from genai_tag_db_tools.db.repository import TagReader, TagRepository
+    from genai_tag_db_tools.db.repository import TagRepository
 
     repo = TagRepository(session_factory=session_factory, reader=None)
-    reader = TagReader(session_factory=session_factory)
 
     format_id = 1000
     resolved_format_name = format_name or "tag-db"
