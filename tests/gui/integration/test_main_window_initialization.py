@@ -29,10 +29,23 @@ def db_init_env(monkeypatch, tmp_path):
         EnsureDbResult(db_path=str(path), sha256="mock", revision=None, cached=True) for path in db_paths
     ]
 
+    from genai_tag_db_tools.db import runtime
+
+    runtime.set_base_database_paths(db_paths)
+    runtime.init_user_db(tmp_path)
+
     monkeypatch.setattr(
         db_initialization,
         "initialize_databases",
         lambda **_kwargs: results,
+    )
+
+    def fake_initialize_databases(self, sources=None, token=None):
+        self.initialization_complete.emit(True, "Database ready")
+
+    monkeypatch.setattr(
+        "genai_tag_db_tools.gui.services.db_initialization.DbInitializationService.initialize_databases",
+        fake_initialize_databases,
     )
 
     def run_sync(self, runnable):
@@ -42,9 +55,12 @@ def db_init_env(monkeypatch, tmp_path):
 
     yield tmp_path
 
-    from genai_tag_db_tools.db import runtime
-
     runtime.close_all()
+    runtime._base_db_paths = None
+
+
+def _wait_for_init(qtbot, window):
+    qtbot.waitUntil(lambda: window.tag_search_service is not None, timeout=5000)
 
 
 @pytest.mark.db_tools
@@ -52,6 +68,7 @@ def test_main_window_initialization(qtbot, db_init_env):
     """MainWindow が正しく初期化される"""
     window = MainWindow(cache_dir=db_init_env)
     qtbot.addWidget(window)
+    _wait_for_init(qtbot, window)
 
     assert window.db_init_service is not None
     assert window.tag_search_service is not None
@@ -65,6 +82,7 @@ def test_main_window_db_init_progress_updates_ui(qtbot, db_init_env):
     """DB 初期化の進捗が UI に反映される"""
     window = MainWindow(cache_dir=db_init_env)
     qtbot.addWidget(window)
+    _wait_for_init(qtbot, window)
 
     window._on_db_init_progress("Loading database...", 50)
 
@@ -84,6 +102,7 @@ def test_main_window_db_init_complete_success(qtbot, db_init_env):
         mock_initialize.return_value = None
         window = MainWindow(cache_dir=db_init_env)
         qtbot.addWidget(window)
+        qtbot.waitUntil(lambda: window.progress_dialog is not None, timeout=5000)
 
         window._on_db_init_complete(True, "Database initialized successfully")
 
@@ -105,6 +124,7 @@ def test_main_window_db_init_complete_failure(qtbot, db_init_env, monkeypatch):
         mock_initialize.return_value = None
         window = MainWindow(cache_dir=db_init_env)
     qtbot.addWidget(window)
+    qtbot.waitUntil(lambda: window.progress_dialog is not None, timeout=5000)
 
     window._on_db_init_complete(False, "Database initialization failed")
 
@@ -126,6 +146,7 @@ def test_main_window_initialize_services_creates_all_services(qtbot, db_init_env
         mock_initialize.return_value = None
         window = MainWindow(cache_dir=db_init_env)
         qtbot.addWidget(window)
+        qtbot.waitUntil(lambda: window.progress_dialog is not None, timeout=5000)
 
         window._initialize_services()
 
@@ -150,6 +171,7 @@ def test_main_window_initialize_widgets_injects_services(qtbot, db_init_env):
         mock_initialize.return_value = None
         window = MainWindow(cache_dir=db_init_env)
         qtbot.addWidget(window)
+        qtbot.waitUntil(lambda: window.progress_dialog is not None, timeout=5000)
         window._initialize_services()
         window._initialize_widgets()
 
@@ -176,6 +198,7 @@ def test_main_window_close_event_cleans_up_resources(qtbot, db_init_env):
         mock_initialize.return_value = None
         window = MainWindow(cache_dir=db_init_env)
         qtbot.addWidget(window)
+        qtbot.waitUntil(lambda: window.progress_dialog is not None, timeout=5000)
         window._initialize_services()
 
         # close() メソッドをモック化
@@ -200,5 +223,6 @@ def test_main_window_with_custom_cache_dir(qtbot, db_init_env):
 
     window = MainWindow(cache_dir=cache_dir)
     qtbot.addWidget(window)
+    _wait_for_init(qtbot, window)
 
     assert window.db_init_service.user_db_dir == cache_dir

@@ -20,32 +20,25 @@ _UserSessionLocal = None
 
 
 def set_database_path(path: Path) -> None:
-    """グローバルのDBパスを設定する（単一DB用）。"""
+    """Set base DB paths for a single DB."""
     set_base_database_paths([path])
 
 
 def set_base_database_paths(paths: list[Path]) -> None:
-    """複数ベースDBパスを設定する（優先順に並べる）。"""
+    """Set base DB paths in priority order."""
     global _base_db_paths
     if not paths:
-        raise ValueError("paths は空にできません。")
+        raise ValueError("paths must not be empty")
     _base_db_paths = list(paths)
 
 
-def get_database_path() -> Path:
-    """設定済みのDBパスを返す。未設定ならエラー。"""
+def get_base_database_paths() -> list[Path]:
+    """Return base DB paths. Raises if not configured."""
     if _base_db_paths is None or not _base_db_paths:
         raise RuntimeError(
-            "DBパスが未設定です。ensure_db() または set_database_path() を先に呼んでください。"
+            "Base DB paths are not configured. Call ensure_db() or set_database_path() first."
         )
-    return _base_db_paths[0]
-
-
-def get_base_database_paths() -> list[Path]:
-    """ベースDBパス一覧を返す。未設定なら例外を投げる。"""
-    if _base_db_paths is not None:
-        return list(_base_db_paths)
-    return [get_database_path()]
+    return list(_base_db_paths)
 
 
 def enable_foreign_keys(dbapi_connection: Any, connection_record: Any) -> None:
@@ -75,7 +68,7 @@ def init_engine(path: Path | None = None) -> None:
     """DBパスからグローバルのエンジン/セッションを初期化する。"""
     global _engine, _SessionLocal
 
-    db_path = path or get_database_path()
+    db_path = path or get_base_database_paths()[0]
     if not db_path.exists():
         raise FileNotFoundError(f"DBファイルが見つかりません: {db_path}")
 
@@ -134,18 +127,19 @@ def _initialize_default_user_mappings(
     session_factory: sessionmaker[Session], *, format_name: str | None
 ) -> None:
     """Ensure default format/type mappings exist for user DB."""
-    from genai_tag_db_tools.db.repository import TagRepository
+    from genai_tag_db_tools.db.repository import TagReader, TagRepository
 
-    repo = TagRepository(session_factory=session_factory, reader=None)
+    reader = TagReader(session_factory=session_factory)
+    repo = TagRepository(session_factory=session_factory, reader=reader)
 
-    format_id = 1000
     resolved_format_name = format_name or "tag-db"
     type_name = "unknown"
 
     # Ensure format and type exist.
-    repo.create_format_if_not_exists(
+    format_id = repo.create_format_if_not_exists(
         format_name=resolved_format_name,
         description="Default user format",
+        reader=reader,
     )
     type_name_id = repo.create_type_name_if_not_exists(type_name=type_name)
 
