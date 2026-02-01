@@ -786,6 +786,57 @@ class TagRepository:
 
             return max_type_id + 1
 
+    def _resolve_type_id_for_format(
+        self,
+        session: "Session",
+        type_name: str,
+        type_name_id: int,
+        format_id: int,
+        cache: dict[str, int],
+    ) -> int:
+        """format_id に対応する type_id を解決する。既存マッピングがなければ新規作成する。
+
+        Args:
+            session: 現在のSQLAlchemyセッション。
+            type_name: タイプ名文字列。
+            type_name_id: タイプ名のDB ID。
+            format_id: フォーマットID。
+            cache: type_name → type_id のキャッシュ辞書（直接更新される）。
+
+        Returns:
+            解決された type_id。
+        """
+        if type_name in cache:
+            return cache[type_name]
+
+        from genai_tag_db_tools.db.schema import TagTypeFormatMapping
+
+        mapping = (
+            session.query(TagTypeFormatMapping)
+            .filter(
+                TagTypeFormatMapping.format_id == format_id,
+                TagTypeFormatMapping.type_name_id == type_name_id,
+            )
+            .first()
+        )
+
+        if mapping:
+            cache[type_name] = mapping.type_id
+        else:
+            next_type_id = self.get_next_type_id(format_id)
+            self.create_type_format_mapping_if_not_exists(
+                format_id=format_id,
+                type_id=next_type_id,
+                type_name_id=type_name_id,
+            )
+            cache[type_name] = next_type_id
+            self.logger.info(
+                f"Created new type mapping: format_id={format_id}, "
+                f"type_id={next_type_id}, type_name={type_name}"
+            )
+
+        return cache[type_name]
+
     def update_tags_type_batch(
         self,
         tag_updates: list,  # list[TagTypeUpdate] - avoid circular import
@@ -814,8 +865,6 @@ class TagRepository:
             ... ]
             >>> repo.update_tags_type_batch(updates, format_id=1000)
         """
-        from genai_tag_db_tools.db.schema import TagTypeFormatMapping
-
         if not tag_updates:
             return
 
@@ -825,48 +874,20 @@ class TagRepository:
                 type_name_to_type_id: dict[str, int] = {}
 
                 for update in tag_updates:
-                    tag_id = update.tag_id
-                    type_name = update.type_name
-
                     # Step 1: Get or create type_name_id
-                    type_name_id = self.create_type_name_if_not_exists(type_name)
+                    type_name_id = self.create_type_name_if_not_exists(update.type_name)
 
                     # Step 2: Get or create format-specific type_id
-                    if type_name not in type_name_to_type_id:
-                        # Query existing mapping
-                        mapping = (
-                            session.query(TagTypeFormatMapping)
-                            .filter(
-                                TagTypeFormatMapping.format_id == format_id,
-                                TagTypeFormatMapping.type_name_id == type_name_id,
-                            )
-                            .first()
-                        )
-
-                        if mapping:
-                            # Use existing type_id
-                            type_name_to_type_id[type_name] = mapping.type_id
-                        else:
-                            # Create new mapping with auto-incremented type_id
-                            next_type_id = self.get_next_type_id(format_id)
-                            self.create_type_format_mapping_if_not_exists(
-                                format_id=format_id,
-                                type_id=next_type_id,
-                                type_name_id=type_name_id,
-                            )
-                            type_name_to_type_id[type_name] = next_type_id
-                            self.logger.info(
-                                f"Created new type mapping: format_id={format_id}, "
-                                f"type_id={next_type_id}, type_name={type_name}"
-                            )
+                    type_id = self._resolve_type_id_for_format(
+                        session, update.type_name, type_name_id, format_id, type_name_to_type_id
+                    )
 
                     # Step 3: Update tag status with new type_id
-                    type_id = type_name_to_type_id[type_name]
                     self.update_tag_status(
-                        tag_id=tag_id,
+                        tag_id=update.tag_id,
                         format_id=format_id,
                         alias=False,
-                        preferred_tag_id=tag_id,
+                        preferred_tag_id=update.tag_id,
                         type_id=type_id,
                     )
 
