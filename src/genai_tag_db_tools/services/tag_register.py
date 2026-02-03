@@ -118,6 +118,85 @@ class TagRegisterService:
         self._repo = repository if repository else get_default_repository()
         self._reader = reader or get_default_reader()
 
+    def _resolve_format_id(self, format_name: str) -> int:
+        """フォーマット名からformat_idを解決する。存在しない場合は自動作成。
+
+        Args:
+            format_name: フォーマット名。
+
+        Returns:
+            解決されたformat_id。
+        """
+        try:
+            return self._reader.get_format_id(format_name)
+        except ValueError:
+            fmt_id = self._repo.create_format_if_not_exists(
+                format_name=format_name,
+                description=f"Auto-created format: {format_name}",
+                reader=self._reader,
+            )
+            self.logger.info(f"Auto-created format_name: {format_name} (ID: {fmt_id})")
+            return fmt_id
+
+    def _resolve_type_id(self, type_name: str, format_name: str, fmt_id: int) -> int:
+        """タイプ名からtype_idを解決する。存在しない場合は自動作成(type_id=0)。
+
+        type_idとtype_nameの不整合(例: "unknown"にtype_id!=0、名前付きタイプにtype_id=0)
+        を検知した場合はwarningログを出力する。
+
+        Args:
+            type_name: タイプ名。
+            format_name: フォーマット名(ログ用)。
+            fmt_id: フォーマットID。
+
+        Returns:
+            解決されたtype_id。
+        """
+        type_id_result = self._reader.get_type_id(type_name)
+
+        if type_id_result is None:
+            type_name_id = self._repo.create_type_name_if_not_exists(
+                type_name=type_name, description=f"Auto-created type: {type_name}"
+            )
+            type_id = 0
+            self._repo.create_type_format_mapping_if_not_exists(
+                format_id=fmt_id,
+                type_id=type_id,
+                type_name_id=type_name_id,
+                description=f"Auto-created mapping for {format_name}/{type_name}",
+            )
+            self.logger.info(
+                f"Auto-created type_name: {type_name} for format {format_name} (type_id: {type_id})"
+            )
+            return type_id
+
+        type_id = type_id_result
+
+        # type_id/type_name 不整合検知
+        if type_name == "unknown" and type_id != 0:
+            self.logger.warning(
+                f"type_id/type_name mismatch: type_name='unknown' but type_id={type_id} "
+                f"(expected 0) in format '{format_name}'"
+            )
+        elif type_name != "unknown" and type_id == 0:
+            self.logger.warning(
+                f"type_id/type_name mismatch: type_name='{type_name}' resolved to type_id=0 "
+                f"(reserved for 'unknown') in format '{format_name}'"
+            )
+
+        # type_nameとtype_idの整合性ガード: type_nameから解決したtype_idが
+        # format内で有効なマッピングを持つことを確保
+        type_name_id = self._repo.create_type_name_if_not_exists(
+            type_name=type_name, description=f"Auto-created type: {type_name}"
+        )
+        self._repo.create_type_format_mapping_if_not_exists(
+            format_id=fmt_id,
+            type_id=type_id,
+            type_name_id=type_name_id,
+            description=f"Auto-created mapping for {format_name}/{type_name}",
+        )
+        return type_id
+
     def register_tag(self, request: "TagRegisterRequest") -> "TagRegisterResult":
         """Register a tag and optional metadata via the repository.
 
@@ -134,43 +213,10 @@ class TagRegisterService:
         tag = request.tag
         source_tag = request.source_tag or request.tag
 
-        # Auto-create format if it doesn't exist
-        try:
-            fmt_id = self._reader.get_format_id(request.format_name)
-        except ValueError:
-            # Format doesn't exist, create it
-            # Pass reader to avoid format_id collision with base DBs
-            fmt_id = self._repo.create_format_if_not_exists(
-                format_name=request.format_name,
-                description=f"Auto-created format: {request.format_name}",
-                reader=self._reader,
-            )
-            self.logger.info(f"Auto-created format_name: {request.format_name} (ID: {fmt_id})")
+        fmt_id = self._resolve_format_id(request.format_name)
 
-        # Auto-create type_name if it doesn't exist
         type_name = request.type_name or "unknown"
-        type_id_result = self._reader.get_type_id(type_name)
-        if type_id_result is None:
-            # Type doesn't exist, create it
-            # First, ensure the type_name exists in TAG_TYPE_NAME table
-            type_name_id = self._repo.create_type_name_if_not_exists(
-                type_name=type_name, description=f"Auto-created type: {type_name}"
-            )
-
-            # Create the mapping (format_id + type_id + type_name_id)
-            # Use type_id=0 for the default unknown type in this format
-            type_id = 0
-            self._repo.create_type_format_mapping_if_not_exists(
-                format_id=fmt_id,
-                type_id=type_id,
-                type_name_id=type_name_id,
-                description=f"Auto-created mapping for {request.format_name}/{type_name}",
-            )
-            self.logger.info(
-                f"Auto-created type_name: {type_name} for format {request.format_name} (type_id: {type_id})"
-            )
-        else:
-            type_id = type_id_result
+        type_id = self._resolve_type_id(type_name, request.format_name, fmt_id)
 
         existing_id = self._reader.get_tag_id_by_name(tag, partial=False)
         tag_id = self._repo.create_tag(source_tag, tag)

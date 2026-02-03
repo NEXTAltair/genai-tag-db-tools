@@ -42,6 +42,14 @@ class DummyRepo:
     def update_usage_count(self, tag_id: int, format_id: int, count: int) -> None:
         self.usage_updates.append((tag_id, format_id, count))
 
+    def create_type_name_if_not_exists(self, type_name: str, description: str | None = None) -> int:
+        return {"unknown": 0, "character": 2, "general": 1}.get(type_name, 0)
+
+    def create_type_format_mapping_if_not_exists(
+        self, format_id: int, type_id: int, type_name_id: int, description: str | None = None
+    ) -> None:
+        pass
+
 
 class DummyReader:
     """Minimal reader mock for testing"""
