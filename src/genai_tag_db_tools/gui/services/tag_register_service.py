@@ -87,7 +87,8 @@ class GuiTagRegisterService(GuiServiceBase):
                 return tag_id
 
             fmt_id = self._reader.get_format_id(format_name)
-            type_id = self._reader.get_type_id(type_name) if type_name else None
+            # format固有のtype_idを正しく解決する
+            type_id = self._reader.get_type_id_for_format(type_name, fmt_id) if type_name else None
 
             tag_id = self._repo.create_tag(source_tag, normalized_tag)
 

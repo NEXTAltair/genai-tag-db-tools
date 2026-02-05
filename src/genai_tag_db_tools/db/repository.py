@@ -111,10 +111,51 @@ class TagReader:
                 return None
             return mapping_obj.type_name.type_name if mapping_obj.type_name else None
 
-    def get_type_id(self, type_name: str) -> int | None:
+    def get_type_name_id(self, type_name: str) -> int | None:
+        """type_nameからTAG_TYPE_NAMEテーブルのtype_name_idを取得する。
+
+        注意: 返り値はformat固有のtype_idではなく、グローバルなtype_name_idである。
+        format固有のtype_idが必要な場合は get_type_id_for_format() を使用すること。
+
+        Args:
+            type_name: タイプ名文字列。
+
+        Returns:
+            type_name_id。見つからない場合はNone。
+        """
         with self.session_factory() as session:
             type_obj = session.query(TagTypeName).filter(TagTypeName.type_name == type_name).one_or_none()
             return type_obj.type_name_id if type_obj else None
+
+    def get_type_id_for_format(self, type_name: str, format_id: int) -> int | None:
+        """type_nameとformat_idからformat固有のtype_idを取得する。
+
+        TAG_TYPE_NAME → TAG_TYPE_FORMAT_MAPPING を結合して解決する。
+
+        Args:
+            type_name: タイプ名文字列。
+            format_id: フォーマットID。
+
+        Returns:
+            format固有のtype_id。マッピングが存在しない場合はNone。
+        """
+        with self.session_factory() as session:
+            type_obj = (
+                session.query(TagTypeName)
+                .filter(TagTypeName.type_name == type_name)
+                .one_or_none()
+            )
+            if not type_obj:
+                return None
+            mapping = (
+                session.query(TagTypeFormatMapping)
+                .filter(
+                    TagTypeFormatMapping.format_id == format_id,
+                    TagTypeFormatMapping.type_name_id == type_obj.type_name_id,
+                )
+                .first()
+            )
+            return mapping.type_id if mapping else None
 
     def get_tag_status(self, tag_id: int, format_id: int) -> TagStatus | None:
         with self.session_factory() as session:
@@ -816,38 +857,80 @@ class TagRepository:
 
     def create_type_format_mapping_if_not_exists(
         self, format_id: int, type_id: int, type_name_id: int, description: str | None = None
-    ) -> None:
+    ) -> int:
         """Create a TagTypeFormatMapping if it doesn't exist.
+
+        重複防止ガード:
+        - (format_id, type_name_id) が既存なら作成せず既存のtype_idを返す
+        - (format_id, type_id) が他type_name_idで使用済みなら次のtype_idへ繰り上げる
 
         Args:
             format_id: Format ID
             type_id: Type ID (within the format)
             type_name_id: Type name ID (references TagTypeName)
             description: Optional description
+
+        Returns:
+            実際に使用されるtype_id（既存マッピングのtype_idまたは新規作成したtype_id）。
         """
         from genai_tag_db_tools.db.schema import TagTypeFormatMapping
 
         with self.session_factory() as session:
-            # Check if mapping already exists
-            mapping = (
+            # ガード1: (format_id, type_name_id) 重複チェック
+            mapping_by_name = (
                 session.query(TagTypeFormatMapping)
                 .filter(
-                    TagTypeFormatMapping.format_id == format_id, TagTypeFormatMapping.type_id == type_id
+                    TagTypeFormatMapping.format_id == format_id,
+                    TagTypeFormatMapping.type_name_id == type_name_id,
                 )
-                .one_or_none()
+                .first()
             )
-            if mapping:
-                return
+            if mapping_by_name:
+                self.logger.debug(
+                    f"Mapping already exists for format_id={format_id}, type_name_id={type_name_id} "
+                    f"with type_id={mapping_by_name.type_id}, skipping creation of type_id={type_id}"
+                )
+                return mapping_by_name.type_id
 
-            # Create new mapping
-            new_mapping = TagTypeFormatMapping(
-                format_id=format_id, type_id=type_id, type_name_id=type_name_id, description=description
-            )
-            session.add(new_mapping)
-            session.commit()
-            self.logger.info(
-                f"Created new TagTypeFormatMapping: format_id={format_id}, type_id={type_id}, type_name_id={type_name_id}"
-            )
+            # type_id衝突時は次の候補へ繰り上げる
+            candidate_type_id = type_id
+            while True:
+                mapping_by_pk = (
+                    session.query(TagTypeFormatMapping)
+                    .filter(
+                        TagTypeFormatMapping.format_id == format_id,
+                        TagTypeFormatMapping.type_id == candidate_type_id,
+                    )
+                    .one_or_none()
+                )
+
+                if mapping_by_pk is None:
+                    new_mapping = TagTypeFormatMapping(
+                        format_id=format_id,
+                        type_id=candidate_type_id,
+                        type_name_id=type_name_id,
+                        description=description,
+                    )
+                    session.add(new_mapping)
+                    session.commit()
+                    self.logger.debug(
+                        f"Created new TagTypeFormatMapping: format_id={format_id}, "
+                        f"type_id={candidate_type_id}, type_name_id={type_name_id}"
+                    )
+                    return candidate_type_id
+
+                if mapping_by_pk.type_name_id == type_name_id:
+                    return mapping_by_pk.type_id
+
+                self.logger.warning(
+                    "type_id collision detected for format_id=%s, requested_type_id=%s, "
+                    "existing_type_name_id=%s, requested_type_name_id=%s; retrying with next type_id",
+                    format_id,
+                    candidate_type_id,
+                    mapping_by_pk.type_name_id,
+                    type_name_id,
+                )
+                candidate_type_id += 1
 
     def get_next_type_id(self, format_id: int) -> int:
         """Get the next available type_id for a given format.
@@ -883,6 +966,108 @@ class TagRepository:
                 return 0
 
             return max_type_id + 1
+
+    def cleanup_duplicate_type_mappings(self, format_id: int) -> int:
+        """TAG_TYPE_FORMAT_MAPPINGの(format_id, type_name_id)重複を修復する。
+
+        type_name_id/type_idの混同バグにより生成された重複行を安全に削除する。
+        各(format_id, type_name_id)グループで代表type_idを選び、
+        TAG_STATUSの参照を代表type_idに更新してから不要行を削除する。
+
+        代表type_id選択ルール:
+        - unknownは type_id=0 を優先
+        - それ以外は TAG_STATUS で参照中の type_id を優先、なければ最小非0
+
+        Args:
+            format_id: クリーンアップ対象のフォーマットID。
+
+        Returns:
+            削除された重複行数。
+        """
+        from sqlalchemy import func
+
+        from genai_tag_db_tools.db.schema import TagStatus, TagTypeFormatMapping, TagTypeName
+
+        deleted_count = 0
+
+        with self.session_factory() as session:
+            # (format_id, type_name_id) ごとの重複を検出
+            duplicates = (
+                session.query(
+                    TagTypeFormatMapping.type_name_id,
+                    func.count(TagTypeFormatMapping.type_id).label("cnt"),
+                )
+                .filter(TagTypeFormatMapping.format_id == format_id)
+                .group_by(TagTypeFormatMapping.type_name_id)
+                .having(func.count(TagTypeFormatMapping.type_id) > 1)
+                .all()
+            )
+
+            for dup_type_name_id, _ in duplicates:
+                # 重複グループの全マッピングを取得
+                mappings = (
+                    session.query(TagTypeFormatMapping)
+                    .filter(
+                        TagTypeFormatMapping.format_id == format_id,
+                        TagTypeFormatMapping.type_name_id == dup_type_name_id,
+                    )
+                    .all()
+                )
+                type_ids = [m.type_id for m in mappings]
+
+                # type_nameを取得して代表type_idを選択
+                type_name_obj = (
+                    session.query(TagTypeName)
+                    .filter(TagTypeName.type_name_id == dup_type_name_id)
+                    .one_or_none()
+                )
+                type_name_str = type_name_obj.type_name if type_name_obj else ""
+
+                if type_name_str == "unknown" and 0 in type_ids:
+                    representative_type_id = 0
+                else:
+                    # TAG_STATUSで参照中のtype_idを優先
+                    referenced_type_ids = (
+                        session.query(TagStatus.type_id)
+                        .filter(
+                            TagStatus.format_id == format_id,
+                            TagStatus.type_id.in_(type_ids),
+                        )
+                        .distinct()
+                        .all()
+                    )
+                    referenced = {r[0] for r in referenced_type_ids}
+
+                    if referenced:
+                        representative_type_id = min(referenced)
+                    else:
+                        # 参照なし: 最小非0、なければ最小値
+                        non_zero = [t for t in type_ids if t != 0]
+                        representative_type_id = min(non_zero) if non_zero else min(type_ids)
+
+                # TAG_STATUSを代表type_idに更新
+                remove_type_ids = [t for t in type_ids if t != representative_type_id]
+                for old_type_id in remove_type_ids:
+                    session.query(TagStatus).filter(
+                        TagStatus.format_id == format_id,
+                        TagStatus.type_id == old_type_id,
+                    ).update({TagStatus.type_id: representative_type_id})
+
+                # 不要なマッピング行を削除
+                for old_type_id in remove_type_ids:
+                    session.query(TagTypeFormatMapping).filter(
+                        TagTypeFormatMapping.format_id == format_id,
+                        TagTypeFormatMapping.type_id == old_type_id,
+                    ).delete()
+                    deleted_count += 1
+
+            if deleted_count > 0:
+                session.commit()
+                self.logger.info(
+                    f"Cleaned up {deleted_count} duplicate type mappings for format_id={format_id}"
+                )
+
+        return deleted_count
 
     def _resolve_type_id_for_format(
         self,
@@ -922,15 +1107,15 @@ class TagRepository:
             cache[type_name] = mapping.type_id
         else:
             next_type_id = self.get_next_type_id(format_id)
-            self.create_type_format_mapping_if_not_exists(
+            resolved_type_id = self.create_type_format_mapping_if_not_exists(
                 format_id=format_id,
                 type_id=next_type_id,
                 type_name_id=type_name_id,
             )
-            cache[type_name] = next_type_id
+            cache[type_name] = resolved_type_id
             self.logger.info(
                 f"Created new type mapping: format_id={format_id}, "
-                f"type_id={next_type_id}, type_name={type_name}"
+                f"type_id={resolved_type_id}, type_name={type_name}"
             )
 
         return cache[type_name]
@@ -1169,8 +1354,13 @@ class MergedTagReader:
     def get_type_name_by_format_type_id(self, format_id: int, type_id: int) -> str | None:
         return self._first_found("get_type_name_by_format_type_id", format_id, type_id)
 
-    def get_type_id(self, type_name: str) -> int | None:
-        return self._first_found("get_type_id", type_name)
+    def get_type_name_id(self, type_name: str) -> int | None:
+        """type_nameからtype_name_idを取得する（複数リポジトリを検索）。"""
+        return self._first_found("get_type_name_id", type_name)
+
+    def get_type_id_for_format(self, type_name: str, format_id: int) -> int | None:
+        """type_nameとformat_idからformat固有のtype_idを取得する（複数リポジトリを検索）。"""
+        return self._first_found("get_type_id_for_format", type_name, format_id)
 
     def get_metadata_value(self, key: str) -> str | None:
         return self._first_found("get_metadata_value", key)

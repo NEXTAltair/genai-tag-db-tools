@@ -17,7 +17,7 @@ class DummyRepo:
     def get_format_id(self, format_name: str) -> int | None:
         return {"danbooru": 1}.get(format_name)
 
-    def get_type_id(self, type_name: str) -> int | None:
+    def get_type_name_id(self, type_name: str) -> int | None:
         return {"character": 2, "general": 1}.get(type_name)
 
     def get_tag_id_by_name(self, tag: str, partial: bool = False) -> int | None:
@@ -61,10 +61,14 @@ class DummyRepo:
         self._auto_format_id = getattr(self, "_auto_format_id", 1000) + 1
         return self._auto_format_id
 
+    def get_next_type_id(self, format_id: int) -> int:
+        return 1
+
     def create_type_format_mapping_if_not_exists(
         self, format_id: int, type_id: int, type_name_id: int, description: str | None = None
-    ) -> None:
+    ) -> int:
         self.mapping_creations.append((format_id, type_id, type_name_id))
+        return type_id
 
 
 class DummyReader:
@@ -77,8 +81,12 @@ class DummyReader:
             raise ValueError(f"Format not found: {format_name}")
         return result
 
-    def get_type_id(self, type_name: str) -> int | None:
-        return self.repo.get_type_id(type_name)
+    def get_type_name_id(self, type_name: str) -> int | None:
+        return self.repo.get_type_name_id(type_name)
+
+    def get_type_id_for_format(self, type_name: str, format_id: int) -> int | None:
+        """format固有のtype_idを返す。DummyRepoのtype_name_idをそのまま使用。"""
+        return self.repo.get_type_name_id(type_name)
 
     def get_tag_id_by_name(self, tag: str, partial: bool = False) -> int | None:
         return self.repo.get_tag_id_by_name(tag, partial=partial)
@@ -216,29 +224,30 @@ class TestResolveTypeId:
         assert type_id == 2
 
     @pytest.mark.db_tools
-    def test_resolve_unknown_type_returns_zero(self):
-        """未知のタイプ名はtype_id=0で自動作成される。"""
+    def test_resolve_nonexistent_type_creates_new_mapping(self):
+        """未知のタイプ名は新規type_idで自動作成される（unknown以外は0を使わない）。"""
         repo = DummyRepo()
         reader = DummyReader(repo)
         service = TagRegisterService(repository=repo, reader=reader)
 
         type_id = service._resolve_type_id("nonexistent_type", "danbooru", 1)
 
-        assert type_id == 0
+        # DummyRepoのget_next_type_idが1を返すので、type_id=1で作成
+        assert type_id == 1
 
     @pytest.mark.db_tools
-    def test_resolve_type_creates_mapping(self):
-        """既存タイプでもformat-typeマッピングが作成される。"""
+    def test_resolve_type_existing_returns_directly(self):
+        """既存タイプはformat固有のtype_idをそのまま返す。"""
         repo = DummyRepo()
         reader = DummyReader(repo)
         service = TagRegisterService(repository=repo, reader=reader)
 
-        # generalは既存(type_id=1)だが、マッピング作成が呼ばれることを確認
+        # generalは既存(type_id=1)
         type_id = service._resolve_type_id("general", "danbooru", 1)
 
         assert type_id == 1
-        # (format_id=1, type_id=1, type_name_id=1) でマッピング作成が呼ばれた
-        assert repo.mapping_creations == [(1, 1, 1)]
+        # 既存のためマッピング作成は呼ばれない
+        assert repo.mapping_creations == []
 
     @pytest.mark.db_tools
     def test_resolve_type_unknown_creates_type_name(self):
@@ -247,49 +256,88 @@ class TestResolveTypeId:
 
         repo = Mock()
         reader = Mock()
-        reader.get_type_id.return_value = None
+        # type_name_idは取得できるがformat固有のtype_idは未存在
+        reader.get_type_id_for_format.return_value = None
         repo.create_type_name_if_not_exists.return_value = 50
-        repo.create_type_format_mapping_if_not_exists.return_value = None
+        repo.get_next_type_id.return_value = 1
+        repo.create_type_format_mapping_if_not_exists.return_value = 1
 
         service = TagRegisterService(repository=repo, reader=reader)
 
+        # unknown以外のタイプはget_next_type_idで採番
         type_id = service._resolve_type_id("brand_new_type", "danbooru", 1)
 
-        assert type_id == 0
+        assert type_id == 1
         repo.create_type_name_if_not_exists.assert_called_once_with(
             type_name="brand_new_type",
             description="Auto-created type: brand_new_type",
         )
         repo.create_type_format_mapping_if_not_exists.assert_called_once_with(
             format_id=1,
-            type_id=0,
+            type_id=1,
             type_name_id=50,
             description="Auto-created mapping for danbooru/brand_new_type",
         )
 
     @pytest.mark.db_tools
-    def test_resolve_type_existing_ensures_mapping(self):
-        """既存タイプでもマッピング確保が行われる（整合性ガード）。"""
+    def test_resolve_type_returns_repository_resolved_type_id(self):
+        """競合時はrepoが返した最終type_idを返す。"""
         from unittest.mock import Mock
 
         repo = Mock()
         reader = Mock()
-        reader.get_type_id.return_value = 5  # 既存type_id
+        reader.get_type_id_for_format.return_value = None
+        repo.create_type_name_if_not_exists.return_value = 50
+        repo.get_next_type_id.return_value = 1
+        # 競合等でrepo側が異なるtype_idを返したケース
+        repo.create_type_format_mapping_if_not_exists.return_value = 5
+
+        service = TagRegisterService(repository=repo, reader=reader)
+
+        type_id = service._resolve_type_id("brand_new_type", "danbooru", 1)
+
+        assert type_id == 5
+
+    @pytest.mark.db_tools
+    def test_resolve_type_unknown_uses_zero(self):
+        """unknownタイプはtype_id=0で作成される。"""
+        from unittest.mock import Mock
+
+        repo = Mock()
+        reader = Mock()
+        reader.get_type_id_for_format.return_value = None
+        repo.create_type_name_if_not_exists.return_value = 50
+        repo.create_type_format_mapping_if_not_exists.return_value = 0
+
+        service = TagRegisterService(repository=repo, reader=reader)
+
+        type_id = service._resolve_type_id("unknown", "danbooru", 1)
+
+        assert type_id == 0
+        repo.create_type_format_mapping_if_not_exists.assert_called_once_with(
+            format_id=1,
+            type_id=0,
+            type_name_id=50,
+            description="Auto-created mapping for danbooru/unknown",
+        )
+
+    @pytest.mark.db_tools
+    def test_resolve_type_existing_returns_type_id(self):
+        """既存タイプはformat固有のtype_idをそのまま返す。"""
+        from unittest.mock import Mock
+
+        repo = Mock()
+        reader = Mock()
+        reader.get_type_id_for_format.return_value = 5  # 既存type_id
         repo.create_type_name_if_not_exists.return_value = 30
-        repo.create_type_format_mapping_if_not_exists.return_value = None
 
         service = TagRegisterService(repository=repo, reader=reader)
 
         type_id = service._resolve_type_id("existing_type", "danbooru", 1)
 
         assert type_id == 5
-        # 既存でもマッピング確保が呼ばれることが整合性ガード
-        repo.create_type_format_mapping_if_not_exists.assert_called_once_with(
-            format_id=1,
-            type_id=5,
-            type_name_id=30,
-            description="Auto-created mapping for danbooru/existing_type",
-        )
+        # マッピングが既存なので create は呼ばれない
+        repo.create_type_format_mapping_if_not_exists.assert_not_called()
 
 
 # ==============================================================================
@@ -308,10 +356,9 @@ class TestTypeInconsistencyDetection:
 
         repo = Mock()
         reader = Mock()
-        # "unknown"に対してtype_id=5が返る(不整合)
-        reader.get_type_id.return_value = 5
+        # "unknown"に対してformat固有type_id=5が返る(不整合)
+        reader.get_type_id_for_format.return_value = 5
         repo.create_type_name_if_not_exists.return_value = 0
-        repo.create_type_format_mapping_if_not_exists.return_value = None
 
         service = TagRegisterService(repository=repo, reader=reader)
 
@@ -330,10 +377,9 @@ class TestTypeInconsistencyDetection:
 
         repo = Mock()
         reader = Mock()
-        # "character"に対してtype_id=0が返る(不整合)
-        reader.get_type_id.return_value = 0
+        # "character"に対してformat固有type_id=0が返る(不整合)
+        reader.get_type_id_for_format.return_value = 0
         repo.create_type_name_if_not_exists.return_value = 2
-        repo.create_type_format_mapping_if_not_exists.return_value = None
 
         service = TagRegisterService(repository=repo, reader=reader)
 

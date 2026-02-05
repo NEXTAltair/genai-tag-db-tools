@@ -128,6 +128,7 @@ def _initialize_default_user_mappings(
 ) -> None:
     """Ensure default format/type mappings exist for user DB."""
     from genai_tag_db_tools.db.repository import TagReader, TagRepository
+    from genai_tag_db_tools.db.schema import TagFormat
 
     reader = TagReader(session_factory=session_factory)
     repo = TagRepository(session_factory=session_factory, reader=reader)
@@ -150,6 +151,12 @@ def _initialize_default_user_mappings(
         type_name_id=type_name_id,
         description=f"Default mapping for {resolved_format_name}/{type_name}",
     )
+
+    # 既存破損データの修復: 全フォーマットの重複マッピングをクリーンアップ
+    with session_factory() as session:
+        all_format_ids = [f.format_id for f in session.query(TagFormat.format_id).all()]
+    for fid in all_format_ids:
+        repo.cleanup_duplicate_type_mappings(fid)
 
 
 def get_user_session_factory() -> sessionmaker[Session]:

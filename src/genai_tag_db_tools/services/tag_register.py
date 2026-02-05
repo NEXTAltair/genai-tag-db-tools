@@ -139,63 +139,64 @@ class TagRegisterService:
             return fmt_id
 
     def _resolve_type_id(self, type_name: str, format_name: str, fmt_id: int) -> int:
-        """タイプ名からtype_idを解決する。存在しない場合は自動作成(type_id=0)。
+        """タイプ名からformat固有のtype_idを解決する。
 
-        type_idとtype_nameの不整合(例: "unknown"にtype_id!=0、名前付きタイプにtype_id=0)
-        を検知した場合はwarningログを出力する。
+        2段階で解決する:
+        1) type_name → type_name_id（TAG_TYPE_NAME）
+        2) (type_name, format_id) → type_id（TAG_TYPE_FORMAT_MAPPING）
+
+        マッピングが存在しない場合は自動作成する。
+        unknownはtype_id=0固定、それ以外はget_next_type_idで採番する。
 
         Args:
             type_name: タイプ名。
-            format_name: フォーマット名(ログ用)。
+            format_name: フォーマット名（ログ用）。
             fmt_id: フォーマットID。
 
         Returns:
-            解決されたtype_id。
+            解決されたformat固有のtype_id。
         """
-        type_id_result = self._reader.get_type_id(type_name)
-
-        if type_id_result is None:
-            type_name_id = self._repo.create_type_name_if_not_exists(
-                type_name=type_name, description=f"Auto-created type: {type_name}"
-            )
-            type_id = 0
-            self._repo.create_type_format_mapping_if_not_exists(
-                format_id=fmt_id,
-                type_id=type_id,
-                type_name_id=type_name_id,
-                description=f"Auto-created mapping for {format_name}/{type_name}",
-            )
-            self.logger.info(
-                f"Auto-created type_name: {type_name} for format {format_name} (type_id: {type_id})"
-            )
-            return type_id
-
-        type_id = type_id_result
-
-        # type_id/type_name 不整合検知
-        if type_name == "unknown" and type_id != 0:
-            self.logger.warning(
-                f"type_id/type_name mismatch: type_name='unknown' but type_id={type_id} "
-                f"(expected 0) in format '{format_name}'"
-            )
-        elif type_name != "unknown" and type_id == 0:
-            self.logger.warning(
-                f"type_id/type_name mismatch: type_name='{type_name}' resolved to type_id=0 "
-                f"(reserved for 'unknown') in format '{format_name}'"
-            )
-
-        # type_nameとtype_idの整合性ガード: type_nameから解決したtype_idが
-        # format内で有効なマッピングを持つことを確保
+        # Stage 1: type_name_id を確保
         type_name_id = self._repo.create_type_name_if_not_exists(
             type_name=type_name, description=f"Auto-created type: {type_name}"
         )
-        self._repo.create_type_format_mapping_if_not_exists(
+
+        # Stage 2: format固有の type_id を解決
+        type_id = self._reader.get_type_id_for_format(type_name, fmt_id)
+
+        if type_id is not None:
+            # type_id/type_name 不整合検知
+            if type_name == "unknown" and type_id != 0:
+                self.logger.warning(
+                    f"type_id/type_name mismatch: type_name='unknown' but type_id={type_id} "
+                    f"(expected 0) in format '{format_name}'"
+                )
+            elif type_name != "unknown" and type_id == 0:
+                self.logger.warning(
+                    f"type_id/type_name mismatch: type_name='{type_name}' resolved to type_id=0 "
+                    f"(reserved for 'unknown') in format '{format_name}'"
+                )
+            return type_id
+
+        # マッピング未存在: 新規作成
+        if type_name == "unknown":
+            new_type_id = 0
+        else:
+            new_type_id = self._repo.get_next_type_id(fmt_id)
+            # type_id=0はunknown専用として予約
+            if new_type_id == 0:
+                new_type_id = 1
+
+        resolved_type_id = self._repo.create_type_format_mapping_if_not_exists(
             format_id=fmt_id,
-            type_id=type_id,
+            type_id=new_type_id,
             type_name_id=type_name_id,
             description=f"Auto-created mapping for {format_name}/{type_name}",
         )
-        return type_id
+        self.logger.info(
+            f"Auto-created type_name: {type_name} for format {format_name} (type_id: {resolved_type_id})"
+        )
+        return resolved_type_id
 
     def register_tag(self, request: "TagRegisterRequest") -> "TagRegisterResult":
         """Register a tag and optional metadata via the repository.

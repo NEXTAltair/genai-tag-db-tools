@@ -191,6 +191,69 @@ def test_update_tags_type_batch_creates_type_names_and_mappings(
         assert status2.type_id in [0, 1]
 
 
+def test_create_type_format_mapping_reuses_existing_type_name_mapping(
+    session_factory: Callable[[], Session],
+) -> None:
+    """Test that same (format_id, type_name_id) returns existing type_id."""
+    from genai_tag_db_tools.db.schema import TagFormat, TagTypeFormatMapping, TagTypeName
+
+    repo = TagRepository(session_factory)
+
+    with session_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Test"))
+        session.add(TagTypeName(type_name_id=1, type_name="character"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=3, type_name_id=1))
+        session.commit()
+
+    resolved_type_id = repo.create_type_format_mapping_if_not_exists(
+        format_id=1000,
+        type_id=9,
+        type_name_id=1,
+    )
+
+    assert resolved_type_id == 3
+    with session_factory() as session:
+        rows = (
+            session.query(TagTypeFormatMapping)
+            .filter(TagTypeFormatMapping.format_id == 1000, TagTypeFormatMapping.type_name_id == 1)
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].type_id == 3
+
+
+def test_create_type_format_mapping_resolves_type_id_collision(
+    session_factory: Callable[[], Session],
+) -> None:
+    """Test that type_id collision for another type_name_id allocates next type_id."""
+    from genai_tag_db_tools.db.schema import TagFormat, TagTypeFormatMapping, TagTypeName
+
+    repo = TagRepository(session_factory)
+
+    with session_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Test"))
+        session.add(TagTypeName(type_name_id=1, type_name="character"))
+        session.add(TagTypeName(type_name_id=2, type_name="general"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=1, type_name_id=1))
+        session.commit()
+
+    resolved_type_id = repo.create_type_format_mapping_if_not_exists(
+        format_id=1000,
+        type_id=1,
+        type_name_id=2,
+    )
+
+    assert resolved_type_id == 2
+    with session_factory() as session:
+        rows = (
+            session.query(TagTypeFormatMapping)
+            .filter(TagTypeFormatMapping.format_id == 1000)
+            .order_by(TagTypeFormatMapping.type_id)
+            .all()
+        )
+        assert [(row.type_id, row.type_name_id) for row in rows] == [(1, 1), (2, 2)]
+
+
 def test_update_tags_type_batch_reuses_existing_type_ids(session_factory: Callable[[], Session]) -> None:
     """Test that update_tags_type_batch reuses existing type_ids for same type_name."""
     from genai_tag_db_tools.db.schema import (

@@ -45,10 +45,13 @@ class DummyRepo:
     def create_type_name_if_not_exists(self, type_name: str, description: str | None = None) -> int:
         return {"unknown": 0, "character": 2, "general": 1}.get(type_name, 0)
 
+    def get_next_type_id(self, format_id: int) -> int:
+        return 1
+
     def create_type_format_mapping_if_not_exists(
         self, format_id: int, type_id: int, type_name_id: int, description: str | None = None
-    ) -> None:
-        pass
+    ) -> int:
+        return type_id
 
 
 class DummyReader:
@@ -60,7 +63,10 @@ class DummyReader:
     def get_format_id(self, format_name: str) -> int | None:
         return {"danbooru": 1}.get(format_name)
 
-    def get_type_id(self, type_name: str) -> int | None:
+    def get_type_name_id(self, type_name: str) -> int | None:
+        return {"character": 2, "general": 1}.get(type_name)
+
+    def get_type_id_for_format(self, type_name: str, format_id: int) -> int | None:
         return {"character": 2, "general": 1}.get(type_name)
 
     def get_tag_id_by_name(self, tag: str, partial: bool = False) -> int | None:
