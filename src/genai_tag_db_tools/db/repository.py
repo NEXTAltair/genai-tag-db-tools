@@ -1368,13 +1368,13 @@ class MergedTagReader:
     def get_format_id(self, format_name: str) -> int:
         if self._has_user():
             assert self.user_repo is not None
-            result = self.user_repo.get_format_id(format_name)
-            if result != 0:
-                return result
+            for format_id, name in self.user_repo.get_format_map().items():
+                if name == format_name:
+                    return format_id
         for repo in self._iter_base_repos():
-            result = repo.get_format_id(format_name)
-            if result != 0:
-                return result
+            for format_id, name in repo.get_format_map().items():
+                if name == format_name:
+                    return format_id
         raise ValueError(f"format_name not found: {format_name}")
 
     # ------------------------------------------------------------------
