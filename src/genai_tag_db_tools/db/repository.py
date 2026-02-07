@@ -1366,9 +1366,15 @@ class MergedTagReader:
         return self._first_found("get_metadata_value", key)
 
     def get_format_id(self, format_name: str) -> int:
-        result = self._first_found("get_format_id", format_name)
-        if result:
-            return result
+        if self._has_user():
+            assert self.user_repo is not None
+            result = self.user_repo.get_format_id(format_name)
+            if result != 0:
+                return result
+        for repo in self._iter_base_repos():
+            result = repo.get_format_id(format_name)
+            if result != 0:
+                return result
         raise ValueError(f"format_name not found: {format_name}")
 
     # ------------------------------------------------------------------
