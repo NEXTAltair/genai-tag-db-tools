@@ -1,5 +1,5 @@
 from logging import Logger
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import or_
@@ -48,7 +48,14 @@ class TagSearchQueryBuilder:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def initial_tag_ids(self, keyword: str, use_like: bool) -> set[int]:
+    def initial_tag_ids(
+        self,
+        keyword: str,
+        use_like: bool,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> set[int]:
         tag_query = self.session.query(Tag.tag_id)
         translation_query = self.session.query(TagTranslation.tag_id)
 
@@ -62,6 +69,13 @@ class TagSearchQueryBuilder:
             TagTranslation.translation.like(keyword) if use_like else TagTranslation.translation == keyword
         )
         translation_query = translation_query.filter(translation_condition)
+
+        if offset:
+            tag_query = tag_query.offset(offset)
+            translation_query = translation_query.offset(offset)
+        if limit is not None:
+            tag_query = tag_query.limit(limit)
+            translation_query = translation_query.limit(limit)
 
         tag_ids = {row[0] for row in tag_query.all()}
         translation_ids = {row[0] for row in translation_query.all()}
@@ -201,38 +215,72 @@ class TagSearchQueryBuilder:
 class TagSearchPreloader:
     """Preload related tag data to avoid N+1 queries during search."""
 
+    SQLITE_IN_LIMIT = 900
+
     def __init__(self, session: Session) -> None:
         self.session = session
 
+    def _query_in_chunks(self, query: Any, column: Any, ids: set[int]) -> list:
+        """SQLite の IN 句変数上限を避けるため、ids をチャンク分割してクエリを実行する。"""
+        if not ids:
+            return []
+
+        id_list = sorted(ids)
+        rows: list = []
+        for i in range(0, len(id_list), self.SQLITE_IN_LIMIT):
+            chunk = id_list[i : i + self.SQLITE_IN_LIMIT]
+            rows.extend(query.filter(column.in_(chunk)).all())
+        return rows
+
     def load(self, tag_ids: set[int]) -> PreloadedData:
-        initial_status_rows = self.session.query(TagStatus).filter(TagStatus.tag_id.in_(tag_ids)).all()
+        if not tag_ids:
+            return PreloadedData(
+                format_name_by_id={},
+                type_name_by_key={},
+                usage_by_key={},
+                tags_by_id={},
+                trans_by_tag_id={},
+                status_by_tag_format={},
+                statuses_by_tag_id={},
+            )
+
+        initial_status_rows = self._query_in_chunks(
+            self.session.query(TagStatus), TagStatus.tag_id, tag_ids
+        )
         preferred_ids = {
             row.preferred_tag_id for row in initial_status_rows if row.preferred_tag_id is not None
         }
         status_tag_ids = set(tag_ids) | preferred_ids
-        status_rows = self.session.query(TagStatus).filter(TagStatus.tag_id.in_(status_tag_ids)).all()
+        status_rows = self._query_in_chunks(
+            self.session.query(TagStatus), TagStatus.tag_id, status_tag_ids
+        )
         format_ids = {row.format_id for row in status_rows}
         format_name_by_id = {
             fmt.format_id: fmt.format_name
-            for fmt in self.session.query(TagFormat).filter(TagFormat.format_id.in_(format_ids)).all()
+            for fmt in self._query_in_chunks(
+                self.session.query(TagFormat), TagFormat.format_id, format_ids
+            )
         }
         type_name_by_key = {
             (mapping.format_id, mapping.type_id): (mapping.type_name.type_name if mapping.type_name else "")
-            for mapping in self.session.query(TagTypeFormatMapping)
-            .filter(TagTypeFormatMapping.format_id.in_(format_ids))
-            .all()
+            for mapping in self._query_in_chunks(
+                self.session.query(TagTypeFormatMapping),
+                TagTypeFormatMapping.format_id,
+                format_ids,
+            )
         }
         usage_by_key = {
             (usage.tag_id, usage.format_id): usage.count
-            for usage in self.session.query(TagUsageCounts)
-            .filter(TagUsageCounts.tag_id.in_(status_tag_ids))
-            .all()
+            for usage in self._query_in_chunks(
+                self.session.query(TagUsageCounts), TagUsageCounts.tag_id, status_tag_ids
+            )
         }
         tags_by_id = {
-            t.tag_id: t for t in self.session.query(Tag).filter(Tag.tag_id.in_(status_tag_ids)).all()
+            t.tag_id: t
+            for t in self._query_in_chunks(self.session.query(Tag), Tag.tag_id, status_tag_ids)
         }
-        all_translations = (
-            self.session.query(TagTranslation).filter(TagTranslation.tag_id.in_(status_tag_ids)).all()
+        all_translations = self._query_in_chunks(
+            self.session.query(TagTranslation), TagTranslation.tag_id, status_tag_ids
         )
         trans_by_tag_id: dict[int, list[TagTranslation]] = {}
         for tr in all_translations:

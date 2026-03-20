@@ -161,6 +161,11 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
         resolve_preferred=request.resolve_preferred,
     )
     rows = _filter_rows(rows, request)
+    total = len(rows)
+    if request.offset:
+        rows = rows[request.offset :]
+    if request.limit is not None:
+        rows = rows[: request.limit]
     items = [
         TagRecordPublic(
             tag=row["tag"],
@@ -177,7 +182,7 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
         )
         for row in rows
     ]
-    return TagSearchResult(items=items, total=len(items))
+    return TagSearchResult(items=items, total=total)
 
 
 def register_tag(service: TagRegisterService, request: TagRegisterRequest) -> TagRegisterResult:
