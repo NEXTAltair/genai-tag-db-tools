@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from genai_tag_db_tools.db.repository import MergedTagReader, TagReader, TagRepository
-from genai_tag_db_tools.db.schema import Base, Tag, TagFormat, TagTranslation
+from genai_tag_db_tools.db.schema import Base, Tag, TagFormat, TagStatus, TagTranslation, TagTypeFormatMapping, TagTypeName
 
 pytestmark = pytest.mark.db_tools
 
@@ -81,6 +81,34 @@ def test_get_tag_languages_returns_sorted_list(session_factory: Callable[[], Ses
     languages = repo.get_tag_languages()
 
     assert languages == ["chinese", "english", "japanese"]
+
+
+def test_search_tags_handles_large_candidate_set_without_sqlite_variable_overflow(
+    session_factory: Callable[[], Session],
+) -> None:
+    reader = TagReader(session_factory)
+
+    with session_factory() as session:
+        session.add(TagFormat(format_id=1, format_name="test"))
+        session.add(TagTypeName(type_name_id=0, type_name="general"))
+        session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=0))
+
+        for tag_id in range(1, 1205):
+            tag_name = f"sample_{tag_id}"
+            session.add(Tag(tag_id=tag_id, source_tag=tag_name, tag=tag_name))
+            session.add(
+                TagStatus(
+                    tag_id=tag_id,
+                    format_id=1,
+                    type_id=0,
+                    alias=False,
+                    preferred_tag_id=tag_id,
+                )
+            )
+        session.commit()
+
+    rows = reader.search_tags("sa", partial=True, format_name="test")
+    assert len(rows) == 1204
 
 
 def test_get_next_type_id_returns_zero_for_empty_format(session_factory: Callable[[], Session]) -> None:
