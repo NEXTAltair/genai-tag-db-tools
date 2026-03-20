@@ -93,6 +93,8 @@ class TagSearchRequest(BaseModel):
     include_deprecated: bool = Field(default=False, description="Include deprecated tags")
     min_usage: int | None = Field(default=None, description="Minimum usage count")
     max_usage: int | None = Field(default=None, description="Maximum usage count")
+    limit: int | None = Field(default=None, ge=1, description="Maximum number of rows")
+    offset: int = Field(default=0, ge=0, description="Number of rows to skip")
 
 
 class TagIdRef(BaseModel):

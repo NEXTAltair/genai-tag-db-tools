@@ -157,6 +157,56 @@ def test_search_tags_filters_and_maps():
     assert result.total == 1
 
 
+def test_search_tags_applies_limit_and_offset_after_filtering():
+    rows = [
+        {
+            "tag": "cat",
+            "source_tag": "cat",
+            "tag_id": 1,
+            "format_name": "danbooru",
+            "type_id": 1,
+            "type_name": "general",
+            "alias": False,
+            "deprecated": False,
+            "usage_count": 100,
+            "translations": None,
+            "format_statuses": {"danbooru": {"status": "active"}},
+        },
+        {
+            "tag": "dog",
+            "source_tag": "dog",
+            "tag_id": 2,
+            "format_name": "danbooru",
+            "type_id": 1,
+            "type_name": "general",
+            "alias": False,
+            "deprecated": False,
+            "usage_count": 90,
+            "translations": None,
+            "format_statuses": {"danbooru": {"status": "active"}},
+        },
+        {
+            "tag": "fox",
+            "source_tag": "fox",
+            "tag_id": 3,
+            "format_name": "danbooru",
+            "type_id": 1,
+            "type_name": "general",
+            "alias": False,
+            "deprecated": False,
+            "usage_count": 80,
+            "translations": None,
+            "format_statuses": {"danbooru": {"status": "active"}},
+        },
+    ]
+    repo = DummyRepo(rows)
+    request = TagSearchRequest(query="a", limit=1, offset=1)
+    result = core_api.search_tags(repo, request)
+
+    assert [item.tag for item in result.items] == ["dog"]
+    assert result.total == 1
+
+
 def test_register_tag_delegates():
     service = DummyService()
     request = TagRegisterRequest(
