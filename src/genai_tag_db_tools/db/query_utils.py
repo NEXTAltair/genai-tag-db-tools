@@ -48,7 +48,14 @@ class TagSearchQueryBuilder:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def initial_tag_ids(self, keyword: str, use_like: bool) -> set[int]:
+    def initial_tag_ids(
+        self,
+        keyword: str,
+        use_like: bool,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> set[int]:
         tag_query = self.session.query(Tag.tag_id)
         translation_query = self.session.query(TagTranslation.tag_id)
 
@@ -62,6 +69,13 @@ class TagSearchQueryBuilder:
             TagTranslation.translation.like(keyword) if use_like else TagTranslation.translation == keyword
         )
         translation_query = translation_query.filter(translation_condition)
+
+        if offset:
+            tag_query = tag_query.offset(offset)
+            translation_query = translation_query.offset(offset)
+        if limit is not None:
+            tag_query = tag_query.limit(limit)
+            translation_query = translation_query.limit(limit)
 
         tag_ids = {row[0] for row in tag_query.all()}
         translation_ids = {row[0] for row in translation_query.all()}
@@ -204,13 +218,29 @@ class TagSearchPreloader:
     def __init__(self, session: Session) -> None:
         self.session = session
 
+    def _chunk_size(self) -> int:
+        if self.session.bind is not None and self.session.bind.dialect.name == "sqlite":
+            return 900
+        return 10_000
+
+    def _query_in_chunks(self, model: object, column: object, ids: set[int]) -> list[object]:
+        if not ids:
+            return []
+        ids_list = list(ids)
+        chunk_size = self._chunk_size()
+        rows: list[object] = []
+        for i in range(0, len(ids_list), chunk_size):
+            chunk = ids_list[i : i + chunk_size]
+            rows.extend(self.session.query(model).filter(column.in_(chunk)).all())
+        return rows
+
     def load(self, tag_ids: set[int]) -> PreloadedData:
-        initial_status_rows = self.session.query(TagStatus).filter(TagStatus.tag_id.in_(tag_ids)).all()
+        initial_status_rows = self._query_in_chunks(TagStatus, TagStatus.tag_id, tag_ids)
         preferred_ids = {
             row.preferred_tag_id for row in initial_status_rows if row.preferred_tag_id is not None
         }
         status_tag_ids = set(tag_ids) | preferred_ids
-        status_rows = self.session.query(TagStatus).filter(TagStatus.tag_id.in_(status_tag_ids)).all()
+        status_rows = self._query_in_chunks(TagStatus, TagStatus.tag_id, status_tag_ids)
         format_ids = {row.format_id for row in status_rows}
         format_name_by_id = {
             fmt.format_id: fmt.format_name
@@ -224,16 +254,12 @@ class TagSearchPreloader:
         }
         usage_by_key = {
             (usage.tag_id, usage.format_id): usage.count
-            for usage in self.session.query(TagUsageCounts)
-            .filter(TagUsageCounts.tag_id.in_(status_tag_ids))
-            .all()
+            for usage in self._query_in_chunks(TagUsageCounts, TagUsageCounts.tag_id, status_tag_ids)
         }
         tags_by_id = {
-            t.tag_id: t for t in self.session.query(Tag).filter(Tag.tag_id.in_(status_tag_ids)).all()
+            t.tag_id: t for t in self._query_in_chunks(Tag, Tag.tag_id, status_tag_ids)
         }
-        all_translations = (
-            self.session.query(TagTranslation).filter(TagTranslation.tag_id.in_(status_tag_ids)).all()
-        )
+        all_translations = self._query_in_chunks(TagTranslation, TagTranslation.tag_id, status_tag_ids)
         trans_by_tag_id: dict[int, list[TagTranslation]] = {}
         for tr in all_translations:
             trans_by_tag_id.setdefault(tr.tag_id, []).append(tr)
