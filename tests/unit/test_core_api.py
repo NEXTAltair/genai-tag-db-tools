@@ -157,6 +157,32 @@ def test_search_tags_filters_and_maps():
     assert result.total == 1
 
 
+def test_search_tags_applies_offset_and_limit():
+    rows = [
+        {
+            "tag": f"tag{i}",
+            "source_tag": f"tag{i}",
+            "tag_id": i,
+            "format_name": "danbooru",
+            "type_id": 1,
+            "type_name": "general",
+            "alias": False,
+            "deprecated": False,
+            "usage_count": 100,
+            "translations": None,
+            "format_statuses": {"danbooru": {"status": "active"}},
+        }
+        for i in range(1, 6)
+    ]
+    repo = DummyRepo(rows)
+    request = TagSearchRequest(query="tag", partial=True, offset=1, limit=2)
+
+    result = core_api.search_tags(repo, request)
+
+    assert [item.tag for item in result.items] == ["tag2", "tag3"]
+    assert result.total == 5
+
+
 def test_register_tag_delegates():
     service = DummyService()
     request = TagRegisterRequest(
