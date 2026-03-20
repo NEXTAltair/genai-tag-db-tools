@@ -1,6 +1,7 @@
 from logging import Logger
 from typing import TypedDict
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import or_
 
@@ -203,36 +204,95 @@ class TagSearchPreloader:
 
     def __init__(self, session: Session) -> None:
         self.session = session
+        self._max_in_clause_items = self._detect_max_in_clause_items()
+
+    def _detect_max_in_clause_items(self) -> int:
+        bind = self.session.get_bind()
+        if bind is None or bind.dialect.name != "sqlite":
+            return 5000
+
+        try:
+            rows = self.session.execute(text("PRAGMA compile_options")).all()
+        except Exception:
+            return 900
+
+        for row in rows:
+            option = row[0] if row else None
+            if not isinstance(option, str):
+                continue
+            if not option.startswith("MAX_VARIABLE_NUMBER="):
+                continue
+            value = option.split("=", 1)[1]
+            if not value.isdigit():
+                continue
+            detected = int(value)
+            return max(1, detected - 50)
+
+        return 900
+
+    def _query_all_in_chunks(self, query, column, values: set[int]) -> list:
+        if not values:
+            return []
+
+        value_list = sorted(values)
+        if len(value_list) <= self._max_in_clause_items:
+            return query.filter(column.in_(value_list)).all()
+
+        rows: list = []
+        chunk_size = self._max_in_clause_items
+        for start in range(0, len(value_list), chunk_size):
+            chunk = value_list[start : start + chunk_size]
+            rows.extend(query.filter(column.in_(chunk)).all())
+        return rows
 
     def load(self, tag_ids: set[int]) -> PreloadedData:
-        initial_status_rows = self.session.query(TagStatus).filter(TagStatus.tag_id.in_(tag_ids)).all()
+        initial_status_rows = self._query_all_in_chunks(
+            self.session.query(TagStatus),
+            TagStatus.tag_id,
+            tag_ids,
+        )
         preferred_ids = {
             row.preferred_tag_id for row in initial_status_rows if row.preferred_tag_id is not None
         }
         status_tag_ids = set(tag_ids) | preferred_ids
-        status_rows = self.session.query(TagStatus).filter(TagStatus.tag_id.in_(status_tag_ids)).all()
+        status_rows = self._query_all_in_chunks(
+            self.session.query(TagStatus),
+            TagStatus.tag_id,
+            status_tag_ids,
+        )
         format_ids = {row.format_id for row in status_rows}
-        format_name_by_id = {
-            fmt.format_id: fmt.format_name
-            for fmt in self.session.query(TagFormat).filter(TagFormat.format_id.in_(format_ids)).all()
-        }
+        format_rows = self._query_all_in_chunks(
+            self.session.query(TagFormat),
+            TagFormat.format_id,
+            format_ids,
+        )
+        format_name_by_id = {fmt.format_id: fmt.format_name for fmt in format_rows}
         type_name_by_key = {
             (mapping.format_id, mapping.type_id): (mapping.type_name.type_name if mapping.type_name else "")
-            for mapping in self.session.query(TagTypeFormatMapping)
-            .filter(TagTypeFormatMapping.format_id.in_(format_ids))
-            .all()
+            for mapping in self._query_all_in_chunks(
+                self.session.query(TagTypeFormatMapping),
+                TagTypeFormatMapping.format_id,
+                format_ids,
+            )
         }
         usage_by_key = {
             (usage.tag_id, usage.format_id): usage.count
-            for usage in self.session.query(TagUsageCounts)
-            .filter(TagUsageCounts.tag_id.in_(status_tag_ids))
-            .all()
+            for usage in self._query_all_in_chunks(
+                self.session.query(TagUsageCounts),
+                TagUsageCounts.tag_id,
+                status_tag_ids,
+            )
         }
-        tags_by_id = {
-            t.tag_id: t for t in self.session.query(Tag).filter(Tag.tag_id.in_(status_tag_ids)).all()
-        }
-        all_translations = (
-            self.session.query(TagTranslation).filter(TagTranslation.tag_id.in_(status_tag_ids)).all()
+        tag_rows = self._query_all_in_chunks(
+            self.session.query(Tag),
+            Tag.tag_id,
+            status_tag_ids,
+        )
+        tags_by_id = {t.tag_id: t for t in tag_rows}
+        all_translations = self._query_all_in_chunks(
+            self.session.query(TagTranslation),
+            TagTranslation.tag_id,
+            status_tag_ids,
         )
         trans_by_tag_id: dict[int, list[TagTranslation]] = {}
         for tr in all_translations:

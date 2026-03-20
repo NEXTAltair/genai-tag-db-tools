@@ -9,7 +9,15 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from genai_tag_db_tools.db.repository import MergedTagReader, TagReader, TagRepository
-from genai_tag_db_tools.db.schema import Base, Tag, TagFormat, TagTranslation
+from genai_tag_db_tools.db.schema import (
+    Base,
+    Tag,
+    TagFormat,
+    TagStatus,
+    TagTranslation,
+    TagTypeFormatMapping,
+    TagTypeName,
+)
 
 pytestmark = pytest.mark.db_tools
 
@@ -90,6 +98,40 @@ def test_get_next_type_id_returns_zero_for_empty_format(session_factory: Callabl
     next_type_id = repo.get_next_type_id(format_id=1000)
 
     assert next_type_id == 0
+
+
+def test_search_tags_handles_large_result_set_without_sqlite_variable_error(
+    session_factory: Callable[[], Session],
+) -> None:
+    reader = TagReader(session_factory)
+    total_tags = 1200
+
+    with session_factory() as session:
+        session.add(TagFormat(format_id=1, format_name="danbooru"))
+        session.add(TagTypeName(type_name_id=1, type_name="general"))
+        session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=1))
+
+        for tag_id in range(1, total_tags + 1):
+            source_tag = f"sample_{tag_id}"
+            session.add(Tag(tag_id=tag_id, tag=source_tag, source_tag=source_tag))
+            session.add(
+                TagStatus(
+                    tag_id=tag_id,
+                    format_id=1,
+                    type_id=0,
+                    alias=False,
+                    preferred_tag_id=tag_id,
+                )
+            )
+        session.commit()
+
+    rows = reader.search_tags(
+        "sa",
+        partial=True,
+        resolve_preferred=False,
+    )
+
+    assert len(rows) == total_tags
 
 
 def test_get_next_type_id_returns_incremented_value(session_factory: Callable[[], Session]) -> None:
