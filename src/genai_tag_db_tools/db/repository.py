@@ -220,12 +220,14 @@ class TagReader:
         max_usage: int | None = None,
         alias: bool | None = None,
         resolve_preferred: bool = False,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[TagSearchRow]:
         keyword, use_like = normalize_search_keyword(keyword, partial)
 
         with self.session_factory() as session:
             builder = TagSearchQueryBuilder(session)
-            tag_ids = builder.initial_tag_ids(keyword, use_like)
+            tag_ids = builder.initial_tag_ids(keyword, use_like, limit=limit, offset=offset)
             if not tag_ids:
                 return []
 
@@ -1413,6 +1415,8 @@ class MergedTagReader:
         max_usage: int | None = None,
         alias: bool | None = None,
         resolve_preferred: bool = False,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[TagSearchRow]:
         return self._merge_by_key(
             "search_tags",
@@ -1426,6 +1430,8 @@ class MergedTagReader:
             max_usage=max_usage,
             alias=alias,
             resolve_preferred=resolve_preferred,
+            limit=limit,
+            offset=offset,
         )
 
     def search_tags_bulk(

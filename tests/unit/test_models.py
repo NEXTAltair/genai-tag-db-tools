@@ -106,6 +106,8 @@ def test_tag_search_request_defaults():
     assert request.resolve_preferred is True
     assert request.include_aliases is True
     assert request.include_deprecated is False
+    assert request.limit is None
+    assert request.offset == 0
 
 
 @pytest.mark.db_tools
