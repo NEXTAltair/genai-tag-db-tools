@@ -190,6 +190,52 @@ def test_search_tags_applies_offset_and_limit_preserves_total():
     assert result.total == 5
 
 
+def test_search_tags_passes_limit_to_repo():
+    """core_api.search_tags() が request.limit を repo.search_tags() に伝搬すること。"""
+    rows = [
+        {
+            "tag": "sample_tag",
+            "source_tag": "sample_tag",
+            "tag_id": 1,
+            "format_name": "danbooru",
+            "type_id": 1,
+            "type_name": "general",
+            "alias": False,
+            "deprecated": False,
+            "usage_count": 100,
+            "translations": None,
+            "format_statuses": {},
+        }
+    ]
+    repo = DummyRepo(rows)
+    request = TagSearchRequest(query="tag", partial=True, limit=10)
+    core_api.search_tags(repo, request)
+    assert repo.calls[0].get("limit") == 10
+
+
+def test_search_tags_passes_none_limit_when_not_set():
+    """limit 未設定時は None が渡されること（既存動作を壊さない）。"""
+    rows = [
+        {
+            "tag": "sample_tag",
+            "source_tag": "sample_tag",
+            "tag_id": 1,
+            "format_name": "danbooru",
+            "type_id": 1,
+            "type_name": "general",
+            "alias": False,
+            "deprecated": False,
+            "usage_count": 100,
+            "translations": None,
+            "format_statuses": {},
+        }
+    ]
+    repo = DummyRepo(rows)
+    request = TagSearchRequest(query="tag", partial=True)
+    core_api.search_tags(repo, request)
+    assert repo.calls[0].get("limit") is None
+
+
 def test_register_tag_delegates():
     service = DummyService()
     request = TagRegisterRequest(

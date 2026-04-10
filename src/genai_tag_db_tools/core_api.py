@@ -159,6 +159,7 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
         format_name=format_name,
         type_name=type_name,
         resolve_preferred=request.resolve_preferred,
+        limit=request.limit,
     )
     rows = _filter_rows(rows, request)
     total = len(rows)
