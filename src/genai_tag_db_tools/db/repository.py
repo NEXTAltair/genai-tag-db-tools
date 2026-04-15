@@ -196,6 +196,34 @@ class TagReader:
         with self.session_factory() as session:
             return session.query(TagTranslation).filter(TagTranslation.tag_id == tag_id).all()
 
+    def get_translations_batch(self, tag_ids: list[int]) -> dict[int, list[TagTranslation]]:
+        """複数タグIDの翻訳を一括取得する。
+
+        N+1クエリを回避するため IN 句で一括取得し、tag_id をキーにした辞書で返す。
+        SQLite の変数上限 (999) 対策として 900件ずつチャンク分割してクエリを発行する。
+
+        Args:
+            tag_ids: 翻訳を取得するタグIDのリスト。空リストの場合は空辞書を返す。
+
+        Returns:
+            tag_id をキーとする TagTranslation リストの辞書。
+            翻訳が存在しない tag_id はキーに含まれない。
+        """
+        if not tag_ids:
+            return {}
+        _SQLITE_IN_LIMIT = 900
+        with self.session_factory() as session:
+            rows: list[TagTranslation] = []
+            for i in range(0, len(tag_ids), _SQLITE_IN_LIMIT):
+                chunk = tag_ids[i : i + _SQLITE_IN_LIMIT]
+                rows.extend(
+                    session.query(TagTranslation).filter(TagTranslation.tag_id.in_(chunk)).all()
+                )
+        result: dict[int, list[TagTranslation]] = {}
+        for tr in rows:
+            result.setdefault(tr.tag_id, []).append(tr)
+        return result
+
     def list_translations(self) -> list[TagTranslation]:
         with self.session_factory() as session:
             return session.query(TagTranslation).all()
@@ -1465,6 +1493,40 @@ class MergedTagReader:
             lambda tr: (tr.language, tr.translation),
             tag_id,
         )
+
+    def get_translations_batch(self, tag_ids: list[int]) -> dict[int, list[TagTranslation]]:
+        """複数タグIDの翻訳を全リポジトリからバッチ取得してマージする。
+
+        全リポジトリから一括取得し、(tag_id, language, translation) タプルで重複排除する。
+        重複時は先着順（低優先度→高優先度→user_repo）で保持する。
+        get_translations と同一のセマンティクスを保つ。
+
+        Args:
+            tag_ids: 翻訳を取得するタグIDのリスト。空リストの場合は空辞書を返す。
+
+        Returns:
+            tag_id をキーとする重複排除済み TagTranslation リストの辞書。
+        """
+        if not tag_ids:
+            return {}
+        seen: set[tuple[int, str | None, str | None]] = set()
+        result: dict[int, list[TagTranslation]] = {}
+        for repo in self._iter_base_repos_low_to_high():
+            for tag_id, trs in repo.get_translations_batch(tag_ids).items():
+                for tr in trs:
+                    key = (tr.tag_id, tr.language, tr.translation)
+                    if key not in seen:
+                        seen.add(key)
+                        result.setdefault(tag_id, []).append(tr)
+        if self._has_user():
+            assert self.user_repo is not None
+            for tag_id, trs in self.user_repo.get_translations_batch(tag_ids).items():
+                for tr in trs:
+                    key = (tr.tag_id, tr.language, tr.translation)
+                    if key not in seen:
+                        seen.add(key)
+                        result.setdefault(tag_id, []).append(tr)
+        return result
 
     def list_translations(self) -> list[TagTranslation]:
         return self._accumulate_unique(

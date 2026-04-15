@@ -471,3 +471,113 @@ def test_get_unknown_type_tag_ids_handles_multiple_formats(session_factory: Call
     # Get unknown type tags for format 2000 only
     result_2000 = reader.get_unknown_type_tag_ids(format_id=2000)
     assert result_2000 == [20]
+
+
+def test_get_translations_batch_returns_empty_for_empty_input(
+    session_factory: Callable[[], Session],
+) -> None:
+    """空リスト入力時に空辞書を返すこと"""
+    reader = TagReader(session_factory)
+    assert reader.get_translations_batch([]) == {}
+
+
+def test_get_translations_batch_returns_grouped_by_tag_id(
+    session_factory: Callable[[], Session],
+) -> None:
+    """複数 tag_id の翻訳がまとめて取得され tag_id でグループ化されること"""
+    reader = TagReader(session_factory)
+
+    with session_factory() as session:
+        session.add(Tag(tag_id=1, tag="girl", source_tag="girl"))
+        session.add(Tag(tag_id=2, tag="boy", source_tag="boy"))
+        session.add(TagTranslation(tag_id=1, language="japanese", translation="女の子"))
+        session.add(TagTranslation(tag_id=1, language="chinese", translation="女孩"))
+        session.add(TagTranslation(tag_id=2, language="japanese", translation="男の子"))
+        session.commit()
+
+    result = reader.get_translations_batch([1, 2])
+
+    assert 1 in result
+    assert 2 in result
+    ja_1 = next(tr for tr in result[1] if tr.language == "japanese")
+    assert ja_1.translation == "女の子"
+    zh_1 = next(tr for tr in result[1] if tr.language == "chinese")
+    assert zh_1.translation == "女孩"
+    ja_2 = next(tr for tr in result[2] if tr.language == "japanese")
+    assert ja_2.translation == "男の子"
+
+
+def test_get_translations_batch_ignores_unknown_tag_ids(
+    session_factory: Callable[[], Session],
+) -> None:
+    """存在しない tag_id は結果辞書に含まれないこと"""
+    reader = TagReader(session_factory)
+
+    with session_factory() as session:
+        session.add(Tag(tag_id=1, tag="girl", source_tag="girl"))
+        session.add(TagTranslation(tag_id=1, language="japanese", translation="女の子"))
+        session.commit()
+
+    result = reader.get_translations_batch([1, 999])
+
+    assert 1 in result
+    assert 999 not in result
+
+
+def test_get_translations_batch_handles_sqlite_in_limit(
+    session_factory: Callable[[], Session],
+) -> None:
+    """900件超の tag_ids でもチャンク分割して全件取得できること"""
+    reader = TagReader(session_factory)
+    total = 950
+
+    with session_factory() as session:
+        for tag_id in range(1, total + 1):
+            session.add(Tag(tag_id=tag_id, tag=f"tag_{tag_id}", source_tag=f"tag_{tag_id}"))
+            session.add(TagTranslation(tag_id=tag_id, language="japanese", translation=f"タグ{tag_id}"))
+        session.commit()
+
+    tag_ids = list(range(1, total + 1))
+    result = reader.get_translations_batch(tag_ids)
+
+    assert len(result) == total
+    for tag_id in tag_ids:
+        assert tag_id in result
+        assert len(result[tag_id]) == 1
+
+
+def test_merged_reader_get_translations_batch_deduplicates_across_repos(
+    session_factory: Callable[[], Session],
+) -> None:
+    """複数 base_repo で同一 (language, translation) が重複しないこと"""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    engine_b = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine_b)
+    session_factory_b: Callable[[], Session] = sessionmaker(
+        bind=engine_b, autoflush=False, autocommit=False
+    )
+
+    reader_a = TagReader(session_factory)
+    reader_b = TagReader(session_factory_b)
+
+    with session_factory() as session:
+        session.add(Tag(tag_id=1, tag="girl", source_tag="girl"))
+        session.add(TagTranslation(tag_id=1, language="japanese", translation="女の子"))
+        session.commit()
+
+    with session_factory_b() as session:
+        session.add(Tag(tag_id=1, tag="girl", source_tag="girl"))
+        session.add(TagTranslation(tag_id=1, language="japanese", translation="女の子"))
+        session.commit()
+
+    merged = MergedTagReader(base_repo=[reader_a, reader_b])
+    result = merged.get_translations_batch([1])
+
+    assert 1 in result
+    assert len(result[1]) == 1
+    assert result[1][0].translation == "女の子"
