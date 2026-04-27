@@ -60,6 +60,37 @@ class TagCleaner:
     def __init__(self) -> None:
         self.tag_searcher = TagSearcher()
 
+    @staticmethod
+    def _protect_angle_brackets(text: str) -> tuple[str, list[str]]:
+        """`<...>` 構文（LoRA / lyco / embedding 等）を正規化処理から保護する。
+
+        text 中の `<...>` パターンを連番 placeholder に置換し、
+        後で元の文字列に戻すための originals リストを返す。
+
+        Args:
+            text: 保護対象の入力テキスト。
+
+        Returns:
+            (placeholder 化済みテキスト, 復元用の元 `<...>` 文字列リスト)。
+        """
+        pattern = re.compile(r"<[^>]+>")
+        originals: list[str] = []
+
+        def store(match: re.Match[str]) -> str:
+            originals.append(match.group(0))
+            return f"@@@ANGLE{len(originals) - 1}@@@"
+
+        masked = pattern.sub(store, text)
+        return masked, originals
+
+    @staticmethod
+    def _restore_angle_brackets(text: str, originals: list[str]) -> str:
+        """`_protect_angle_brackets` で置換した placeholder を元の `<...>` に戻す。"""
+        result = text
+        for i, original in enumerate(originals):
+            result = result.replace(f"@@@ANGLE{i}@@@", original)
+        return result
+
     @cache
     @staticmethod
     def clean_format(text: str) -> str:
@@ -71,6 +102,10 @@ class TagCleaner:
         Returns:
             str: クリーニング後のテキスト。
         """
+        # `<lora:...>` 等の angle bracket 構文は case と underscore を保持する必要があるため
+        # 以降の正規化処理から退避させる
+        text, angle_originals = TagCleaner._protect_angle_brackets(text)
+
         text = TagCleaner._clean_underscore(text)  # アンダーバーをスペースへ置き換える
         text = re.sub(r"#", "", text)  # '#'を削除
         text = re.sub(r"\"", '"', text)  # ダブルクォートをエスケープ
@@ -83,7 +118,8 @@ class TagCleaner:
         text = re.sub(r"\(", r"\(", text)  # '(' をエスケープ
         text = re.sub(r"\)", r"\)", text)  # ')' をエスケープ
         text = TagCleaner._clean_repetition(text)  # 重複した記号を削除
-        return text.strip()  # 前後の空白を削除
+        text = text.strip()  # 前後の空白を削除
+        return TagCleaner._restore_angle_brackets(text, angle_originals)
 
     @staticmethod
     def _clean_repetition(text: str) -> str:
@@ -111,6 +147,9 @@ class TagCleaner:
         Returns:
             final_tags (str): クリーニング後のタグ
         """
+        # `<lora:...>` 等の angle bracket 構文を `_clean_style` 等の意味的処理から保護
+        tags, angle_originals = TagCleaner._protect_angle_brackets(tags)
+
         tags_dict = TagCleaner._tags_to_dict(tags)  # タグを辞書に変換
 
         # 複数の人物がいる場合は髪色等のタグを削除する
@@ -120,7 +159,8 @@ class TagCleaner:
         tags_dict = TagCleaner._clean_color_object(tags_dict)  # 重複タグを削除
         tags_dict = TagCleaner._clean_style(tags_dict)  # スタイルタグの統一
 
-        return ", ".join(tag for tag in tags_dict.values() if tag)
+        result = ", ".join(tag for tag in tags_dict.values() if tag)
+        return TagCleaner._restore_angle_brackets(result, angle_originals)
 
     @staticmethod
     def _tags_to_dict(tags: str) -> dict[int, str]:
