@@ -61,25 +61,35 @@ def _build_cache_config(args: argparse.Namespace) -> DbCacheConfig:
     )
 
 
-def _dump(obj: object) -> None:
-    from typing import Any, Protocol, cast
+def _emit(line: dict[str, object]) -> None:
+    """1 行 = 1 つの valid JSON オブジェクトを stdout へ出力する (JSONL)。
 
-    class HasModelDump(Protocol):
-        """Pydantic BaseModel like object with model_dump method."""
+    stdout は JSONL 専用。ログ・進捗・装飾は stderr (loguru の既定 sink) へ出す。
+    """
+    print(json.dumps(line, ensure_ascii=False, default=str))
 
-        def model_dump(self) -> dict[str, Any]: ...
 
-    payload: dict[str, Any] | list[Any] | object
-    if hasattr(obj, "model_dump"):
-        payload = cast(HasModelDump, obj).model_dump()
-    elif isinstance(obj, list):
-        payload = [
-            cast(HasModelDump, item).model_dump() if hasattr(item, "model_dump") else item for item in obj
-        ]
+def emit_item(record: object) -> None:
+    """list を返すコマンドの 1 レコードを 1 行 (kind=item) で出力する。
+
+    巨大な配列を 1 行に詰めず、レコードごとに改行する。最終行の summary は
+    `emit_result` で別途出す。
+    """
+    payload = record.model_dump() if hasattr(record, "model_dump") else record
+    if isinstance(payload, dict):
+        _emit({"kind": "item", **payload})
     else:
-        payload = obj
+        _emit({"kind": "item", "value": payload})
 
-    print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+
+def emit_result(message: str, **output: object) -> None:
+    """成功時の最終行 (kind=result) を出力する。"""
+    _emit({"kind": "result", "ok": True, "message": message, **output})
+
+
+def emit_event(event: str, message: str) -> None:
+    """途中経過 (kind=event) を出力する。必要な場合のみ使う。"""
+    _emit({"kind": "event", "event": event, "message": message})
 
 
 def _set_db_paths(base_db_paths: Iterable[str] | None, user_db_dir: str | None) -> None:
@@ -116,12 +126,18 @@ def cmd_ensure_dbs(args: argparse.Namespace) -> None:
         for parsed in (_parse_source(value) for value in args.source)
     ]
     results = ensure_databases(requests)
-    _dump(results)
+    for result in results:
+        emit_item(result)
+    emit_result("databases ensured", count=len(results))
 
 
 def cmd_search(args: argparse.Namespace) -> None:
     _set_db_paths(args.base_db, args.user_db_dir)
     repo = get_default_reader()
+    # --limit 0 は無制限の明示 opt-in。それ以外は CLI 既定 (50) を適用する。
+    # 既定値は CLI 層に置き、TagSearchRequest.limit の既定 (None) は変更しない
+    # (core_api を直呼びする利用側の挙動を壊さないため)。
+    limit = None if args.limit == 0 else args.limit
     request = TagSearchRequest(
         query=args.query,
         partial=not args.exact,
@@ -130,9 +146,20 @@ def cmd_search(args: argparse.Namespace) -> None:
         resolve_preferred=args.resolve_preferred,
         include_aliases=args.include_aliases,
         include_deprecated=args.include_deprecated,
+        limit=limit,
+        offset=args.offset,
     )
     result = search_tags(repo, request)
-    _dump(result)
+    for item in result.items:
+        emit_item(item)
+    emit_result(
+        "search completed",
+        query=args.query,
+        count=len(result.items),
+        total=result.total,
+        limit=limit,
+        offset=args.offset,
+    )
 
 
 def cmd_register(args: argparse.Namespace) -> None:
@@ -152,14 +179,18 @@ def cmd_register(args: argparse.Namespace) -> None:
     )
     service = _build_register_service()
     result = register_tag(service, request)
-    _dump(result)
+    emit_result(
+        "tag registered" if result.created else "tag already exists",
+        created=result.created,
+        tag_id=result.tag_id,
+    )
 
 
 def cmd_stats(args: argparse.Namespace) -> None:
     _set_db_paths(args.base_db, args.user_db_dir)
     repo = get_default_reader()
     result = get_statistics(repo)
-    _dump(result)
+    emit_result("statistics", **result.model_dump())
 
 
 def cmd_convert(args: argparse.Namespace) -> None:
@@ -171,15 +202,13 @@ def cmd_convert(args: argparse.Namespace) -> None:
 
     converted = convert_tags(repo, args.tags, args.format_name, separator=args.separator)
 
-    if args.json:
-        result = {
-            "input": args.tags,
-            "output": converted,
-            "format": args.format_name,
-        }
-        _dump(result)
-    else:
-        print(converted)
+    # 出力は JSONL 一本化。--json は後方互換のため受理するが無視する (deprecated)。
+    emit_result(
+        "tags converted",
+        input=args.tags,
+        output=converted,
+        format=args.format_name,
+    )
 
 
 def _add_base_db_args(parser: argparse.ArgumentParser) -> None:
@@ -223,6 +252,18 @@ def main() -> None:
         action="store_true",
         help="Use exact matching (partial match is default).",
     )
+    search_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum number of items to return (default: 50). Use 0 for unlimited.",
+    )
+    search_parser.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        help="Number of items to skip (default: 0).",
+    )
     _add_base_db_args(search_parser)
     search_parser.set_defaults(func=cmd_search)
 
@@ -251,7 +292,11 @@ def main() -> None:
     convert_parser.add_argument("--tags", required=True, help="Comma-separated tags")
     convert_parser.add_argument("--format-name", required=True, help="Target format (e.g., danbooru, e621)")
     convert_parser.add_argument("--separator", default=", ", help="Tag separator (default: ', ')")
-    convert_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    convert_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Deprecated: output is always JSONL. Accepted but ignored.",
+    )
     _add_base_db_args(convert_parser)
     convert_parser.set_defaults(func=cmd_convert)
 
