@@ -197,8 +197,8 @@ def _add_base_db_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(prog="genai-tag-db-tools")
+def build_parser(prog: str = "tag-db") -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=prog)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     ensure_many_parser = subparsers.add_parser("ensure-dbs", help="Download multiple DBs.")
@@ -257,5 +257,10 @@ def main() -> None:
     _add_base_db_args(convert_parser)
     convert_parser.set_defaults(func=cmd_convert)
 
-    args = parser.parse_args()
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = build_parser()
+    args = parser.parse_args(argv)
     args.func(args)
