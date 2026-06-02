@@ -95,22 +95,32 @@ stays JSONL-only.
 
 ## Side effects and read-only classification
 
-| command | side effects | read-only |
+The classification below is the **steady state** (base DBs already present, no
+`--user-db-dir`). Two conditions add write/network side effects; see the notes.
+
+| command | side effects (steady state) | read-only |
 |---|---|---|
-| `search` | `db_read` (+ `network_read`, `file_write` on cold cache) | yes, once base DBs are present |
-| `stats` | `db_read` (+ `network_read`, `file_write` on cold cache) | yes, once base DBs are present |
-| `convert` | `db_read` (+ `network_read`, `file_write` on cold cache) | yes, once base DBs are present |
+| `search` | `db_read` | conditional (see notes) |
+| `stats` | `db_read` | conditional (see notes) |
+| `convert` | `db_read` | conditional (see notes) |
 | `register` | `db_write` | no |
 | `ensure-dbs` | `network_read`, `file_write` | no |
 
-> **Implicit downloads:** when `--base-db` is omitted and the local cache is cold,
-> the read commands (`search` / `stats` / `convert`) first call
-> `initialize_databases()`, which downloads the default Hugging Face base DBs and
-> writes them to the cache (`network_read` + `file_write`) before the read. They
-> are read-only only once the base DBs already exist locally. To run them in a
-> no-network / read-only context, pre-provision the cache (e.g. `ensure-dbs`) or
-> pass `--base-db` so no download is triggered. A failed download surfaces as a
-> `NETWORK_ERROR` line.
+> **Implicit base-DB downloads (cold cache):** when `--base-db` is omitted and the
+> local cache is cold, *every* command — including `register` and the read
+> commands — first calls `initialize_databases()`, which downloads the default
+> Hugging Face base DBs and writes them to the cache (`network_read` +
+> `file_write`) before doing its work. A failed download surfaces as a
+> `NETWORK_ERROR` line. To stay read-only / offline, pre-provision the cache (e.g.
+> `ensure-dbs`) or pass `--base-db`.
+>
+> **User-DB initialization (`--user-db-dir`):** passing `--user-db-dir` to *any*
+> command (including the read commands) initializes the user DB — it creates the
+> directory, runs the schema `create_all`, and inserts default format/type
+> mappings (`file_write`). So `search` / `stats` / `convert` are read-only only
+> when `--user-db-dir` is omitted (or points at an already-initialized user DB on
+> a writable path). Do not point `--user-db-dir` at a read-only path for a read
+> command.
 
 ## Non-interactive execution
 
@@ -128,7 +138,12 @@ zero-config automation works; pass `--user-db-dir` to choose an explicit target.
 
 `search` returns at most `--limit` items (default **50**). Use `--limit 0` for
 unlimited (opt-in). Each match is an `item` line; the final `result` carries the
-counts.
+counts. `--limit` / `--offset` are applied **after** post-filters (aliases,
+deprecated, usage), so they count active results, not raw keyword matches.
+
+> Cost note: `--limit` bounds the output, not the scan. A broad / near-empty
+> partial query still materializes all keyword matches before filtering. Prefer
+> specific queries. Repository-level bounding is tracked in issue #37.
 
 ```bash
 tag-db search --query cat --limit 2
