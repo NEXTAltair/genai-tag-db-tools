@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from genai_tag_db_tools import errors
 from genai_tag_db_tools.core_api import (
+    default_sources,
     ensure_databases,
     get_statistics,
     initialize_databases,
@@ -145,17 +146,19 @@ def _build_register_service() -> TagRegisterService:
 
 def cmd_ensure_dbs(args: argparse.Namespace) -> None:
     cache = _build_cache_config(args)
-    requests = [
-        EnsureDbRequest(
-            source=DbSourceRef(
+    if args.source:
+        sources = [
+            DbSourceRef(
                 repo_id=parsed.repo_id,
                 filename=parsed.filename,
                 revision=parsed.revision,
-            ),
-            cache=cache,
-        )
-        for parsed in (_parse_source(value) for value in args.source)
-    ]
+            )
+            for parsed in (_parse_source(value) for value in args.source)
+        ]
+    else:
+        sources = default_sources()
+
+    requests = [EnsureDbRequest(source=source, cache=cache) for source in sources]
     results = ensure_databases(requests)
     for result in results:
         emit_item(result)
@@ -260,16 +263,15 @@ def _add_base_db_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(prog="genai-tag-db-tools")
+def build_parser(prog: str = "tag-db") -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=prog)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     ensure_many_parser = subparsers.add_parser("ensure-dbs", help="Download multiple DBs.")
     ensure_many_parser.add_argument(
         "--source",
         action="append",
-        required=True,
-        help="repo_id/filename[@revision]. Repeat for multiple sources.",
+        help="repo_id/filename[@revision]. Repeat for multiple sources. Omit to use default sources.",
     )
     ensure_many_parser.add_argument(
         "--user-db-dir", help="User database directory (defaults to OS-specific cache)"
@@ -337,7 +339,24 @@ def main() -> None:
     _add_base_db_args(convert_parser)
     convert_parser.set_defaults(func=cmd_convert)
 
-    args = parser.parse_args()
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = build_parser()
+    # argparse の失敗 (必須引数欠落・不正サブコマンド・型不正) も契約どおり JSONL の
+    # error 行 + exit code 2 で返す。--help や正常終了 (code 0) はそのまま通す。
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        if exc.code not in (0, None):
+            emit_error(
+                errors.INVALID_INPUT,
+                "invalid command-line arguments (see stderr or --help)",
+                retryable=False,
+                user_action_required=True,
+            )
+        raise
     # CLI 境界: あらゆる失敗を構造化エラー行 (kind=error) + exit code へマッピングする。
     # traceback だけで終わらせず、stdout の JSONL 最終行に必ず error を出す (#31)。
     try:

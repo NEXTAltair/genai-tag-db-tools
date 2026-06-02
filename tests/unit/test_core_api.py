@@ -73,6 +73,21 @@ def test_ensure_databases_returns_cached_status_per_spec(monkeypatch, tmp_path):
     assert results[1].sha256 == _hash_bytes(b"bb")
 
 
+def test_search_tags_offset_inflates_sql_limit():
+    """offset 使用時は SQL LIMIT に offset を上乗せして candidate を確保する (Codex review)."""
+    repo = DummyRepo(rows=[])
+
+    core_api.search_tags(repo, TagSearchRequest(query="cat", limit=50, offset=50))
+    assert repo.calls[-1]["limit"] == 100
+
+    core_api.search_tags(repo, TagSearchRequest(query="cat", limit=50, offset=0))
+    assert repo.calls[-1]["limit"] == 50
+
+    # 無制限 (limit=None) は offset があっても None のまま
+    core_api.search_tags(repo, TagSearchRequest(query="cat", limit=None, offset=50))
+    assert repo.calls[-1]["limit"] is None
+
+
 def test_search_tags_filters_and_maps():
     rows = [
         {

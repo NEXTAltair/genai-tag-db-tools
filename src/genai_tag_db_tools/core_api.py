@@ -44,7 +44,7 @@ def build_downloaded_at_utc() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _default_sources() -> list[DbSourceRef]:
+def default_sources() -> list[DbSourceRef]:
     return [
         DbSourceRef(
             repo_id="NEXTAltair/genai-image-tag-db",
@@ -108,7 +108,7 @@ def initialize_databases(
 
     cache_dir = resolved_user_db_dir or hf_downloader.default_cache_dir()
     cache = DbCacheConfig(cache_dir=str(cache_dir), token=token)
-    requested_sources = sources or _default_sources()
+    requested_sources = sources or default_sources()
     requests = [EnsureDbRequest(source=source, cache=cache) for source in requested_sources]
 
     results = ensure_databases(requests)
@@ -153,13 +153,20 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
     )
     type_name = request.type_names[0] if request.type_names and len(request.type_names) == 1 else None
 
+    # offset を使う場合は SQL LIMIT に offset 分を上乗せして candidate を確保する。
+    # 上乗せしないと limit 件しか取得できず、後段の offset スライスで全件落ちる
+    # (例: --limit 50 --offset 50 が空を返す)。
+    sql_limit = request.limit
+    if sql_limit is not None and request.offset:
+        sql_limit = sql_limit + request.offset
+
     rows = repo.search_tags(
         request.query,
         partial=request.partial,
         format_name=format_name,
         type_name=type_name,
         resolve_preferred=request.resolve_preferred,
-        limit=request.limit,
+        limit=sql_limit,
     )
     rows = _filter_rows(rows, request)
     total = len(rows)

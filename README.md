@@ -56,7 +56,7 @@
 
 ## 使用方法
 
-### GUIの起動
+### CLIの利用
 
 プロジェクト環境で実行（uv run がプロジェクトの仮想環境を自動的に使用）
 
@@ -64,10 +64,25 @@
 uv run tag-db
 ```
 
+サブコマンド例:
+
+```bash
+uv run tag-db search --query girl
+uv run tag-db stats
+```
+
+### GUIの起動
+
+GUIは明示的に `--gui` を指定して起動する。
+
+```bash
+uv run tag-db --gui
+```
+
 Pythonモジュールとして直接実行
 
 ```bash
-uv run python -m genai_tag_db_tools
+uv run python -m genai_tag_db_tools --gui
 ```
 
 ### CLIコマンド

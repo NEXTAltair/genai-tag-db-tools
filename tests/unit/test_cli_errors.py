@@ -74,6 +74,34 @@ class TestClassifyException:
         assert info.code == errors.INTERNAL_ERROR
         assert info.exit_code == 1
 
+    def test_runtime_error_wrapping_network_cause_is_network(self) -> None:
+        """RuntimeError(...) from network_exc は cause を辿って NETWORK_ERROR に分類する。
+
+        hf_downloader.download_with_offline_fallback がネットワーク失敗を
+        RuntimeError でラップするケース (Codex review)。
+        """
+
+        class _FakeHfError(Exception):
+            pass
+
+        _FakeHfError.__module__ = "huggingface_hub.errors"
+
+        try:
+            try:
+                raise _FakeHfError("offline")
+            except _FakeHfError as net_exc:
+                raise RuntimeError("Failed to download repo/file and no cached version") from net_exc
+        except RuntimeError as exc:
+            info = errors.classify_exception(exc)
+
+        assert info.code == errors.NETWORK_ERROR
+        assert info.retryable is True
+
+    def test_plain_runtime_error_stays_precondition(self) -> None:
+        """ネットワーク cause を持たない RuntimeError は PRECONDITION_FAILED のまま。"""
+        info = errors.classify_exception(RuntimeError("user DB not initialized"))
+        assert info.code == errors.PRECONDITION_FAILED
+
 
 class TestEmitError:
     """Test cli.emit_error output."""
@@ -153,3 +181,34 @@ class TestMainErrorBoundary:
         exit_code, error = self._run_main_expecting_exit(monkeypatch, capsys, KeyError("type"))
         assert exit_code == 1
         assert error["code"] == "INTERNAL_ERROR"
+
+
+class TestMainArgparseBoundary:
+    """argparse 失敗も契約どおり JSONL error 行 + exit code 2 で返す (Codex review)."""
+
+    def test_missing_required_arg_emits_invalid_input_exit_2(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with pytest.raises(SystemExit) as exit_info:
+            cli.main(["search"])  # --query 欠落
+
+        assert int(exit_info.value.code or 0) == 2
+        lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+        error = json.loads(lines[-1])
+        assert error["kind"] == "error"
+        assert error["code"] == "INVALID_INPUT"
+
+    def test_invalid_int_arg_emits_invalid_input_exit_2(self, capsys: pytest.CaptureFixture[str]) -> None:
+        with pytest.raises(SystemExit) as exit_info:
+            cli.main(["search", "--query", "cat", "--limit", "abc"])
+
+        assert int(exit_info.value.code or 0) == 2
+        lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+        assert json.loads(lines[-1])["code"] == "INVALID_INPUT"
+
+    def test_help_exit_zero_emits_no_error_line(self, capsys: pytest.CaptureFixture[str]) -> None:
+        with pytest.raises(SystemExit) as exit_info:
+            cli.main(["--help"])
+
+        assert int(exit_info.value.code or 0) == 0
+        assert '"kind": "error"' not in capsys.readouterr().out

@@ -73,16 +73,37 @@ def _module_chain_matches(exc: BaseException, prefixes: tuple[str, ...]) -> bool
     return any(cls.__module__.startswith(prefixes) for cls in type(exc).__mro__)
 
 
-def _is_network_error(exc: BaseException) -> bool:
+def _iter_cause_chain(exc: BaseException) -> list[BaseException]:
+    """Walk the __cause__ / __context__ chain (e.g. ``raise RuntimeError from e``).
+
+    hf_downloader wraps network failures as ``RuntimeError`` with the original
+    error attached via ``from``, so the real cause must be inspected to avoid
+    misclassifying a download failure as a precondition issue.
+    """
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    return chain
+
+
+def _matches_network(exc: BaseException) -> bool:
     # Match by module so we do not import huggingface_hub / requests eagerly.
     if _module_chain_matches(exc, ("requests", "urllib3", "huggingface_hub", "http.client")):
         return True
-    network_names = {"HfHubHTTPError", "LocalEntryNotFoundError", "OfflineModeIsEnabled"}
+    network_names = {"HfHubHTTPError", "LocalEntryNotFoundError", "OfflineModeIsEnabled", "ConnectionError"}
     return any(cls.__name__ in network_names for cls in type(exc).__mro__)
 
 
+def _is_network_error(exc: BaseException) -> bool:
+    return any(_matches_network(item) for item in _iter_cause_chain(exc))
+
+
 def _is_db_error(exc: BaseException) -> bool:
-    return _module_chain_matches(exc, ("sqlalchemy",))
+    return any(_module_chain_matches(item, ("sqlalchemy",)) for item in _iter_cause_chain(exc))
 
 
 def classify_exception(exc: BaseException) -> ErrorInfo:
