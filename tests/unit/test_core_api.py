@@ -250,12 +250,13 @@ def test_search_tags_plain_keyword_bounds_repo_query():
     request = TagSearchRequest(query="tag", partial=True, limit=2, offset=1)
     result = core_api.search_tags(repo, request)
 
-    # limit/offset をそのまま repository に渡す (over-fetch しない)
-    assert repo.calls[0].get("limit") == 2
-    assert repo.calls[0].get("offset") == 1
+    # offset は repo に渡さず (MergedReader の per-DB offset 不正を回避)、limit+offset を渡す。
+    assert repo.calls[0].get("limit") == 3
+    assert repo.calls[0].get("offset", 0) == 0
+    # offset/limit は merge 後に Python でスライス: DummyRepo の全 5 件中 [1:3] = tag_id 2,3
+    assert [item.tag_id for item in result.items] == [2, 3]
     # bounded fetch のため total は不明 (None)
     assert result.total is None
-    assert len(result.items) == 2
 
 
 def test_search_tags_passes_none_limit_when_not_set():

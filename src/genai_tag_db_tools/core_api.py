@@ -170,16 +170,19 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
 
     if request.limit is not None and not constrained:
         # plain keyword: repository クエリを bound する (preload も page 件数に限定される)。
+        # offset は repository に渡さない。MergedTagReader は offset を各 backing DB に転送して
+        # から merge する (merge 後に再適用しない) ため、per-DB offset は不正なページングになる。
+        # 代わりに limit+offset 件を取得し、merge 後に Python で offset/limit をスライスする。
         rows = repo.search_tags(
             request.query,
             partial=request.partial,
             format_name=None,
             type_name=None,
             resolve_preferred=request.resolve_preferred,
-            limit=request.limit,
-            offset=request.offset,
+            limit=request.limit + request.offset,
         )
-        page = _filter_rows(rows, request)[: request.limit]
+        filtered_rows = _filter_rows(rows, request)
+        page = filtered_rows[request.offset : request.offset + request.limit]
         total: int | None = None  # bounded fetch のため全件数は不明
     else:
         rows = repo.search_tags(
