@@ -204,27 +204,44 @@ tag-db ensure-dbs --source NEXTAltair/genai-image-tag-db/genai-image-tag-db-cc0.
 They do not initialize databases, access the network, or execute the described
 command.
 
+Default output is the compact type notation (`str (required)` / `bool=true` /
+`int>=1?` / `list[str]?`; nested models are referenced by name). `describe`
+returns input / output / error (`CliErrorResult`) model lines.
+
 ```bash
 tag-db describe search
 ```
 
 ```jsonl
-{"kind": "tool", "name": "search", "description": "Search tags.", "side_effects": ["db_read"], "read_only": true, "input_model": "TagSearchRequest", "output_model": "TagSearchResult", "error_model": "CliErrorResult"}
-{"kind": "model", "role": "input", "name": "TagSearchRequest", "version": "1", "schema_format": "inline", "schema": {"title": "TagSearchRequest", "type": "object", "properties": {}}}
-{"kind": "model", "role": "output", "name": "TagSearchResult", "version": "1", "schema_format": "inline", "schema": {"title": "TagSearchResult", "type": "object", "properties": {}}}
-{"kind": "model", "role": "error", "name": "CliErrorResult", "version": "1", "schema_format": "inline", "schema": {"title": "CliErrorResult", "type": "object", "properties": {}}}
-{"kind": "result", "ok": true, "message": "command described", "command": "search", "schema": "inline"}
+{"kind": "tool", "name": "search", "message": "Search tags (read-only).", "read_only": true, "side_effects": ["db_read"], "input_model": "TagSearchRequest", "output_model": "TagSearchResult", "error_model": "CliErrorResult"}
+{"kind": "model", "role": "input", "name": "TagSearchRequest", "message": "input for search", "fields": {"query": "str (required)", "limit": "int>=1?", "format_names": "list[str]?", "offset": "int>=0"}}
+{"kind": "model", "role": "output", "name": "TagSearchResult", "message": "output for search", "fields": {"items": "list[TagRecordPublic] (required)", "total": "int?"}}
+{"kind": "result", "ok": true, "message": "command described", "command": "search"}
 ```
+
+`list-commands` emits one `tool` line per command plus a final `result`:
 
 ```bash
-tag-db list-commands --schema none
+tag-db list-commands
 ```
 
-`--schema` supports:
+### `--schema` modes
 
-- `inline` (default): emit Pydantic `model_json_schema()` in `model` lines.
-- `ref`: emit compact `#/models/<ModelName>` references instead of schema bodies.
-- `none`: emit only `tool` lines and the final `result` line.
+- `compact` (default): short field notation per `model` line (human + agent readable).
+- `json_schema`: the full Pydantic `model_json_schema()`. This mode is the **only**
+  exception to "stdout is kind-tagged JSONL": the first line is a human `#` note,
+  then each model's raw JSON Schema is emitted as one line.
+
+```bash
+tag-db describe search --schema json_schema
+```
+
+```
+# Full JSON Schema (one model per line, raw model_json_schema; not kind-wrapped JSONL)
+{"type": "object", "title": "TagSearchRequest", "properties": {"query": {"type": "string"}, ...}, "required": ["query"]}
+{"type": "object", "title": "TagSearchResult", "properties": {...}}
+{"type": "object", "title": "CliErrorResult", "properties": {...}}
+```
 
 The `tool.read_only` field is the steady-state classification. The conditional
 cold-cache and `--user-db-dir` side effects described above still apply when the
