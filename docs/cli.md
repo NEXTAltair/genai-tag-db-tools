@@ -198,8 +198,34 @@ tag-db ensure-dbs --source NEXTAltair/genai-image-tag-db/genai-image-tag-db-cc0.
 {"kind": "result", "ok": true, "message": "databases ensured", "count": 1}
 ```
 
-## Planned
+## Introspection
 
-Machine-readable command introspection (`describe` / `list-commands` emitting
-`model` / `tool` lines, with `inline` / `ref` / `none` schema modes generated
-from `models.py`) is planned but not yet implemented. See issue #32.
+`describe` and `list-commands` expose command contracts as machine-readable JSONL.
+They do not initialize databases, access the network, or execute the described
+command.
+
+```bash
+tag-db describe search
+```
+
+```jsonl
+{"kind": "tool", "name": "search", "description": "Search tags.", "side_effects": ["db_read"], "read_only": true, "input_model": "TagSearchRequest", "output_model": "TagSearchResult", "error_model": "CliErrorResult"}
+{"kind": "model", "role": "input", "name": "TagSearchRequest", "version": "1", "schema_format": "inline", "schema": {"title": "TagSearchRequest", "type": "object", "properties": {}}}
+{"kind": "model", "role": "output", "name": "TagSearchResult", "version": "1", "schema_format": "inline", "schema": {"title": "TagSearchResult", "type": "object", "properties": {}}}
+{"kind": "model", "role": "error", "name": "CliErrorResult", "version": "1", "schema_format": "inline", "schema": {"title": "CliErrorResult", "type": "object", "properties": {}}}
+{"kind": "result", "ok": true, "message": "command described", "command": "search", "schema": "inline"}
+```
+
+```bash
+tag-db list-commands --schema none
+```
+
+`--schema` supports:
+
+- `inline` (default): emit Pydantic `model_json_schema()` in `model` lines.
+- `ref`: emit compact `#/models/<ModelName>` references instead of schema bodies.
+- `none`: emit only `tool` lines and the final `result` line.
+
+The `tool.read_only` field is the steady-state classification. The conditional
+cold-cache and `--user-db-dir` side effects described above still apply when the
+actual command is executed.

@@ -90,6 +90,7 @@ uv run python -m genai_tag_db_tools --gui
 `tag-db` の各コマンド (`search` / `register` / `stats` / `convert` / `ensure-dbs`) は
 機械可読な JSONL を stdout に出力する。出力形式・標準エラーコード・exit code・副作用区分・
 非対話実行の契約は [docs/cli.md](docs/cli.md) を参照。
+`describe` / `list-commands` で各コマンドの入出力モデルと副作用分類も JSONL として取得できる。
 
 ```bash
 uv run tag-db search --query cat --limit 5

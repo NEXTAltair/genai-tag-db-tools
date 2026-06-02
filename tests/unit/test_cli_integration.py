@@ -25,6 +25,7 @@ from genai_tag_db_tools.cli import (
     cmd_register,
     cmd_search,
     cmd_stats,
+    main,
 )
 from genai_tag_db_tools.models import (
     TagRecordPublic,
@@ -441,3 +442,22 @@ class TestCmdConvert:
 
         # Verify separator parameter
         assert mock_convert.call_args[1]["separator"] == "|"
+
+
+class TestCliIntrospectionIntegration:
+    """Integration smoke tests for metadata-only CLI commands."""
+
+    def test_describe_search_stdout_is_jsonl(self, capsys: pytest.CaptureFixture[str]) -> None:
+        main(["describe", "search"])
+
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert lines[0]["kind"] == "tool"
+        assert lines[0]["name"] == "search"
+        assert lines[-1]["kind"] == "result"
+
+    def test_list_commands_stdout_is_jsonl(self, capsys: pytest.CaptureFixture[str]) -> None:
+        main(["list-commands", "--schema", "none"])
+
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert {line["kind"] for line in lines} == {"tool", "result"}
+        assert lines[-1]["count"] == 5
