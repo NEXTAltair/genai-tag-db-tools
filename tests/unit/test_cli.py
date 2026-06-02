@@ -25,6 +25,7 @@ from genai_tag_db_tools.cli import (
     _dump,
     _parse_source,
     _set_db_paths,
+    cmd_ensure_dbs,
     main,
 )
 from genai_tag_db_tools.db import runtime
@@ -161,6 +162,72 @@ class TestBuildCacheConfig:
         assert config.token is None
 
 
+class TestCmdEnsureDbs:
+    """Test ensure-dbs command behavior."""
+
+    def test_ensure_dbs_without_source_uses_default_sources(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        captured_requests = []
+
+        def fake_ensure_databases(requests):
+            captured_requests.extend(requests)
+            return []
+
+        monkeypatch.setattr("genai_tag_db_tools.cli.ensure_databases", fake_ensure_databases)
+
+        args = argparse.Namespace(source=None, user_db_dir=str(tmp_path), token="test-token")
+        cmd_ensure_dbs(args)
+
+        assert [request.source.repo_id for request in captured_requests] == [
+            "NEXTAltair/genai-image-tag-db",
+            "NEXTAltair/genai-image-tag-db-mit",
+            "NEXTAltair/genai-image-tag-db-CC4",
+        ]
+        assert [request.source.filename for request in captured_requests] == [
+            "genai-image-tag-db-cc0.sqlite",
+            "genai-image-tag-db-mit.sqlite",
+            "genai-image-tag-db-cc4.sqlite",
+        ]
+        assert {request.cache.cache_dir for request in captured_requests} == {str(tmp_path)}
+        assert {request.cache.token for request in captured_requests} == {"test-token"}
+        assert json.loads(capsys.readouterr().out) == []
+
+    def test_ensure_dbs_with_source_uses_only_explicit_sources(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        captured_requests = []
+
+        def fake_ensure_databases(requests):
+            captured_requests.extend(requests)
+            return []
+
+        monkeypatch.setattr("genai_tag_db_tools.cli.ensure_databases", fake_ensure_databases)
+
+        args = argparse.Namespace(
+            source=["org/repo/custom-a.sqlite@main", "org/repo/custom-b.sqlite"],
+            user_db_dir=str(tmp_path),
+            token=None,
+        )
+        cmd_ensure_dbs(args)
+
+        explicit_sources = [
+            (request.source.repo_id, request.source.filename, request.source.revision)
+            for request in captured_requests
+        ]
+        assert explicit_sources == [
+            ("org/repo", "custom-a.sqlite", "main"),
+            ("org/repo", "custom-b.sqlite", None),
+        ]
+        assert json.loads(capsys.readouterr().out) == []
+
+
 class TestSetDbPaths:
     """Test _set_db_paths function."""
 
@@ -289,6 +356,17 @@ class TestMainParser:
         handler.assert_called_once()
         args = handler.call_args.args[0]
         assert args.base_db == ["/tmp/base-a.sqlite", "/tmp/base-b.sqlite"]
+
+    def test_ensure_dbs_accepts_no_source(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        handler = MagicMock()
+        monkeypatch.setattr(cli, "cmd_ensure_dbs", handler)
+        monkeypatch.setattr(sys, "argv", ["tag-db", "ensure-dbs"])
+
+        main()
+
+        handler.assert_called_once()
+        args = handler.call_args.args[0]
+        assert args.source is None
 
 
 class TestBuildRegisterService:
