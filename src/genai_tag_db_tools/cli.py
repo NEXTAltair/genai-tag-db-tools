@@ -1,8 +1,11 @@
 import argparse
 import json
+import sys
+import traceback
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from genai_tag_db_tools import errors
 from genai_tag_db_tools.core_api import (
     default_sources,
     ensure_databases,
@@ -62,25 +65,63 @@ def _build_cache_config(args: argparse.Namespace) -> DbCacheConfig:
     )
 
 
-def _dump(obj: object) -> None:
-    from typing import Any, Protocol, cast
+def _emit(line: dict[str, object]) -> None:
+    """1 行 = 1 つの valid JSON オブジェクトを stdout へ出力する (JSONL)。
 
-    class HasModelDump(Protocol):
-        """Pydantic BaseModel like object with model_dump method."""
+    stdout は JSONL 専用。ログ・進捗・装飾は stderr (loguru の既定 sink) へ出す。
+    """
+    print(json.dumps(line, ensure_ascii=False, default=str))
 
-        def model_dump(self) -> dict[str, Any]: ...
 
-    payload: dict[str, Any] | list[Any] | object
-    if hasattr(obj, "model_dump"):
-        payload = cast(HasModelDump, obj).model_dump()
-    elif isinstance(obj, list):
-        payload = [
-            cast(HasModelDump, item).model_dump() if hasattr(item, "model_dump") else item for item in obj
-        ]
+def emit_item(record: object) -> None:
+    """list を返すコマンドの 1 レコードを 1 行 (kind=item) で出力する。
+
+    巨大な配列を 1 行に詰めず、レコードごとに改行する。最終行の summary は
+    `emit_result` で別途出す。
+    """
+    payload = record.model_dump() if hasattr(record, "model_dump") else record
+    if isinstance(payload, dict):
+        _emit({"kind": "item", **payload})
     else:
-        payload = obj
+        _emit({"kind": "item", "value": payload})
 
-    print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+
+def emit_result(message: str, **output: object) -> None:
+    """成功時の最終行 (kind=result) を出力する。"""
+    _emit({"kind": "result", "ok": True, "message": message, **output})
+
+
+def emit_event(event: str, message: str) -> None:
+    """途中経過 (kind=event) を出力する。必要な場合のみ使う。"""
+    _emit({"kind": "event", "event": event, "message": message})
+
+
+def emit_error(
+    code: str,
+    message: str,
+    *,
+    retryable: bool,
+    user_action_required: bool,
+    hint: str | None = None,
+    details: dict[str, object] | None = None,
+) -> None:
+    """失敗時の最終行 (kind=error) を出力する。
+
+    stderr の文字列パースに依存させず、stdout の JSONL 最終行に構造化エラーを出す。
+    """
+    line: dict[str, object] = {
+        "kind": "error",
+        "ok": False,
+        "code": code,
+        "message": message,
+        "retryable": retryable,
+        "user_action_required": user_action_required,
+    }
+    if hint:
+        line["hint"] = hint
+    if details:
+        line["details"] = details
+    _emit(line)
 
 
 def _set_db_paths(base_db_paths: Iterable[str] | None, user_db_dir: str | None) -> None:
@@ -119,12 +160,18 @@ def cmd_ensure_dbs(args: argparse.Namespace) -> None:
 
     requests = [EnsureDbRequest(source=source, cache=cache) for source in sources]
     results = ensure_databases(requests)
-    _dump(results)
+    for result in results:
+        emit_item(result)
+    emit_result("databases ensured", count=len(results))
 
 
 def cmd_search(args: argparse.Namespace) -> None:
     _set_db_paths(args.base_db, args.user_db_dir)
     repo = get_default_reader()
+    # --limit 0 は無制限の明示 opt-in。それ以外は CLI 既定 (50) を適用する。
+    # 既定値は CLI 層に置き、TagSearchRequest.limit の既定 (None) は変更しない
+    # (core_api を直呼びする利用側の挙動を壊さないため)。
+    limit = None if args.limit == 0 else args.limit
     request = TagSearchRequest(
         query=args.query,
         partial=not args.exact,
@@ -133,16 +180,33 @@ def cmd_search(args: argparse.Namespace) -> None:
         resolve_preferred=args.resolve_preferred,
         include_aliases=args.include_aliases,
         include_deprecated=args.include_deprecated,
+        limit=limit,
+        offset=args.offset,
     )
     result = search_tags(repo, request)
-    _dump(result)
+    for item in result.items:
+        emit_item(item)
+    emit_result(
+        "search completed",
+        query=args.query,
+        count=len(result.items),
+        total=result.total,
+        limit=limit,
+        offset=args.offset,
+    )
 
 
 def cmd_register(args: argparse.Namespace) -> None:
-    if not args.user_db_dir:
-        raise ValueError("--user-db-dir is required for register")
+    # #25 案A: register も未指定時は default_cache_dir() 配下の user DB へフォールバックする
+    # (他コマンドと挙動を揃え、エージェント/自動化がゼロコンフィグで動くようにする)。
+    if args.user_db_dir:
+        user_db_dir = args.user_db_dir
+    else:
+        from genai_tag_db_tools.io.hf_downloader import default_cache_dir
 
-    _set_db_paths(args.base_db, args.user_db_dir)
+        user_db_dir = str(default_cache_dir())
+
+    _set_db_paths(args.base_db, user_db_dir)
     translations = [TagTranslationInput(language=lang, translation=text) for lang, text in args.translation]
     request = TagRegisterRequest(
         tag=args.tag,
@@ -155,14 +219,18 @@ def cmd_register(args: argparse.Namespace) -> None:
     )
     service = _build_register_service()
     result = register_tag(service, request)
-    _dump(result)
+    emit_result(
+        "tag registered" if result.created else "tag already exists",
+        created=result.created,
+        tag_id=result.tag_id,
+    )
 
 
 def cmd_stats(args: argparse.Namespace) -> None:
     _set_db_paths(args.base_db, args.user_db_dir)
     repo = get_default_reader()
     result = get_statistics(repo)
-    _dump(result)
+    emit_result("statistics", **result.model_dump())
 
 
 def cmd_convert(args: argparse.Namespace) -> None:
@@ -174,15 +242,13 @@ def cmd_convert(args: argparse.Namespace) -> None:
 
     converted = convert_tags(repo, args.tags, args.format_name, separator=args.separator)
 
-    if args.json:
-        result = {
-            "input": args.tags,
-            "output": converted,
-            "format": args.format_name,
-        }
-        _dump(result)
-    else:
-        print(converted)
+    # 出力は JSONL 一本化。--json は後方互換のため受理するが無視する (deprecated)。
+    emit_result(
+        "tags converted",
+        input=args.tags,
+        output=converted,
+        format=args.format_name,
+    )
 
 
 def _add_base_db_args(parser: argparse.ArgumentParser) -> None:
@@ -193,7 +259,7 @@ def _add_base_db_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--user-db-dir",
-        help="User database directory. Required for register.",
+        help="User database directory (defaults to OS-specific cache dir).",
     )
 
 
@@ -225,6 +291,18 @@ def build_parser(prog: str = "tag-db") -> argparse.ArgumentParser:
         action="store_true",
         help="Use exact matching (partial match is default).",
     )
+    search_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum number of items to return (default: 50). Use 0 for unlimited.",
+    )
+    search_parser.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        help="Number of items to skip (default: 0).",
+    )
     _add_base_db_args(search_parser)
     search_parser.set_defaults(func=cmd_search)
 
@@ -253,7 +331,11 @@ def build_parser(prog: str = "tag-db") -> argparse.ArgumentParser:
     convert_parser.add_argument("--tags", required=True, help="Comma-separated tags")
     convert_parser.add_argument("--format-name", required=True, help="Target format (e.g., danbooru, e621)")
     convert_parser.add_argument("--separator", default=", ", help="Tag separator (default: ', ')")
-    convert_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    convert_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Deprecated: output is always JSONL. Accepted but ignored.",
+    )
     _add_base_db_args(convert_parser)
     convert_parser.set_defaults(func=cmd_convert)
 
@@ -262,5 +344,33 @@ def build_parser(prog: str = "tag-db") -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
-    args = parser.parse_args(argv)
-    args.func(args)
+    # argparse の失敗 (必須引数欠落・不正サブコマンド・型不正) も契約どおり JSONL の
+    # error 行 + exit code 2 で返す。--help や正常終了 (code 0) はそのまま通す。
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        if exc.code not in (0, None):
+            emit_error(
+                errors.INVALID_INPUT,
+                "invalid command-line arguments (see stderr or --help)",
+                retryable=False,
+                user_action_required=True,
+            )
+        raise
+    # CLI 境界: あらゆる失敗を構造化エラー行 (kind=error) + exit code へマッピングする。
+    # traceback だけで終わらせず、stdout の JSONL 最終行に必ず error を出す (#31)。
+    try:
+        args.func(args)
+    except Exception as exc:  # CLI top-level error boundary (see #31)
+        info = errors.classify_exception(exc)
+        emit_error(
+            info.code,
+            str(exc) or type(exc).__name__,
+            retryable=info.retryable,
+            user_action_required=info.user_action_required,
+            hint=errors.hint_for(info.code),
+        )
+        # 予期しない内部エラーのみ、診断用に traceback を stderr へ (stdout は JSONL 専用)。
+        if info.code == errors.INTERNAL_ERROR:
+            traceback.print_exc(file=sys.stderr)
+        sys.exit(info.exit_code)

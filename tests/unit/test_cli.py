@@ -22,11 +22,13 @@ import genai_tag_db_tools.cli as cli
 from genai_tag_db_tools.cli import (
     ParsedSource,
     _build_cache_config,
-    _dump,
     _parse_source,
     _set_db_paths,
     build_parser,
     cmd_ensure_dbs,
+    emit_event,
+    emit_item,
+    emit_result,
     main,
 )
 from genai_tag_db_tools.db import runtime
@@ -66,71 +68,50 @@ class TestParseSource:
             _parse_source("repo_id/")
 
 
-class TestDump:
-    """Test _dump function."""
+class TestEmitters:
+    """Test JSONL emitter functions (emit_result / emit_item / emit_event)."""
 
-    def test_dump_pydantic_model(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Pydantic modelの辞書変換とJSON出力"""
+    def test_emit_result_is_single_jsonl_line(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """emit_result は kind=result の 1 行 JSONL を出力する"""
+        emit_result("done", count=3)
 
-        class SampleModel(BaseModel):
-            name: str
-            value: int
+        lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+        assert len(lines) == 1
+        assert json.loads(lines[0]) == {"kind": "result", "ok": True, "message": "done", "count": 3}
 
-        model = SampleModel(name="test", value=42)
-        _dump(model)
-
-        captured = capsys.readouterr()
-        output = json.loads(captured.out)
-        assert output == {"name": "test", "value": 42}
-
-    def test_dump_list_of_models(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Pydantic modelリストの変換とJSON出力"""
+    def test_emit_item_wraps_pydantic_model(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """emit_item は Pydantic model を kind=item の 1 行で平坦に出力する"""
 
         class Item(BaseModel):
             id: int
             label: str
 
-        items = [Item(id=1, label="first"), Item(id=2, label="second")]
-        _dump(items)
+        emit_item(Item(id=1, label="first"))
 
-        captured = capsys.readouterr()
-        output = json.loads(captured.out)
-        assert output == [{"id": 1, "label": "first"}, {"id": 2, "label": "second"}]
+        output = json.loads(capsys.readouterr().out)
+        assert output == {"kind": "item", "id": 1, "label": "first"}
 
-    def test_dump_mixed_list(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Pydantic modelと通常オブジェクトの混在リスト"""
+    def test_emit_item_non_dict_value(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """dict 化できない値は value キーに包む"""
+        emit_item("plain_string")
 
-        class Model(BaseModel):
-            key: str
+        output = json.loads(capsys.readouterr().out)
+        assert output == {"kind": "item", "value": "plain_string"}
 
-        mixed = [Model(key="model"), "plain_string", 123]
-        _dump(mixed)
+    def test_emit_event(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """emit_event は kind=event の進捗行を出力する"""
+        emit_event("progress", "halfway")
 
-        captured = capsys.readouterr()
-        output = json.loads(captured.out)
-        assert output == [{"key": "model"}, "plain_string", 123]
+        output = json.loads(capsys.readouterr().out)
+        assert output == {"kind": "event", "event": "progress", "message": "halfway"}
 
-    def test_dump_plain_object(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """通常のオブジェクト（辞書など）の出力"""
-        plain_dict = {"status": "ok", "count": 10}
-        _dump(plain_dict)
+    def test_emit_ensures_ascii_false(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """日本語文字列が Unicode escape されずに出力される"""
+        emit_result("テスト")
 
-        captured = capsys.readouterr()
-        output = json.loads(captured.out)
-        assert output == {"status": "ok", "count": 10}
-
-    def test_dump_ensures_ascii_false(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """日本語文字列が正しくエンコードされる"""
-
-        class JapaneseModel(BaseModel):
-            text: str
-
-        model = JapaneseModel(text="テスト")
-        _dump(model)
-
-        captured = capsys.readouterr()
-        assert "テスト" in captured.out
-        assert "\\u" not in captured.out  # Unicode escapeされていない
+        out = capsys.readouterr().out
+        assert "テスト" in out
+        assert "\\u" not in out
 
 
 class TestBuildCacheConfig:
@@ -195,7 +176,9 @@ class TestCmdEnsureDbs:
         ]
         assert {request.cache.cache_dir for request in captured_requests} == {str(tmp_path)}
         assert {request.cache.token for request in captured_requests} == {"test-token"}
-        assert json.loads(capsys.readouterr().out) == []
+        # 結果 0 件でも最終行は result (count=0) の JSONL
+        result = json.loads(capsys.readouterr().out)
+        assert result == {"kind": "result", "ok": True, "message": "databases ensured", "count": 0}
 
     def test_ensure_dbs_with_source_uses_only_explicit_sources(
         self,
@@ -226,7 +209,8 @@ class TestCmdEnsureDbs:
             ("org/repo", "custom-a.sqlite", "main"),
             ("org/repo", "custom-b.sqlite", None),
         ]
-        assert json.loads(capsys.readouterr().out) == []
+        result = json.loads(capsys.readouterr().out)
+        assert result == {"kind": "result", "ok": True, "message": "databases ensured", "count": 0}
 
 
 class TestSetDbPaths:

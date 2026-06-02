@@ -28,9 +28,15 @@ from genai_tag_db_tools.cli import (
 )
 from genai_tag_db_tools.models import (
     TagRecordPublic,
+    TagRegisterResult,
     TagSearchResult,
     TagStatisticsResult,
 )
+
+
+def _parse_jsonl(output: str) -> list[dict]:
+    """Parse JSONL stdout into a list of JSON objects (1 line = 1 object)."""
+    return [json.loads(line) for line in output.splitlines() if line.strip()]
 
 
 class TestCmdSearch:
@@ -78,6 +84,8 @@ class TestCmdSearch:
             include_aliases=False,
             include_deprecated=False,
             exact=False,
+            limit=50,
+            offset=0,
             base_db=[str(base_db)],
             user_db_dir=None,
         )
@@ -87,13 +95,18 @@ class TestCmdSearch:
         assert mock_search.called
         request = mock_search.call_args[0][1]
         assert request.query == "test"
+        assert request.limit == 50
+        assert request.offset == 0
 
-        # Verify output
-        captured = capsys.readouterr()
-        output = json.loads(captured.out)
-        assert output["total"] == 1
-        assert len(output["items"]) == 1
-        assert output["items"][0]["tag"] == "test_tag"
+        # Verify JSONL output: 1 item line + final result line
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert lines[-1]["kind"] == "result"
+        assert lines[-1]["ok"] is True
+        assert lines[-1]["count"] == 1
+        assert lines[-1]["total"] == 1
+        items = [line for line in lines if line["kind"] == "item"]
+        assert len(items) == 1
+        assert items[0]["tag"] == "test_tag"
 
     @patch("genai_tag_db_tools.cli.get_default_reader")
     @patch("genai_tag_db_tools.cli.search_tags")
@@ -113,6 +126,8 @@ class TestCmdSearch:
             include_aliases=True,
             include_deprecated=False,
             exact=False,
+            limit=50,
+            offset=0,
             base_db=[str(base_db)],
             user_db_dir=None,
         )
@@ -126,6 +141,34 @@ class TestCmdSearch:
         assert request.resolve_preferred is True
         assert request.include_aliases is True
         assert request.include_deprecated is False
+
+    @patch("genai_tag_db_tools.cli.get_default_reader")
+    @patch("genai_tag_db_tools.cli.search_tags")
+    def test_search_limit_zero_means_unlimited(
+        self, mock_search: MagicMock, mock_reader: MagicMock, tmp_path: Path
+    ) -> None:
+        """--limit 0 は無制限 (request.limit=None) の opt-in"""
+        mock_search.return_value = TagSearchResult(items=[], total=0)
+
+        base_db = tmp_path / "base.db"
+        base_db.touch()
+        args = argparse.Namespace(
+            query="cat",
+            format_name=None,
+            type_name=None,
+            resolve_preferred=False,
+            include_aliases=False,
+            include_deprecated=False,
+            exact=False,
+            limit=0,
+            offset=0,
+            base_db=[str(base_db)],
+            user_db_dir=None,
+        )
+        cmd_search(args)
+
+        request = mock_search.call_args[0][1]
+        assert request.limit is None
 
 
 class TestCmdRegister:
@@ -164,20 +207,7 @@ class TestCmdRegister:
         """基本的なタグ登録"""
         self._mock_default_bases(monkeypatch, tmp_path)
         # Mock response
-        mock_result = TagRecordPublic(
-            tag="new_tag",
-            source_tag=None,
-            tag_id=2,
-            format_name="custom",
-            type_id=1,
-            type_name="general",
-            alias=False,
-            deprecated=False,
-            usage_count=0,
-            translations=None,
-            format_statuses=None,
-        )
-        mock_register.return_value = mock_result
+        mock_register.return_value = TagRegisterResult(created=True, tag_id=2)
 
         # Execute command
         user_db = tmp_path / "user_db"
@@ -202,15 +232,33 @@ class TestCmdRegister:
         assert request.format_name == "custom"
         assert request.type_name == "general"
 
-        # Verify output
-        captured = capsys.readouterr()
-        output = json.loads(captured.out)
-        assert output["tag"] == "new_tag"
+        # Verify JSONL result line
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert lines[-1]["kind"] == "result"
+        assert lines[-1]["created"] is True
+        assert lines[-1]["tag_id"] == 2
 
-    def test_register_without_user_db_raises_error(self) -> None:
-        """user_db_dir未指定でエラー"""
+    @patch("genai_tag_db_tools.cli._build_register_service")
+    @patch("genai_tag_db_tools.cli.register_tag")
+    def test_register_without_user_db_falls_back_to_default(
+        self,
+        mock_register: MagicMock,
+        mock_service: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """#25 案A: user_db_dir 未指定でも default_cache_dir() へフォールバックして登録できる"""
+        self._mock_default_bases(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            "genai_tag_db_tools.io.hf_downloader.default_cache_dir",
+            lambda: tmp_path / "default_cache",
+        )
+        mock_register.return_value = TagRegisterResult(created=True, tag_id=7)
+
         args = argparse.Namespace(
             tag="tag",
+            source_tag=None,
             format_name="custom",
             type_name="general",
             alias=False,
@@ -219,9 +267,14 @@ class TestCmdRegister:
             base_db=None,
             user_db_dir=None,
         )
+        cmd_register(args)
 
-        with pytest.raises(ValueError, match="--user-db-dir is required"):
-            cmd_register(args)
+        # フォールバックでも register_tag が呼ばれ、result 行が出る
+        assert mock_register.called
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert lines[-1]["kind"] == "result"
+        assert lines[-1]["created"] is True
+        assert lines[-1]["tag_id"] == 7
 
     @patch("genai_tag_db_tools.cli._build_register_service")
     @patch("genai_tag_db_tools.cli.register_tag")
@@ -234,20 +287,7 @@ class TestCmdRegister:
     ) -> None:
         """翻訳付きタグ登録"""
         self._mock_default_bases(monkeypatch, tmp_path)
-        mock_result = TagRecordPublic(
-            tag="translated_tag",
-            source_tag=None,
-            tag_id=3,
-            format_name="custom",
-            type_id=1,
-            type_name="general",
-            alias=False,
-            deprecated=False,
-            usage_count=0,
-            translations={"ja": ["翻訳タグ"], "en": ["Translated Tag"]},
-            format_statuses=None,
-        )
-        mock_register.return_value = mock_result
+        mock_register.return_value = TagRegisterResult(created=True, tag_id=3)
 
         user_db = tmp_path / "user_db"
         user_db.mkdir()
@@ -300,13 +340,13 @@ class TestCmdStats:
         # Verify get_statistics called
         assert mock_stats.called
 
-        # Verify output
-        captured = capsys.readouterr()
-        output = json.loads(captured.out)
-        assert output["total_tags"] == 1000
-        assert output["total_aliases"] == 200
-        assert output["total_formats"] == 5
-        assert output["total_types"] == 10
+        # Verify JSONL result line
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert lines[-1]["kind"] == "result"
+        assert lines[-1]["total_tags"] == 1000
+        assert lines[-1]["total_aliases"] == 200
+        assert lines[-1]["total_formats"] == 5
+        assert lines[-1]["total_types"] == 10
 
 
 class TestCmdConvert:
@@ -321,7 +361,7 @@ class TestCmdConvert:
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """基本的なタグ変換（テキスト出力）"""
+        """基本的なタグ変換 (JSONL 出力に統一)"""
         mock_convert.return_value = "tag1, tag2, tag3"
 
         base_db = tmp_path / "base.db"
@@ -341,20 +381,23 @@ class TestCmdConvert:
         assert mock_convert.call_args[0][1] == "tag1,tag2,tag3"
         assert mock_convert.call_args[0][2] == "danbooru"
 
-        # Verify text output
-        captured = capsys.readouterr()
-        assert captured.out.strip() == "tag1, tag2, tag3"
+        # Verify JSONL result line (no more plain-text branch)
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert lines[-1]["kind"] == "result"
+        assert lines[-1]["input"] == "tag1,tag2,tag3"
+        assert lines[-1]["output"] == "tag1, tag2, tag3"
+        assert lines[-1]["format"] == "danbooru"
 
     @patch("genai_tag_db_tools.cli.get_default_reader")
     @patch("genai_tag_db_tools.core_api.convert_tags")
-    def test_convert_json_output(
+    def test_convert_json_flag_is_deprecated_noop(
         self,
         mock_convert: MagicMock,
         mock_reader: MagicMock,
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """タグ変換（JSON出力）"""
+        """--json は後方互換で受理されるが出力は常に JSONL (deprecated no-op)"""
         mock_convert.return_value = "converted1, converted2"
 
         base_db = tmp_path / "base.db"
@@ -369,12 +412,12 @@ class TestCmdConvert:
         )
         cmd_convert(args)
 
-        # Verify JSON output structure
-        captured = capsys.readouterr()
-        output = json.loads(captured.out)
-        assert output["input"] == "original1,original2"
-        assert output["output"] == "converted1, converted2"
-        assert output["format"] == "e621"
+        # --json 有無に関わらず同じ JSONL result 行になる
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert lines[-1]["kind"] == "result"
+        assert lines[-1]["input"] == "original1,original2"
+        assert lines[-1]["output"] == "converted1, converted2"
+        assert lines[-1]["format"] == "e621"
 
     @patch("genai_tag_db_tools.cli.get_default_reader")
     @patch("genai_tag_db_tools.core_api.convert_tags")

@@ -25,11 +25,11 @@ def _run_gui(argv: list[str] | None = None) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     args = sys.argv[1:] if argv is None else argv
-    if not args:
-        _build_entry_parser().print_help()
-        return
 
-    if args in (["-h"], ["--help"]):
+    # 引数なし / 明示 help は人間向け help を stdout (exit 0) で返す launcher meta 挙動。
+    # JSONL の result/error 契約はコマンド実行時のものであり、help はその文書化された例外
+    # (docs/cli.md 参照)。GUI を import せず help を出す点は #35 で保証。
+    if not args or args in (["-h"], ["--help"]):
         _build_entry_parser().print_help()
         return
 
