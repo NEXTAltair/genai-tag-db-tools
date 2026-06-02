@@ -25,6 +25,7 @@ from genai_tag_db_tools.cli import (
     _dump,
     _parse_source,
     _set_db_paths,
+    build_parser,
     cmd_ensure_dbs,
     main,
 )
@@ -303,6 +304,11 @@ class TestSetDbPaths:
 
 class TestMainParser:
     """Test CLI parser wiring."""
+
+    def test_build_parser_uses_tag_db_prog(self) -> None:
+        parser = build_parser()
+
+        assert parser.prog == "tag-db"
 
     @pytest.mark.parametrize(
         ("command_args", "handler_name"),
