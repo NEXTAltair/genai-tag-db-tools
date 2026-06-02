@@ -17,10 +17,10 @@ from genai_tag_db_tools.core_api import (
 from genai_tag_db_tools.db import runtime
 from genai_tag_db_tools.db.repository import get_default_reader, get_default_repository
 from genai_tag_db_tools.introspection import (
-    SchemaMode,
+    full_schemas,
     get_tool_spec,
-    iter_model_lines,
     iter_tool_specs,
+    model_lines,
     tool_line,
 )
 from genai_tag_db_tools.models import (
@@ -259,22 +259,25 @@ def cmd_convert(args: argparse.Namespace) -> None:
 
 
 def cmd_describe(args: argparse.Namespace) -> None:
-    schema_mode: SchemaMode = args.schema
     spec = get_tool_spec(args.target_command)
+    if args.schema == "json_schema":
+        # 文書化された例外 (ADR 0005): kind 付き JSONL ではなく、人間向け # note 1 行 +
+        # 各モデルの model_json_schema() を生の 1 行 JSON で出力する。
+        print("# Full JSON Schema (one model per line, raw model_json_schema; not kind-wrapped JSONL)")
+        for schema in full_schemas([spec]):
+            print(json.dumps(schema, ensure_ascii=False))
+        return
     _emit(tool_line(spec))
-    for line in iter_model_lines([spec], schema_mode):
+    for line in model_lines(spec):
         _emit(line)
-    emit_result("command described", command=spec.name, schema=schema_mode)
+    emit_result("command described", command=spec.name)
 
 
 def cmd_list_commands(args: argparse.Namespace) -> None:
-    schema_mode: SchemaMode = args.schema
     specs = list(iter_tool_specs())
     for spec in specs:
         _emit(tool_line(spec))
-    for line in iter_model_lines(specs, schema_mode):
-        _emit(line)
-    emit_result("commands listed", count=len(specs), schema=schema_mode)
+    emit_result("commands listed", count=len(specs))
 
 
 def _add_base_db_args(parser: argparse.ArgumentParser) -> None:
@@ -372,21 +375,15 @@ def build_parser(prog: str = "tag-db") -> argparse.ArgumentParser:
     describe_parser.add_argument("target_command", choices=[spec.name for spec in iter_tool_specs()])
     describe_parser.add_argument(
         "--schema",
-        choices=["inline", "ref", "none"],
-        default="inline",
-        help="Schema output mode (default: inline).",
+        choices=["compact", "json_schema"],
+        default="compact",
+        help="compact (default) for short field notation, json_schema for the full schema.",
     )
     describe_parser.set_defaults(func=cmd_describe)
 
     list_commands_parser = subparsers.add_parser(
         "list-commands",
         help="Emit machine-readable metadata for all commands.",
-    )
-    list_commands_parser.add_argument(
-        "--schema",
-        choices=["inline", "ref", "none"],
-        default="inline",
-        help="Schema output mode (default: inline).",
     )
     list_commands_parser.set_defaults(func=cmd_list_commands)
 
