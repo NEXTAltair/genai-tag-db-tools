@@ -11,17 +11,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from pydantic import BaseModel
 
+import genai_tag_db_tools.cli as cli
 from genai_tag_db_tools.cli import (
     ParsedSource,
     _build_cache_config,
     _dump,
     _parse_source,
     _set_db_paths,
+    main,
 )
 from genai_tag_db_tools.db import runtime
 
@@ -220,7 +224,7 @@ class TestSetDbPaths:
 
         _set_db_paths(None, str(user_dir))
 
-        # user_db初期化確認（runtime state check）
+        # user_db初期化確認(runtime state check)
         # Note: runtime.user_db_pathはprivateなので、副作用の確認は制限される
 
     def test_set_db_paths_none_specified(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -228,6 +232,63 @@ class TestSetDbPaths:
         self._mock_default_bases(monkeypatch, tmp_path)
         # エラーなく完了すればOK
         _set_db_paths(None, None)
+
+
+class TestMainParser:
+    """Test CLI parser wiring."""
+
+    @pytest.mark.parametrize(
+        ("command_args", "handler_name"),
+        [
+            (["search", "--query", "cat"], "cmd_search"),
+            (["stats"], "cmd_stats"),
+            (["convert", "--tags", "cat", "--format-name", "danbooru"], "cmd_convert"),
+            (
+                [
+                    "register",
+                    "--tag",
+                    "cat",
+                    "--format-name",
+                    "custom",
+                    "--type-name",
+                    "general",
+                    "--user-db-dir",
+                    "/tmp/user-db",
+                ],
+                "cmd_register",
+            ),
+        ],
+    )
+    def test_base_db_arg_is_available_to_commands(
+        self,
+        command_args: list[str],
+        handler_name: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        handler = MagicMock()
+        monkeypatch.setattr(cli, handler_name, handler)
+        monkeypatch.setattr(sys, "argv", ["tag-db", *command_args, "--base-db", "/tmp/base.sqlite"])
+
+        main()
+
+        handler.assert_called_once()
+        args = handler.call_args.args[0]
+        assert args.base_db == ["/tmp/base.sqlite"]
+
+    def test_base_db_arg_accepts_multiple_values(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        handler = MagicMock()
+        monkeypatch.setattr(cli, "cmd_stats", handler)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["tag-db", "stats", "--base-db", "/tmp/base-a.sqlite", "--base-db", "/tmp/base-b.sqlite"],
+        )
+
+        main()
+
+        handler.assert_called_once()
+        args = handler.call_args.args[0]
+        assert args.base_db == ["/tmp/base-a.sqlite", "/tmp/base-b.sqlite"]
 
 
 class TestBuildRegisterService:
