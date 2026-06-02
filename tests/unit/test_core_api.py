@@ -73,62 +73,46 @@ def test_ensure_databases_returns_cached_status_per_spec(monkeypatch, tmp_path):
     assert results[1].sha256 == _hash_bytes(b"bb")
 
 
-def test_search_tags_paginates_after_post_filters():
-    """limit/offset は post-filter 後の行に適用し、SQL LIMIT は使わない (Codex review)."""
+def _usage_row(tag_id: int, usage: int) -> dict[str, object]:
+    return {
+        "tag": f"t{tag_id}",
+        "source_tag": None,
+        "tag_id": tag_id,
+        "format_name": None,
+        "type_id": 1,
+        "type_name": "general",
+        "alias": False,
+        "deprecated": False,
+        "usage_count": usage,
+        "translations": None,
+        "format_statuses": {},
+    }
 
-    def _row(tag_id: int, *, deprecated: bool = False) -> dict:
-        return {
-            "tag": f"t{tag_id}",
-            "source_tag": None,
-            "tag_id": tag_id,
-            "format_name": None,
-            "type_id": 1,
-            "type_name": "general",
-            "alias": False,
-            "deprecated": deprecated,
-            "usage_count": 1,
-            "translations": None,
-            "format_statuses": {},
-        }
 
-    # 先頭 2 件は deprecated (既定 include_deprecated=False で除外される)
-    rows = [_row(1, deprecated=True), _row(2, deprecated=True), _row(3), _row(4), _row(5)]
+def test_search_tags_constrained_paginates_after_filter():
+    """制約付き検索は unbounded fetch → filter → Python paging。total は filter 後の正確な件数。"""
+    # min_usage=10 で usage<10 の先頭 2 件が落ちる
+    rows = [_usage_row(1, 1), _usage_row(2, 1), _usage_row(3, 50), _usage_row(4, 60), _usage_row(5, 70)]
     repo = DummyRepo(rows=rows)
 
-    result = core_api.search_tags(repo, TagSearchRequest(query="t", limit=2, offset=0))
+    result = core_api.search_tags(repo, TagSearchRequest(query="t", limit=2, offset=0, min_usage=10))
 
-    # post-filter があるため SQL LIMIT は渡さない (全件取得 → filter → Python paging)
+    # 制約あり → SQL LIMIT は使わず全件取得
     assert repo.calls[-1]["limit"] is None
-    # deprecated 2 件除外後の active 3 件中、limit=2 で先頭 2 件 (tag_id 3, 4)
+    # usage>=10 の active 3 件 (3,4,5) 中、limit=2 → (3,4)
     assert [item.tag_id for item in result.items] == [3, 4]
-    # total は filter 後の全件数 (3)。limit でキャップされない
+    # total は filter 後の全件数 (3)、limit でキャップされない
     assert result.total == 3
 
 
-def test_search_tags_offset_after_filter_returns_later_rows():
-    """offset も filter 後の行に対して適用される (先頭が落ちても空にならない)."""
-
-    def _row(tag_id: int, *, deprecated: bool = False) -> dict:
-        return {
-            "tag": f"t{tag_id}",
-            "source_tag": None,
-            "tag_id": tag_id,
-            "format_name": None,
-            "type_id": 1,
-            "type_name": "general",
-            "alias": False,
-            "deprecated": deprecated,
-            "usage_count": 1,
-            "translations": None,
-            "format_statuses": {},
-        }
-
-    rows = [_row(1, deprecated=True), _row(2), _row(3), _row(4)]
+def test_search_tags_constrained_offset_returns_later_rows():
+    """制約付き検索でも offset は filter 後の行に適用される (先頭が落ちても空にならない)。"""
+    rows = [_usage_row(1, 1), _usage_row(2, 50), _usage_row(3, 60), _usage_row(4, 70)]
     repo = DummyRepo(rows=rows)
 
-    result = core_api.search_tags(repo, TagSearchRequest(query="t", limit=2, offset=1))
+    result = core_api.search_tags(repo, TagSearchRequest(query="t", limit=2, offset=1, min_usage=10))
 
-    # active 3 件 (2,3,4) を offset=1 → (3,4)
+    # usage>=10 の (2,3,4) を offset=1 → (3,4)
     assert [item.tag_id for item in result.items] == [3, 4]
     assert result.total == 3
 
@@ -235,48 +219,44 @@ def test_search_tags_applies_offset_and_limit_preserves_total():
         for i in range(1, 6)
     ]
     repo = DummyRepo(rows)
+    # min_usage=1 は全行 (usage=100) を通すが、制約付きパス (unbounded fetch → Python paging)
+    # を通すことで offset/limit が Python 側で適用され total が保持されることを検証する。
     request = TagSearchRequest(
         query="tag",
         partial=True,
         include_aliases=True,
         include_deprecated=True,
+        min_usage=1,
         offset=1,
         limit=2,
     )
 
     result = core_api.search_tags(repo, request)
 
+    # 制約付き → unbounded fetch、Python で offset/limit、total は filter 後の全件数
+    assert repo.calls[-1]["limit"] is None
     assert [item.tag_id for item in result.items] == [2, 3]
     assert result.total == 5
 
 
-def test_search_tags_does_not_push_limit_to_repo():
-    """limit は SQL に pushdown せず Python 側で適用する (post-filter との整合, Codex review)。"""
-    rows = [
-        {
-            "tag": f"sample_{i}",
-            "source_tag": None,
-            "tag_id": i,
-            "format_name": "danbooru",
-            "type_id": 1,
-            "type_name": "general",
-            "alias": False,
-            "deprecated": False,
-            "usage_count": 100,
-            "translations": None,
-            "format_statuses": {},
-        }
-        for i in range(1, 6)
-    ]
+def test_search_tags_plain_keyword_bounds_repo_query():
+    """plain keyword + limit は limit/offset を repository に pushdown して bound する (autocomplete)。
+
+    format/type/usage 制約が無い検索では post-filter が何も落とさないため、SQL LIMIT を
+    そのまま渡して repository クエリ (および preload) を bound できる。
+    """
+    rows = [_usage_row(i, 100) for i in range(1, 6)]
     repo = DummyRepo(rows)
-    request = TagSearchRequest(query="tag", partial=True, limit=2)
+    request = TagSearchRequest(query="tag", partial=True, limit=2, offset=1)
     result = core_api.search_tags(repo, request)
 
-    # SQL LIMIT は渡さない (全件取得 → filter → Python paging)
-    assert repo.calls[0].get("limit") is None
-    # limit は Python 側で適用 (items は 2 件)、total は全件数 (5)
-    assert len(result.items) == 2
-    assert result.total == 5
+    # offset は repo に渡さず (MergedReader の per-DB offset 不正を回避)、limit+offset を渡す。
+    assert repo.calls[0].get("limit") == 3
+    assert repo.calls[0].get("offset", 0) == 0
+    # offset/limit は merge 後に Python でスライス: DummyRepo の全 5 件中 [1:3] = tag_id 2,3
+    assert [item.tag_id for item in result.items] == [2, 3]
+    # bounded fetch のため total は不明 (None)
+    assert result.total is None
 
 
 def test_search_tags_passes_none_limit_when_not_set():

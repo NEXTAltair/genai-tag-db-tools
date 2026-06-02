@@ -153,26 +153,52 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
     )
     type_name = request.type_names[0] if request.type_names and len(request.type_names) == 1 else None
 
-    # post-filter (_filter_rows: alias / deprecated / usage / 複数 format・type) は
-    # repository クエリの「後」に Python 側で走る。ここで SQL LIMIT を先にかけると、
-    # 先頭 N 件が alias/deprecated だった場合に有効な一致を取りこぼし、total も raw 件数で
-    # キャップされてしまう。そのため SQL LIMIT は使わず、全一致を取得 → filter →
-    # Python 側で offset/limit を適用する。これにより limit/offset は filter 後の行を数え、
-    # total は filter 後の全件数になる。
-    rows = repo.search_tags(
-        request.query,
-        partial=request.partial,
-        format_name=format_name,
-        type_name=type_name,
-        resolve_preferred=request.resolve_preferred,
-        limit=None,
+    # post-filter がドロップしうるのは format/type/usage 制約がある場合のみ。
+    # alias/deprecated/usage/type は format 未指定時に全行デフォルト (False/0/"") になり
+    # (TagSearchResultBuilder._resolve_status_info は format_id がある時だけ解決する)、
+    # _filter_rows は何も落とさない。repository 側の format/type フィルタも SQL LIMIT の後に
+    # 走るため、制約がある検索は limit を pushdown すると取りこぼす。
+    # よって「plain keyword 検索 (制約なし)」のときだけ limit/offset を repository に渡して
+    # bound する (autocomplete/typeahead 経路)。制約付きは全件取得 → filter → Python paging
+    # で正確性を優先する。
+    constrained = bool(
+        request.format_names
+        or request.type_names
+        or request.min_usage is not None
+        or request.max_usage is not None
     )
-    rows = _filter_rows(rows, request)
-    total = len(rows)
-    if request.offset:
-        rows = rows[request.offset :]
-    if request.limit is not None:
-        rows = rows[: request.limit]
+
+    if request.limit is not None and not constrained:
+        # plain keyword: repository クエリを bound する (preload も page 件数に限定される)。
+        # offset は repository に渡さない。MergedTagReader は offset を各 backing DB に転送して
+        # から merge する (merge 後に再適用しない) ため、per-DB offset は不正なページングになる。
+        # 代わりに limit+offset 件を取得し、merge 後に Python で offset/limit をスライスする。
+        rows = repo.search_tags(
+            request.query,
+            partial=request.partial,
+            format_name=None,
+            type_name=None,
+            resolve_preferred=request.resolve_preferred,
+            limit=request.limit + request.offset,
+        )
+        filtered_rows = _filter_rows(rows, request)
+        page = filtered_rows[request.offset : request.offset + request.limit]
+        total: int | None = None  # bounded fetch のため全件数は不明
+    else:
+        rows = repo.search_tags(
+            request.query,
+            partial=request.partial,
+            format_name=format_name,
+            type_name=type_name,
+            resolve_preferred=request.resolve_preferred,
+            limit=None,
+        )
+        filtered = _filter_rows(rows, request)
+        total = len(filtered)
+        page = filtered[request.offset :] if request.offset else filtered
+        if request.limit is not None:
+            page = page[: request.limit]
+
     items = [
         TagRecordPublic(
             tag=row["tag"],
@@ -187,7 +213,7 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
             translations=row["translations"],
             format_statuses=row["format_statuses"],
         )
-        for row in rows
+        for row in page
     ]
     return TagSearchResult(items=items, total=total)
 

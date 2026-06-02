@@ -2,7 +2,7 @@ from logging import Logger
 from typing import Any, TypedDict
 
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import or_
+from sqlalchemy.sql import literal_column, or_
 
 from genai_tag_db_tools.db.schema import (
     Tag,
@@ -56,30 +56,30 @@ class TagSearchQueryBuilder:
         limit: int | None = None,
         offset: int = 0,
     ) -> set[int]:
-        tag_query = self.session.query(Tag.tag_id)
-        translation_query = self.session.query(TagTranslation.tag_id)
-
         tag_conditions = or_(
             Tag.tag.like(keyword) if use_like else Tag.tag == keyword,
             Tag.source_tag.like(keyword) if use_like else Tag.source_tag == keyword,
         )
-        tag_query = tag_query.filter(tag_conditions)
-
         translation_condition = (
             TagTranslation.translation.like(keyword) if use_like else TagTranslation.translation == keyword
         )
-        translation_query = translation_query.filter(translation_condition)
 
+        tag_query = self.session.query(Tag.tag_id.label("tag_id")).filter(tag_conditions)
+        translation_query = self.session.query(TagTranslation.tag_id.label("tag_id")).filter(
+            translation_condition
+        )
+
+        # tag と translation の一致を UNION で重複排除してから limit/offset を適用する。
+        # 各クエリ個別に limit すると、同一タグの多言語 translation 行が窓を食い潰し
+        # ユニークな tag_id 数が limit に満たなくなる (重複排除が limit の後になる問題)。
+        # ページングを決定的にするため tag_id 昇順で order_by する。
+        union_query = tag_query.union(translation_query).order_by(literal_column("tag_id"))
         if offset:
-            tag_query = tag_query.offset(offset)
-            translation_query = translation_query.offset(offset)
+            union_query = union_query.offset(offset)
         if limit is not None:
-            tag_query = tag_query.limit(limit)
-            translation_query = translation_query.limit(limit)
+            union_query = union_query.limit(limit)
 
-        tag_ids = {row[0] for row in tag_query.all()}
-        translation_ids = {row[0] for row in translation_query.all()}
-        return tag_ids | translation_ids
+        return {row[0] for row in union_query.all()}
 
     def initial_tag_ids_for_keywords(self, keywords: list[str]) -> dict[str, set[int]]:
         if not keywords:
