@@ -198,8 +198,48 @@ tag-db ensure-dbs --source NEXTAltair/genai-image-tag-db/genai-image-tag-db-cc0.
 {"kind": "result", "ok": true, "message": "databases ensured", "count": 1}
 ```
 
-## Planned
+### list-commands — machine-readable command list (`db_read`)
 
-Machine-readable command introspection (`describe` / `list-commands` emitting
-`model` / `tool` lines, with `inline` / `ref` / `none` schema modes generated
-from `models.py`) is planned but not yet implemented. See issue #32.
+One `tool` line per command (name, side effects, read-only, input/output model)
+plus a final `result`. Schemas are generated from the Pydantic models in
+`models.py`.
+
+```bash
+tag-db list-commands
+```
+
+```jsonl
+{"kind": "tool", "name": "search", "message": "Search tags (read-only)", "read_only": true, "side_effects": ["db_read"], "input_model": "TagSearchRequest", "output_model": "TagSearchResult"}
+{"kind": "result", "ok": true, "message": "5 commands", "count": 5}
+```
+
+### describe — describe a command's input/output models (`db_read`)
+
+Default output is the compact type notation (`str (required)` / `bool=true` /
+`int>=1?` / `list[str]?`; nested models are referenced by name).
+
+```bash
+tag-db describe search
+```
+
+```jsonl
+{"kind": "tool", "name": "search", "message": "Search tags (read-only)", "read_only": true, "side_effects": ["db_read"], "input_model": "TagSearchRequest", "output_model": "TagSearchResult"}
+{"kind": "model", "role": "input", "name": "TagSearchRequest", "message": "input for search", "fields": {"query": "str (required)", "limit": "int>=1?", "format_names": "list[str]?", "offset": "int>=0"}}
+{"kind": "model", "role": "output", "name": "TagSearchResult", "message": "output for search", "fields": {"items": "list[TagRecordPublic] (required)", "total": "int?"}}
+{"kind": "result", "ok": true, "message": "described search", "name": "search"}
+```
+
+**`--schema json_schema` (documented JSONL exception):** emits the full
+`model_json_schema()` for each model. This mode is the **only** exception to
+"stdout is kind-tagged JSONL": the first line is a human `#` note, then each
+model's raw JSON Schema is one line.
+
+```bash
+tag-db describe search --schema json_schema
+```
+
+```
+# Full JSON Schema (one model per line, raw model_json_schema; not kind-wrapped JSONL)
+{"type": "object", "title": "TagSearchRequest", "properties": {"query": {"type": "string"}, ...}, "required": ["query"]}
+{"type": "object", "title": "TagSearchResult", "properties": {...}}
+```

@@ -240,6 +240,34 @@ class TagTypeUpdate(BaseModel):
     type_name: str = Field(..., description="新しいtype名")
 
 
+class ConvertRequest(BaseModel):
+    """タグ変換リクエスト（外部向け）。
+
+    Args:
+        tags: カンマ区切りのタグ文字列。
+        format_name: 変換先フォーマット名（例: danbooru, e621）。
+        separator: 出力タグの区切り文字。
+    """
+
+    tags: str = Field(..., description="カンマ区切りのタグ文字列")
+    format_name: str = Field(..., description="変換先フォーマット名")
+    separator: str = Field(default=", ", description="出力タグの区切り文字")
+
+
+class ConvertResult(BaseModel):
+    """タグ変換結果。
+
+    Args:
+        input: 入力タグ文字列。
+        output: 変換後タグ文字列。
+        format: 変換先フォーマット名。
+    """
+
+    input: str = Field(..., description="入力タグ文字列")
+    output: str = Field(..., description="変換後タグ文字列")
+    format: str = Field(..., description="変換先フォーマット名")
+
+
 class TagStatisticsResult(BaseModel):
     """統計サマリ。
 

@@ -5,7 +5,7 @@ import traceback
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from genai_tag_db_tools import errors
+from genai_tag_db_tools import errors, introspection
 from genai_tag_db_tools.core_api import (
     default_sources,
     ensure_databases,
@@ -17,6 +17,8 @@ from genai_tag_db_tools.core_api import (
 from genai_tag_db_tools.db import runtime
 from genai_tag_db_tools.db.repository import get_default_reader, get_default_repository
 from genai_tag_db_tools.models import (
+    ConvertRequest,
+    ConvertResult,
     DbCacheConfig,
     DbSourceRef,
     EnsureDbRequest,
@@ -240,15 +242,41 @@ def cmd_convert(args: argparse.Namespace) -> None:
     _set_db_paths(args.base_db, args.user_db_dir)
     repo = get_default_reader()
 
-    converted = convert_tags(repo, args.tags, args.format_name, separator=args.separator)
+    request = ConvertRequest(tags=args.tags, format_name=args.format_name, separator=args.separator)
+    converted = convert_tags(repo, request.tags, request.format_name, separator=request.separator)
 
     # 出力は JSONL 一本化。--json は後方互換のため受理するが無視する (deprecated)。
-    emit_result(
-        "tags converted",
-        input=args.tags,
-        output=converted,
-        format=args.format_name,
-    )
+    result = ConvertResult(input=request.tags, output=converted, format=request.format_name)
+    emit_result("tags converted", **result.model_dump())
+
+
+def cmd_list_commands(args: argparse.Namespace) -> None:
+    """List all commands with their side effects / read-only flag (JSONL)."""
+    specs = introspection.COMMANDS
+    for spec in specs:
+        _emit(introspection.tool_line(spec))
+    emit_result(f"{len(specs)} commands", count=len(specs))
+
+
+def cmd_describe(args: argparse.Namespace) -> None:
+    """Describe one command's input/output models (JSONL, or full JSON Schema)."""
+    spec = introspection.find_command(args.command_name)
+    if spec is None:
+        names = ", ".join(s.name for s in introspection.COMMANDS)
+        raise ValueError(f"unknown command: {args.command_name} (choose from: {names})")
+
+    if args.schema == "json_schema":
+        # 文書化された例外 (ADR 0005): kind 付き JSONL ではなく、人間向け # note 1 行 +
+        # 各モデルの model_json_schema() を生の 1 行 JSON で出力する。
+        print("# Full JSON Schema (one model per line, raw model_json_schema; not kind-wrapped JSONL)")
+        for schema in introspection.full_schemas(spec):
+            print(json.dumps(schema, ensure_ascii=False))
+        return
+
+    _emit(introspection.tool_line(spec))
+    for line in introspection.model_lines(spec):
+        _emit(line)
+    emit_result(f"described {spec.name}", name=spec.name)
 
 
 def _add_base_db_args(parser: argparse.ArgumentParser) -> None:
@@ -338,6 +366,23 @@ def build_parser(prog: str = "tag-db") -> argparse.ArgumentParser:
     )
     _add_base_db_args(convert_parser)
     convert_parser.set_defaults(func=cmd_convert)
+
+    list_commands_parser = subparsers.add_parser(
+        "list-commands", help="List commands with side effects / read-only (JSONL)."
+    )
+    list_commands_parser.set_defaults(func=cmd_list_commands)
+
+    describe_parser = subparsers.add_parser(
+        "describe", help="Describe a command's input/output models (JSONL)."
+    )
+    describe_parser.add_argument("command_name", help="Command to describe (e.g. search).")
+    describe_parser.add_argument(
+        "--schema",
+        choices=["compact", "json_schema"],
+        default="compact",
+        help="compact (default) for short field notation, json_schema for the full schema.",
+    )
+    describe_parser.set_defaults(func=cmd_describe)
 
     return parser
 
