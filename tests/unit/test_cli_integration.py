@@ -238,10 +238,27 @@ class TestCmdRegister:
         assert lines[-1]["created"] is True
         assert lines[-1]["tag_id"] == 2
 
-    def test_register_without_user_db_raises_error(self) -> None:
-        """user_db_dir未指定でエラー"""
+    @patch("genai_tag_db_tools.cli._build_register_service")
+    @patch("genai_tag_db_tools.cli.register_tag")
+    def test_register_without_user_db_falls_back_to_default(
+        self,
+        mock_register: MagicMock,
+        mock_service: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """#25 案A: user_db_dir 未指定でも default_cache_dir() へフォールバックして登録できる"""
+        self._mock_default_bases(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            "genai_tag_db_tools.io.hf_downloader.default_cache_dir",
+            lambda: tmp_path / "default_cache",
+        )
+        mock_register.return_value = TagRegisterResult(created=True, tag_id=7)
+
         args = argparse.Namespace(
             tag="tag",
+            source_tag=None,
             format_name="custom",
             type_name="general",
             alias=False,
@@ -250,9 +267,14 @@ class TestCmdRegister:
             base_db=None,
             user_db_dir=None,
         )
+        cmd_register(args)
 
-        with pytest.raises(ValueError, match="--user-db-dir is required"):
-            cmd_register(args)
+        # フォールバックでも register_tag が呼ばれ、result 行が出る
+        assert mock_register.called
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert lines[-1]["kind"] == "result"
+        assert lines[-1]["created"] is True
+        assert lines[-1]["tag_id"] == 7
 
     @patch("genai_tag_db_tools.cli._build_register_service")
     @patch("genai_tag_db_tools.cli.register_tag")

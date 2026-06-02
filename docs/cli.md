@@ -1,0 +1,167 @@
+# tag-db CLI Contract
+
+This document is the contract for the `tag-db` command-line interface. It is the
+single reference for both agents and humans. The contract is intentionally small
+and machine-readable so automation does not have to parse human-formatted text.
+
+> Source of truth: the request/result shapes come from
+> `src/genai_tag_db_tools/models.py` (Pydantic) and the `core_api` functions.
+> The CLI is a thin JSONL wrapper over them and does not redefine the contract.
+
+## Output format: JSONL only
+
+- **stdout is JSONL**: one line is exactly one valid JSON object. There is no
+  second human/agent output mode (no `--pretty`, no `--format`). Human
+  readability is achieved by keeping each line shallow and one command =
+  one responsibility, not by adding renderers.
+- **stderr is for diagnostics**: logs, progress, and unexpected-error tracebacks
+  go to stderr. stdout never contains color codes, progress bars, or decoration.
+- **The final stdout line is always `result` or `error`.**
+- If JSONL feels hard to read, suspect the command is doing too much, not the
+  output format.
+
+### Line kinds
+
+| kind | When | Required fields |
+|---|---|---|
+| `item` | One record of a list-returning command (one record per line) | `kind`, plus the record fields |
+| `event` | Optional progress | `kind`, `event`, `message` |
+| `result` | Final line on success | `kind`, `ok:true`, `message`, plus command output |
+| `error` | Final line on failure | `kind`, `ok:false`, `code`, `message`, `retryable`, `user_action_required` (optional `hint`, `details`) |
+
+List-returning commands (`search`, `ensure-dbs`) emit one `item` line per record
+and a final `result` line carrying a count summary. They never pack all records
+into a single giant array line.
+
+### Human-readable JSONL guidelines
+
+- One line, one meaning. Keep the top level shallow.
+- Every line carries a short `message`.
+- Avoid deep nesting (`data.result.payload.metadata...` is not allowed).
+- Split summary from detail; include `details` only when needed.
+
+## Error contract
+
+On failure the final stdout line is a structured `error` object. Failures are not
+left as a bare traceback.
+
+```json
+{"kind": "error", "ok": false, "code": "PRECONDITION_FAILED", "message": "...", "retryable": false, "user_action_required": true, "hint": "..."}
+```
+
+### Standard error codes
+
+`INVALID_INPUT`, `VALIDATION_FAILED`, `PRECONDITION_FAILED`, `NOT_FOUND`,
+`ALREADY_EXISTS`, `CONFLICT`, `IO_ERROR`, `NETWORK_ERROR`, `DB_ERROR`,
+`TIMEOUT`, `INTERNAL_ERROR`.
+
+Exception → code mapping (see `src/genai_tag_db_tools/errors.py`):
+
+| Exception | code |
+|---|---|
+| `ValueError` (e.g. bad source string, missing required arg) | `INVALID_INPUT` |
+| pydantic `ValidationError` | `VALIDATION_FAILED` |
+| `RuntimeError` (DB engine / user DB not initialized) | `PRECONDITION_FAILED` |
+| `FileNotFoundError` / other `OSError` | `IO_ERROR` |
+| Hugging Face / `requests` / `urllib3` errors | `NETWORK_ERROR` |
+| SQLAlchemy errors | `DB_ERROR` |
+| `TimeoutError` | `TIMEOUT` |
+| anything else | `INTERNAL_ERROR` |
+
+### Exit codes
+
+| code | meaning |
+|---|---|
+| `0` | success |
+| `2` | input / validation error (`INVALID_INPUT`, `VALIDATION_FAILED`) |
+| `1` | runtime error (everything else) |
+
+The full traceback for an unexpected `INTERNAL_ERROR` is written to stderr; stdout
+stays JSONL-only.
+
+## Side effects and read-only classification
+
+| command | side effects | read-only |
+|---|---|---|
+| `search` | `db_read` | yes |
+| `stats` | `db_read` | yes |
+| `convert` | `db_read` | yes |
+| `register` | `db_write` | no |
+| `ensure-dbs` | `network_read`, `file_write` | no |
+
+## Non-interactive execution
+
+All commands run without interactive prompts (no `Are you sure? [y/N]`).
+Automation, CI, and scripts never block on input. Irreversible operations, if any
+are added later, must require an explicit flag rather than prompting.
+
+`register` writes to a user database. When `--user-db-dir` is omitted it falls
+back to the OS-specific cache directory (consistent with the other commands), so
+zero-config automation works; pass `--user-db-dir` to choose an explicit target.
+
+## Commands
+
+### search — read tags (`db_read`)
+
+`search` returns at most `--limit` items (default **50**). Use `--limit 0` for
+unlimited (opt-in). Each match is an `item` line; the final `result` carries the
+counts.
+
+```bash
+tag-db search --query cat --limit 2
+```
+
+```jsonl
+{"kind": "item", "tag": "cat", "source_tag": null, "tag_id": 1, "format_name": "danbooru", "type_id": 0, "type_name": "general", "alias": false, "deprecated": false, "usage_count": 12345, "translations": {}, "format_statuses": {}}
+{"kind": "item", "tag": "cat_ears", "source_tag": null, "tag_id": 2, "format_name": "danbooru", "type_id": 0, "type_name": "general", "alias": false, "deprecated": false, "usage_count": 678, "translations": {}, "format_statuses": {}}
+{"kind": "result", "ok": true, "message": "search completed", "query": "cat", "count": 2, "total": 2, "limit": 2, "offset": 0}
+```
+
+### register — add a tag (`db_write`)
+
+```bash
+tag-db register --tag mychar --format-name custom --type-name character
+```
+
+```jsonl
+{"kind": "result", "ok": true, "message": "tag registered", "created": true, "tag_id": 1042}
+```
+
+### stats — summary statistics (`db_read`)
+
+```bash
+tag-db stats
+```
+
+```jsonl
+{"kind": "result", "ok": true, "message": "statistics", "total_tags": 100000, "total_aliases": 2000, "total_formats": 5, "total_types": 10}
+```
+
+### convert — normalize tags to a format (`db_read`)
+
+Output is always JSONL. `--json` is accepted but ignored (deprecated).
+
+```bash
+tag-db convert --tags "cat,1girl" --format-name danbooru
+```
+
+```jsonl
+{"kind": "result", "ok": true, "message": "tags converted", "input": "cat,1girl", "output": "cat, 1girl", "format": "danbooru"}
+```
+
+### ensure-dbs — download base DBs (`network_read`, `file_write`)
+
+```bash
+tag-db ensure-dbs --source NEXTAltair/genai-image-tag-db/genai-image-tag-db-cc0.sqlite
+```
+
+```jsonl
+{"kind": "item", "db_path": "/home/user/.cache/.../genai-image-tag-db-cc0.sqlite", "sha256": "...", "revision": null, "cached": true}
+{"kind": "result", "ok": true, "message": "databases ensured", "count": 1}
+```
+
+## Planned
+
+Machine-readable command introspection (`describe` / `list-commands` emitting
+`model` / `tool` lines, with `inline` / `ref` / `none` schema modes generated
+from `models.py`) is planned but not yet implemented. See issue #32.

@@ -70,6 +70,16 @@ Pythonモジュールとして直接実行
 uv run python -m genai_tag_db_tools
 ```
 
+### CLIコマンド
+
+`tag-db` の各コマンド (`search` / `register` / `stats` / `convert` / `ensure-dbs`) は
+機械可読な JSONL を stdout に出力する。出力形式・標準エラーコード・exit code・副作用区分・
+非対話実行の契約は [docs/cli.md](docs/cli.md) を参照。
+
+```bash
+uv run tag-db search --query cat --limit 5
+```
+
 ### 他プロジェクトでの利用
 
 `genai_tag_db_tools` をインポートし、データベース操作やタグ管理機能を他プロジェクト内から利用できる。

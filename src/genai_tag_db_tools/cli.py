@@ -194,10 +194,16 @@ def cmd_search(args: argparse.Namespace) -> None:
 
 
 def cmd_register(args: argparse.Namespace) -> None:
-    if not args.user_db_dir:
-        raise ValueError("--user-db-dir is required for register")
+    # #25 案A: register も未指定時は default_cache_dir() 配下の user DB へフォールバックする
+    # (他コマンドと挙動を揃え、エージェント/自動化がゼロコンフィグで動くようにする)。
+    if args.user_db_dir:
+        user_db_dir = args.user_db_dir
+    else:
+        from genai_tag_db_tools.io.hf_downloader import default_cache_dir
 
-    _set_db_paths(args.base_db, args.user_db_dir)
+        user_db_dir = str(default_cache_dir())
+
+    _set_db_paths(args.base_db, user_db_dir)
     translations = [TagTranslationInput(language=lang, translation=text) for lang, text in args.translation]
     request = TagRegisterRequest(
         tag=args.tag,
@@ -250,7 +256,7 @@ def _add_base_db_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--user-db-dir",
-        help="User database directory. Required for register.",
+        help="User database directory (defaults to OS-specific cache dir).",
     )
 
 
