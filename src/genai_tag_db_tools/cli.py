@@ -184,6 +184,11 @@ def cmd_convert(args: argparse.Namespace) -> None:
 
 def _add_base_db_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
+        "--base-db",
+        action="append",
+        help="Base DB sqlite path. Repeat for multiple. Omit to auto-download default sources from HF.",
+    )
+    parser.add_argument(
         "--user-db-dir",
         help="User database directory. Required for register.",
     )
