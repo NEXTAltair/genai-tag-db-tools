@@ -1,8 +1,11 @@
 import argparse
 import json
+import sys
+import traceback
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from genai_tag_db_tools import errors
 from genai_tag_db_tools.core_api import (
     ensure_databases,
     get_statistics,
@@ -90,6 +93,34 @@ def emit_result(message: str, **output: object) -> None:
 def emit_event(event: str, message: str) -> None:
     """途中経過 (kind=event) を出力する。必要な場合のみ使う。"""
     _emit({"kind": "event", "event": event, "message": message})
+
+
+def emit_error(
+    code: str,
+    message: str,
+    *,
+    retryable: bool,
+    user_action_required: bool,
+    hint: str | None = None,
+    details: dict[str, object] | None = None,
+) -> None:
+    """失敗時の最終行 (kind=error) を出力する。
+
+    stderr の文字列パースに依存させず、stdout の JSONL 最終行に構造化エラーを出す。
+    """
+    line: dict[str, object] = {
+        "kind": "error",
+        "ok": False,
+        "code": code,
+        "message": message,
+        "retryable": retryable,
+        "user_action_required": user_action_required,
+    }
+    if hint:
+        line["hint"] = hint
+    if details:
+        line["details"] = details
+    _emit(line)
 
 
 def _set_db_paths(base_db_paths: Iterable[str] | None, user_db_dir: str | None) -> None:
@@ -301,4 +332,20 @@ def main() -> None:
     convert_parser.set_defaults(func=cmd_convert)
 
     args = parser.parse_args()
-    args.func(args)
+    # CLI 境界: あらゆる失敗を構造化エラー行 (kind=error) + exit code へマッピングする。
+    # traceback だけで終わらせず、stdout の JSONL 最終行に必ず error を出す (#31)。
+    try:
+        args.func(args)
+    except Exception as exc:  # CLI top-level error boundary (see #31)
+        info = errors.classify_exception(exc)
+        emit_error(
+            info.code,
+            str(exc) or type(exc).__name__,
+            retryable=info.retryable,
+            user_action_required=info.user_action_required,
+            hint=errors.hint_for(info.code),
+        )
+        # 予期しない内部エラーのみ、診断用に traceback を stderr へ (stdout は JSONL 専用)。
+        if info.code == errors.INTERNAL_ERROR:
+            traceback.print_exc(file=sys.stderr)
+        sys.exit(info.exit_code)
