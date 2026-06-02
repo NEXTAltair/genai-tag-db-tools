@@ -147,28 +147,41 @@ def _filter_rows(rows: list[TagSearchRow], request: TagSearchRequest) -> list[Ta
     return filtered
 
 
+# bounded over-fetch parameters (Issue #37 暫定対応 / autocomplete typeahead を bound する)。
+# post-filter (_filter_rows: alias/deprecated/usage/複数 format・type) は repository クエリの
+# 「後」に Python 側で走るため、SQL LIMIT をそのまま limit 件にすると post-filter で落ちた分だけ
+# 結果が不足する。一方 SQL LIMIT を完全に外すと autocomplete のような typeahead が毎回全一致を
+# materialize して劣化する。そこで「(offset+limit) * FACTOR + BUFFER」だけ over-fetch して
+# post-filter のドロップを吸収しつつ、repository クエリを bound したままにする。
+_SEARCH_OVERFETCH_FACTOR = 4
+_SEARCH_OVERFETCH_BUFFER = 50
+
+
 def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchResult:
     format_name = (
         request.format_names[0] if request.format_names and len(request.format_names) == 1 else None
     )
     type_name = request.type_names[0] if request.type_names and len(request.type_names) == 1 else None
 
-    # post-filter (_filter_rows: alias / deprecated / usage / 複数 format・type) は
-    # repository クエリの「後」に Python 側で走る。ここで SQL LIMIT を先にかけると、
-    # 先頭 N 件が alias/deprecated だった場合に有効な一致を取りこぼし、total も raw 件数で
-    # キャップされてしまう。そのため SQL LIMIT は使わず、全一致を取得 → filter →
-    # Python 側で offset/limit を適用する。これにより limit/offset は filter 後の行を数え、
-    # total は filter 後の全件数になる。
+    if request.limit is None:
+        sql_limit: int | None = None
+    else:
+        # over-fetch で post-filter のドロップを吸収しつつ repository クエリを bound する。
+        sql_limit = (request.offset + request.limit) * _SEARCH_OVERFETCH_FACTOR + _SEARCH_OVERFETCH_BUFFER
+
     rows = repo.search_tags(
         request.query,
         partial=request.partial,
         format_name=format_name,
         type_name=type_name,
         resolve_preferred=request.resolve_preferred,
-        limit=None,
+        limit=sql_limit,
     )
+    # over-fetch 窓を取り切っていない (rows == sql_limit) 場合は全件を見ていないため total 不明 (None)。
+    # 窓に収まった (rows < sql_limit) か無制限なら total は filter 後の正確な件数。
+    exhausted = sql_limit is None or len(rows) < sql_limit
     rows = _filter_rows(rows, request)
-    total = len(rows)
+    total: int | None = len(rows) if exhausted else None
     if request.offset:
         rows = rows[request.offset :]
     if request.limit is not None:

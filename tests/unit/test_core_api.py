@@ -97,11 +97,11 @@ def test_search_tags_paginates_after_post_filters():
 
     result = core_api.search_tags(repo, TagSearchRequest(query="t", limit=2, offset=0))
 
-    # post-filter があるため SQL LIMIT は渡さない (全件取得 → filter → Python paging)
-    assert repo.calls[-1]["limit"] is None
+    # bounded over-fetch: SQL には (offset+limit)*4+50 = 58 を渡す (post-filter ドロップ吸収)
+    assert repo.calls[-1]["limit"] == 58
     # deprecated 2 件除外後の active 3 件中、limit=2 で先頭 2 件 (tag_id 3, 4)
     assert [item.tag_id for item in result.items] == [3, 4]
-    # total は filter 後の全件数 (3)。limit でキャップされない
+    # over-fetch 窓に収まった (rows < sql_limit) ので total は filter 後の全件数 (3)
     assert result.total == 3
 
 
@@ -250,8 +250,12 @@ def test_search_tags_applies_offset_and_limit_preserves_total():
     assert result.total == 5
 
 
-def test_search_tags_does_not_push_limit_to_repo():
-    """limit は SQL に pushdown せず Python 側で適用する (post-filter との整合, Codex review)。"""
+def test_search_tags_uses_bounded_overfetch_limit():
+    """limit 指定時は bounded over-fetch (= (offset+limit)*4+50) を repo に渡す (Codex review)。
+
+    autocomplete 等の typeahead が毎回全件 materialize しないよう repository クエリを bound
+    したまま、post-filter のドロップを over-fetch で吸収する。
+    """
     rows = [
         {
             "tag": f"sample_{i}",
@@ -272,11 +276,47 @@ def test_search_tags_does_not_push_limit_to_repo():
     request = TagSearchRequest(query="tag", partial=True, limit=2)
     result = core_api.search_tags(repo, request)
 
-    # SQL LIMIT は渡さない (全件取得 → filter → Python paging)
-    assert repo.calls[0].get("limit") is None
-    # limit は Python 側で適用 (items は 2 件)、total は全件数 (5)
+    # bounded over-fetch: (0+2)*4+50 = 58
+    assert repo.calls[0].get("limit") == 58
+    # limit は Python 側で適用 (items は 2 件)、over-fetch 窓内なので total は全件数 (5)
     assert len(result.items) == 2
     assert result.total == 5
+
+
+def test_search_tags_total_unknown_when_overfetch_window_full():
+    """over-fetch 窓を取り切った (rows == sql_limit) 場合、全件未走査なので total は None。"""
+
+    class _FullWindowRepo:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def search_tags(self, keyword: str, **kwargs) -> list[dict]:
+            self.calls.append({"keyword": keyword, **kwargs})
+            limit = kwargs["limit"]
+            # 窓ぴったりの active 行を返す (=全件は走査しきれていない状況)
+            return [
+                {
+                    "tag": f"t{i}",
+                    "source_tag": None,
+                    "tag_id": i,
+                    "format_name": None,
+                    "type_id": 1,
+                    "type_name": "general",
+                    "alias": False,
+                    "deprecated": False,
+                    "usage_count": 1,
+                    "translations": None,
+                    "format_statuses": {},
+                }
+                for i in range(limit)
+            ]
+
+    repo = _FullWindowRepo()
+    result = core_api.search_tags(repo, TagSearchRequest(query="t", limit=2, offset=0))
+
+    assert len(result.items) == 2
+    # 窓を取り切ったため全件不明 → total は None
+    assert result.total is None
 
 
 def test_search_tags_passes_none_limit_when_not_set():
