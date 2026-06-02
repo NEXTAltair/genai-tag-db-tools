@@ -70,6 +70,18 @@ class EnsureDbResult(BaseModel):
     cached: bool = Field(default=False, description="キャッシュのみ使用したか")
 
 
+class CliErrorResult(BaseModel):
+    """CLI失敗時の構造化エラー行。"""
+
+    ok: bool = Field(default=False, description="Always false for error lines")
+    code: str = Field(..., description="Standard error code")
+    message: str = Field(..., description="Human-readable error message")
+    retryable: bool = Field(..., description="Whether retrying the same command may succeed")
+    user_action_required: bool = Field(..., description="Whether the user must change input or setup")
+    hint: str | None = Field(default=None, description="Optional remediation hint")
+    details: dict[str, object] | None = Field(default=None, description="Optional structured details")
+
+
 class TagSearchRequest(BaseModel):
     """タグ検索リクエスト（外部向け）。
 
@@ -226,6 +238,22 @@ class TagRegisterResult(BaseModel):
 
     created: bool = Field(..., description="新規作成かどうか")
     tag_id: int = Field(..., description="登録されたタグID")
+
+
+class ConvertTagsRequest(BaseModel):
+    """タグ変換リクエスト（CLI/core契約用）。"""
+
+    tags: str = Field(..., description="Comma-separated input tags")
+    format_name: str = Field(..., description="Target format name")
+    separator: str = Field(default=", ", description="Output tag separator")
+
+
+class ConvertTagsResult(BaseModel):
+    """タグ変換結果（CLI/core契約用）。"""
+
+    input: str = Field(..., description="Original input tag string")
+    output: str = Field(..., description="Converted tag string")
+    format: str = Field(..., description="Target format name")
 
 
 class TagTypeUpdate(BaseModel):

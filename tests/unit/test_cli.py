@@ -34,6 +34,10 @@ from genai_tag_db_tools.cli import (
 from genai_tag_db_tools.db import runtime
 
 
+def _parse_jsonl(output: str) -> list[dict]:
+    return [json.loads(line) for line in output.splitlines() if line.strip()]
+
+
 class TestParseSource:
     """Test _parse_source function."""
 
@@ -357,6 +361,118 @@ class TestMainParser:
         handler.assert_called_once()
         args = handler.call_args.args[0]
         assert args.source is None
+
+
+class TestCliIntrospection:
+    """Test machine-readable CLI introspection commands."""
+
+    def test_describe_search_defaults_to_inline_schema(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["tag-db", "describe", "search"])
+
+        main()
+
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert lines[0]["kind"] == "tool"
+        assert lines[0]["name"] == "search"
+        assert lines[0]["side_effects"] == ["db_read"]
+        assert lines[0]["read_only"] is True
+        assert lines[0]["input_model"] == "TagSearchRequest"
+        assert lines[0]["output_model"] == "TagSearchResult"
+
+        model_lines = [line for line in lines if line["kind"] == "model"]
+        assert {line["role"] for line in model_lines} == {"input", "output", "error"}
+        input_model = next(line for line in model_lines if line["role"] == "input")
+        assert input_model["name"] == "TagSearchRequest"
+        assert input_model["schema_format"] == "inline"
+        assert input_model["schema"]["properties"]["query"]["type"] == "string"
+        assert lines[-1] == {
+            "kind": "result",
+            "ok": True,
+            "message": "command described",
+            "command": "search",
+            "schema": "inline",
+        }
+
+    def test_describe_schema_ref_uses_model_references(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["tag-db", "describe", "convert", "--schema", "ref"])
+
+        main()
+
+        lines = _parse_jsonl(capsys.readouterr().out)
+        model_lines = [line for line in lines if line["kind"] == "model"]
+        assert model_lines
+        assert all(line["schema_format"] == "ref" for line in model_lines)
+        assert all("schema" not in line for line in model_lines)
+        assert {line["ref"] for line in model_lines} == {
+            "#/models/ConvertTagsRequest",
+            "#/models/ConvertTagsResult",
+            "#/models/CliErrorResult",
+        }
+
+    def test_describe_schema_none_omits_model_lines(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["tag-db", "describe", "stats", "--schema", "none"])
+
+        main()
+
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert [line["kind"] for line in lines] == ["tool", "result"]
+        assert lines[0]["input_model"] is None
+        assert lines[0]["output_model"] == "TagStatisticsResult"
+        assert lines[-1]["schema"] == "none"
+
+    def test_list_commands_emits_all_tools_without_schema(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["tag-db", "list-commands", "--schema", "none"])
+
+        main()
+
+        lines = _parse_jsonl(capsys.readouterr().out)
+        tools = [line for line in lines if line["kind"] == "tool"]
+        assert [line["name"] for line in tools] == [
+            "ensure-dbs",
+            "search",
+            "register",
+            "stats",
+            "convert",
+        ]
+        assert not [line for line in lines if line["kind"] == "model"]
+        assert lines[-1] == {
+            "kind": "result",
+            "ok": True,
+            "message": "commands listed",
+            "count": 5,
+            "schema": "none",
+        }
+
+    def test_unknown_describe_command_returns_argparse_error_line(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["tag-db", "describe", "missing"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 2
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert lines[-1]["kind"] == "error"
+        assert lines[-1]["code"] == "INVALID_INPUT"
 
 
 class TestBuildRegisterService:

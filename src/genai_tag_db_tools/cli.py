@@ -16,6 +16,13 @@ from genai_tag_db_tools.core_api import (
 )
 from genai_tag_db_tools.db import runtime
 from genai_tag_db_tools.db.repository import get_default_reader, get_default_repository
+from genai_tag_db_tools.introspection import (
+    SchemaMode,
+    get_tool_spec,
+    iter_model_lines,
+    iter_tool_specs,
+    tool_line,
+)
 from genai_tag_db_tools.models import (
     DbCacheConfig,
     DbSourceRef,
@@ -251,6 +258,25 @@ def cmd_convert(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_describe(args: argparse.Namespace) -> None:
+    schema_mode: SchemaMode = args.schema
+    spec = get_tool_spec(args.target_command)
+    _emit(tool_line(spec))
+    for line in iter_model_lines([spec], schema_mode):
+        _emit(line)
+    emit_result("command described", command=spec.name, schema=schema_mode)
+
+
+def cmd_list_commands(args: argparse.Namespace) -> None:
+    schema_mode: SchemaMode = args.schema
+    specs = list(iter_tool_specs())
+    for spec in specs:
+        _emit(tool_line(spec))
+    for line in iter_model_lines(specs, schema_mode):
+        _emit(line)
+    emit_result("commands listed", count=len(specs), schema=schema_mode)
+
+
 def _add_base_db_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--base-db",
@@ -338,6 +364,31 @@ def build_parser(prog: str = "tag-db") -> argparse.ArgumentParser:
     )
     _add_base_db_args(convert_parser)
     convert_parser.set_defaults(func=cmd_convert)
+
+    describe_parser = subparsers.add_parser(
+        "describe",
+        help="Emit machine-readable metadata for one command.",
+    )
+    describe_parser.add_argument("target_command", choices=[spec.name for spec in iter_tool_specs()])
+    describe_parser.add_argument(
+        "--schema",
+        choices=["inline", "ref", "none"],
+        default="inline",
+        help="Schema output mode (default: inline).",
+    )
+    describe_parser.set_defaults(func=cmd_describe)
+
+    list_commands_parser = subparsers.add_parser(
+        "list-commands",
+        help="Emit machine-readable metadata for all commands.",
+    )
+    list_commands_parser.add_argument(
+        "--schema",
+        choices=["inline", "ref", "none"],
+        default="inline",
+        help="Schema output mode (default: inline).",
+    )
+    list_commands_parser.set_defaults(func=cmd_list_commands)
 
     return parser
 
