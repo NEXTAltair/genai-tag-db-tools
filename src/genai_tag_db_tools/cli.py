@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from genai_tag_db_tools.core_api import (
+    default_sources,
     ensure_databases,
     get_statistics,
     initialize_databases,
@@ -104,17 +105,19 @@ def _build_register_service() -> TagRegisterService:
 
 def cmd_ensure_dbs(args: argparse.Namespace) -> None:
     cache = _build_cache_config(args)
-    requests = [
-        EnsureDbRequest(
-            source=DbSourceRef(
+    if args.source:
+        sources = [
+            DbSourceRef(
                 repo_id=parsed.repo_id,
                 filename=parsed.filename,
                 revision=parsed.revision,
-            ),
-            cache=cache,
-        )
-        for parsed in (_parse_source(value) for value in args.source)
-    ]
+            )
+            for parsed in (_parse_source(value) for value in args.source)
+        ]
+    else:
+        sources = default_sources()
+
+    requests = [EnsureDbRequest(source=source, cache=cache) for source in sources]
     results = ensure_databases(requests)
     _dump(results)
 
@@ -202,8 +205,7 @@ def main() -> None:
     ensure_many_parser.add_argument(
         "--source",
         action="append",
-        required=True,
-        help="repo_id/filename[@revision]. Repeat for multiple sources.",
+        help="repo_id/filename[@revision]. Repeat for multiple sources. Omit to use default sources.",
     )
     ensure_many_parser.add_argument(
         "--user-db-dir", help="User database directory (defaults to OS-specific cache)"

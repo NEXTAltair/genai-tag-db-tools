@@ -44,7 +44,7 @@ def build_downloaded_at_utc() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _default_sources() -> list[DbSourceRef]:
+def default_sources() -> list[DbSourceRef]:
     return [
         DbSourceRef(
             repo_id="NEXTAltair/genai-image-tag-db",
@@ -108,7 +108,7 @@ def initialize_databases(
 
     cache_dir = resolved_user_db_dir or hf_downloader.default_cache_dir()
     cache = DbCacheConfig(cache_dir=str(cache_dir), token=token)
-    requested_sources = sources or _default_sources()
+    requested_sources = sources or default_sources()
     requests = [EnsureDbRequest(source=source, cache=cache) for source in requested_sources]
 
     results = ensure_databases(requests)
