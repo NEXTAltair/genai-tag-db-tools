@@ -153,20 +153,19 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
     )
     type_name = request.type_names[0] if request.type_names and len(request.type_names) == 1 else None
 
-    # offset を使う場合は SQL LIMIT に offset 分を上乗せして candidate を確保する。
-    # 上乗せしないと limit 件しか取得できず、後段の offset スライスで全件落ちる
-    # (例: --limit 50 --offset 50 が空を返す)。
-    sql_limit = request.limit
-    if sql_limit is not None and request.offset:
-        sql_limit = sql_limit + request.offset
-
+    # post-filter (_filter_rows: alias / deprecated / usage / 複数 format・type) は
+    # repository クエリの「後」に Python 側で走る。ここで SQL LIMIT を先にかけると、
+    # 先頭 N 件が alias/deprecated だった場合に有効な一致を取りこぼし、total も raw 件数で
+    # キャップされてしまう。そのため SQL LIMIT は使わず、全一致を取得 → filter →
+    # Python 側で offset/limit を適用する。これにより limit/offset は filter 後の行を数え、
+    # total は filter 後の全件数になる。
     rows = repo.search_tags(
         request.query,
         partial=request.partial,
         format_name=format_name,
         type_name=type_name,
         resolve_preferred=request.resolve_preferred,
-        limit=sql_limit,
+        limit=None,
     )
     rows = _filter_rows(rows, request)
     total = len(rows)

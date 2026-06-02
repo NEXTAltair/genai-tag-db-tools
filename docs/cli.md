@@ -16,9 +16,23 @@ and machine-readable so automation does not have to parse human-formatted text.
   one responsibility, not by adding renderers.
 - **stderr is for diagnostics**: logs, progress, and unexpected-error tracebacks
   go to stderr. stdout never contains color codes, progress bars, or decoration.
-- **The final stdout line is always `result` or `error`.**
+- **When a command runs, the final stdout line is always `result` or `error`**
+  (including argparse input errors, which emit an `error` line + exit code 2).
 - If JSONL feels hard to read, suspect the command is doing too much, not the
   output format.
+
+### Scope: help is the documented exception
+
+The JSONL `result` / `error` contract governs **command execution**. The launcher
+meta operations are the explicit exception and print human-readable help to stdout
+with exit code 0:
+
+- `tag-db --help` / `tag-db -h`
+- `tag-db` with no arguments (shows help; does not import the GUI)
+- `tag-db --gui` launches the Qt GUI
+
+Automation should invoke an explicit subcommand (`search` / `register` / ...);
+those always follow the JSONL contract.
 
 ### Line kinds
 
@@ -83,11 +97,20 @@ stays JSONL-only.
 
 | command | side effects | read-only |
 |---|---|---|
-| `search` | `db_read` | yes |
-| `stats` | `db_read` | yes |
-| `convert` | `db_read` | yes |
+| `search` | `db_read` (+ `network_read`, `file_write` on cold cache) | yes, once base DBs are present |
+| `stats` | `db_read` (+ `network_read`, `file_write` on cold cache) | yes, once base DBs are present |
+| `convert` | `db_read` (+ `network_read`, `file_write` on cold cache) | yes, once base DBs are present |
 | `register` | `db_write` | no |
 | `ensure-dbs` | `network_read`, `file_write` | no |
+
+> **Implicit downloads:** when `--base-db` is omitted and the local cache is cold,
+> the read commands (`search` / `stats` / `convert`) first call
+> `initialize_databases()`, which downloads the default Hugging Face base DBs and
+> writes them to the cache (`network_read` + `file_write`) before the read. They
+> are read-only only once the base DBs already exist locally. To run them in a
+> no-network / read-only context, pre-provision the cache (e.g. `ensure-dbs`) or
+> pass `--base-db` so no download is triggered. A failed download surfaces as a
+> `NETWORK_ERROR` line.
 
 ## Non-interactive execution
 
