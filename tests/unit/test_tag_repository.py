@@ -581,3 +581,83 @@ def test_merged_reader_get_translations_batch_deduplicates_across_repos(
     assert 1 in result
     assert len(result[1]) == 1
     assert result[1][0].translation == "女の子"
+
+
+def test_merged_reader_search_tags_applies_limit_after_merge(
+    session_factory: Callable[[], Session],
+) -> None:
+    """複数DB検索でもmerge/dedup後にlimitを適用すること。"""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    engine_b = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine_b)
+    session_factory_b: Callable[[], Session] = sessionmaker(
+        bind=engine_b, autoflush=False, autocommit=False
+    )
+
+    reader_a = TagReader(session_factory)
+    reader_b = TagReader(session_factory_b)
+
+    with session_factory() as session:
+        _seed_search_rows(session, range(1, 6))
+    with session_factory_b() as session:
+        _seed_search_rows(session, range(1, 6))
+
+    merged = MergedTagReader(base_repo=[reader_a, reader_b])
+    result = merged.search_tags("sample", partial=True, limit=3)
+
+    assert [row["tag_id"] for row in result] == [1, 2, 3]
+
+
+def test_merged_reader_search_tags_applies_offset_after_merge(
+    session_factory: Callable[[], Session],
+) -> None:
+    """offsetはrepo別ではなくmerge済み結果に適用すること。"""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    engine_b = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine_b)
+    session_factory_b: Callable[[], Session] = sessionmaker(
+        bind=engine_b, autoflush=False, autocommit=False
+    )
+
+    reader_a = TagReader(session_factory)
+    reader_b = TagReader(session_factory_b)
+
+    with session_factory() as session:
+        _seed_search_rows(session, range(1, 8))
+    with session_factory_b() as session:
+        _seed_search_rows(session, range(1, 8))
+
+    merged = MergedTagReader(base_repo=[reader_a, reader_b])
+    result = merged.search_tags("sample", partial=True, limit=2, offset=3)
+
+    assert [row["tag_id"] for row in result] == [4, 5]
+
+
+def _seed_search_rows(session: Session, tag_ids: range) -> None:
+    session.add(TagFormat(format_id=1, format_name="test"))
+    session.add(TagTypeName(type_name_id=1, type_name="general"))
+    session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=1))
+    for tag_id in tag_ids:
+        tag_name = f"sample_{tag_id}"
+        session.add(Tag(tag_id=tag_id, tag=tag_name, source_tag=tag_name))
+        session.add(
+            TagStatus(
+                tag_id=tag_id,
+                format_id=1,
+                type_id=0,
+                alias=False,
+                preferred_tag_id=tag_id,
+                deprecated=False,
+            )
+        )
+    session.commit()

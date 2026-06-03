@@ -15,6 +15,7 @@ from genai_tag_db_tools.db.schema import (
     TagStatus,
     TagTypeFormatMapping,
     TagTypeName,
+    TagUsageCounts,
 )
 
 pytestmark = pytest.mark.db_tools
@@ -57,6 +58,63 @@ def test_initial_tag_ids_respects_limit_and_offset(session_factory: Callable[[],
         builder = TagSearchQueryBuilder(session)
         ids = builder.initial_tag_ids("%sample_%", use_like=True, limit=5, offset=3)
         assert len(ids) == 5
+
+
+def test_filtered_tag_ids_applies_filters_before_limit(
+    session_factory: Callable[[], Session],
+) -> None:
+    with session_factory() as session:
+        _seed_minimal_schema(session, total_tags=6)
+        session.add(TagTypeName(type_name_id=2, type_name="character"))
+        session.add(TagTypeFormatMapping(format_id=1, type_id=1, type_name_id=2))
+        for tag_id in range(1, 4):
+            status = session.get(TagStatus, (tag_id, 1))
+            assert status is not None
+            status.type_id = 1
+            session.add(TagUsageCounts(tag_id=tag_id, format_id=1, count=1))
+        for tag_id in range(4, 7):
+            session.add(TagUsageCounts(tag_id=tag_id, format_id=1, count=100))
+        session.commit()
+
+        builder = TagSearchQueryBuilder(session)
+        ids, format_id = builder.filtered_tag_ids(
+            "%sample_%",
+            use_like=True,
+            format_names=["test"],
+            type_names=["general"],
+            min_usage=10,
+            limit=2,
+        )
+
+    assert sorted(ids) == [4, 5]
+    assert format_id == 1
+
+
+def test_filtered_tag_ids_filters_alias_and_deprecated_before_limit(
+    session_factory: Callable[[], Session],
+) -> None:
+    with session_factory() as session:
+        _seed_minimal_schema(session, total_tags=5)
+        first = session.get(TagStatus, (1, 1))
+        second = session.get(TagStatus, (2, 1))
+        assert first is not None
+        assert second is not None
+        first.alias = True
+        first.preferred_tag_id = 2
+        second.deprecated = True
+        session.commit()
+
+        builder = TagSearchQueryBuilder(session)
+        ids, _ = builder.filtered_tag_ids(
+            "%sample_%",
+            use_like=True,
+            format_names=["test"],
+            alias=False,
+            deprecated=False,
+            limit=2,
+        )
+
+    assert sorted(ids) == [3, 4]
 
 
 def test_preloader_load_handles_large_id_sets_with_chunking(
