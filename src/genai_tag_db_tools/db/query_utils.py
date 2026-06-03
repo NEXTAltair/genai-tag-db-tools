@@ -103,12 +103,14 @@ class TagSearchQueryBuilder:
         requested; result row construction uses that to expose format-specific
         status fields.
         """
-        format_ids = self._format_ids_for_names(format_names)
-        if format_names and not format_ids:
+        concrete_format_names = self._normalize_filter_names(format_names)
+        format_ids = self._format_ids_for_names(concrete_format_names)
+        if concrete_format_names and not format_ids:
             return set(), 0
 
-        type_name_ids = self._type_name_ids_for_names(type_names)
-        if type_names and not type_name_ids:
+        concrete_type_names = self._normalize_filter_names(type_names)
+        type_name_ids = self._type_name_ids_for_names(concrete_type_names)
+        if concrete_type_names and not type_name_ids:
             return set(), 0
 
         candidate = self._keyword_candidate_query(keyword, use_like).subquery()
@@ -183,6 +185,28 @@ class TagSearchQueryBuilder:
         deprecated: bool | None,
     ) -> Any:
         if not format_ids and not type_name_ids and alias is None and deprecated is None:
+            return query
+
+        if not format_ids and not type_name_ids:
+            if alias is True or deprecated is True:
+                status_select = select(TagStatus.tag_id).where(TagStatus.tag_id == tag_id_column)
+                if alias is True:
+                    status_select = status_select.where(TagStatus.alias == alias)
+                if deprecated is True:
+                    status_select = status_select.where(TagStatus.deprecated == deprecated)
+                query = query.filter(exists(status_select))
+            if alias is False:
+                alias_select = select(TagStatus.tag_id).where(
+                    TagStatus.tag_id == tag_id_column,
+                    TagStatus.alias.is_(True),
+                )
+                query = query.filter(not_(exists(alias_select)))
+            if deprecated is False:
+                deprecated_select = select(TagStatus.tag_id).where(
+                    TagStatus.tag_id == tag_id_column,
+                    TagStatus.deprecated.is_(True),
+                )
+                query = query.filter(not_(exists(deprecated_select)))
             return query
 
         status_select = select(TagStatus.tag_id).where(TagStatus.tag_id == tag_id_column)

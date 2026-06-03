@@ -124,8 +124,8 @@ def initialize_databases(
 
 def _filter_rows(rows: list[TagSearchRow], request: TagSearchRequest) -> list[TagSearchRow]:
     filtered: list[TagSearchRow] = []
-    format_names = set(request.format_names or [])
-    type_names = set(request.type_names or [])
+    format_names = set(_concrete_filter_names(request.format_names))
+    type_names = set(_concrete_filter_names(request.type_names))
 
     for row in rows:
         usage_count = row["usage_count"] or 0
@@ -147,15 +147,21 @@ def _filter_rows(rows: list[TagSearchRow], request: TagSearchRequest) -> list[Ta
     return filtered
 
 
+def _concrete_filter_names(names: list[str] | None) -> list[str]:
+    if not names:
+        return []
+    return [name for name in names if name and name.lower() != "all"]
+
+
 def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchResult:
-    format_name = (
-        request.format_names[0] if request.format_names and len(request.format_names) == 1 else None
-    )
+    format_names = _concrete_filter_names(request.format_names)
+    type_names = _concrete_filter_names(request.type_names)
+    format_name = format_names[0] if len(format_names) == 1 else None
 
     common_kwargs = {
         "partial": request.partial,
-        "format_names": request.format_names,
-        "type_names": request.type_names,
+        "format_names": format_names or None,
+        "type_names": type_names or None,
         "alias": None if request.include_aliases else False,
         "deprecated": None if request.include_deprecated else False,
         "min_usage": request.min_usage,
