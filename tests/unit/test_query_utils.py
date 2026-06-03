@@ -135,6 +135,49 @@ def test_filtered_tag_ids_treats_all_as_unfiltered(
     assert format_id == 0
 
 
+def test_filtered_tag_ids_negative_status_filters_keep_statusless_tags(
+    session_factory: Callable[[], Session],
+) -> None:
+    with session_factory() as session:
+        session.add(Tag(tag_id=1, source_tag="sample_statusless", tag="sample_statusless"))
+        session.add(TagFormat(format_id=1, format_name="test"))
+        session.add(TagTypeName(type_name_id=1, type_name="general"))
+        session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=1))
+        session.add(Tag(tag_id=2, source_tag="sample_active", tag="sample_active"))
+        session.add(
+            TagStatus(
+                tag_id=2,
+                format_id=1,
+                type_id=0,
+                alias=False,
+                preferred_tag_id=2,
+                deprecated=False,
+            )
+        )
+        session.add(Tag(tag_id=3, source_tag="sample_deprecated", tag="sample_deprecated"))
+        session.add(
+            TagStatus(
+                tag_id=3,
+                format_id=1,
+                type_id=0,
+                alias=False,
+                preferred_tag_id=3,
+                deprecated=True,
+            )
+        )
+        session.commit()
+
+        builder = TagSearchQueryBuilder(session)
+        ids, _ = builder.filtered_tag_ids(
+            "%sample_%",
+            use_like=True,
+            alias=False,
+            deprecated=False,
+        )
+
+    assert sorted(ids) == [1, 2]
+
+
 def test_preloader_load_handles_large_id_sets_with_chunking(
     session_factory: Callable[[], Session],
     monkeypatch: pytest.MonkeyPatch,

@@ -270,10 +270,36 @@ def test_search_tags_plain_keyword_bounds_repo_query():
     assert repo.calls[0].get("limit") == 2
     assert repo.calls[0].get("offset") == 1
     assert repo.calls[0].get("alias") is None
-    assert repo.calls[0].get("deprecated") is None
+    assert repo.calls[0].get("deprecated") is False
     assert [item.tag_id for item in result.items] == [2, 3]
     # bounded fetch のため total は不明 (None)
     assert result.total is None
+
+
+def test_search_tags_treats_all_filters_as_unqualified():
+    rows = [
+        {
+            "tag": "cat",
+            "source_tag": "cat",
+            "tag_id": 1,
+            "format_name": None,
+            "type_id": None,
+            "type_name": "",
+            "alias": False,
+            "deprecated": False,
+            "usage_count": 0,
+            "translations": None,
+            "format_statuses": {"danbooru": {"status": "active"}},
+        }
+    ]
+    repo = DummyRepo(rows)
+    request = TagSearchRequest(query="cat", format_names=["all"], type_names=["all"], limit=1)
+
+    result = core_api.search_tags(repo, request)
+
+    assert repo.calls[0]["format_names"] is None
+    assert repo.calls[0]["type_names"] is None
+    assert [item.tag_id for item in result.items] == [1]
 
 
 def test_search_tags_passes_none_limit_when_not_set():

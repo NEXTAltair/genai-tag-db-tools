@@ -187,6 +187,28 @@ class TagSearchQueryBuilder:
         if not format_ids and not type_name_ids and alias is None and deprecated is None:
             return query
 
+        if not format_ids and not type_name_ids:
+            if alias is True or deprecated is True:
+                status_select = select(TagStatus.tag_id).where(TagStatus.tag_id == tag_id_column)
+                if alias is True:
+                    status_select = status_select.where(TagStatus.alias == alias)
+                if deprecated is True:
+                    status_select = status_select.where(TagStatus.deprecated == deprecated)
+                query = query.filter(exists(status_select))
+            if alias is False:
+                alias_select = select(TagStatus.tag_id).where(
+                    TagStatus.tag_id == tag_id_column,
+                    TagStatus.alias.is_(True),
+                )
+                query = query.filter(not_(exists(alias_select)))
+            if deprecated is False:
+                deprecated_select = select(TagStatus.tag_id).where(
+                    TagStatus.tag_id == tag_id_column,
+                    TagStatus.deprecated.is_(True),
+                )
+                query = query.filter(not_(exists(deprecated_select)))
+            return query
+
         status_select = select(TagStatus.tag_id).where(TagStatus.tag_id == tag_id_column)
         if type_name_ids:
             status_select = status_select.join(
