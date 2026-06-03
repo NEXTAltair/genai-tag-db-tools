@@ -23,6 +23,7 @@ class DummyRepo:
     def search_tags(self, keyword: str, **kwargs) -> list[dict]:
         self.calls.append({"keyword": keyword, **kwargs})
         rows = list(self._rows)
+        # repository は実 DB 値で SQL フィルタする
         if kwargs.get("min_usage") is not None:
             rows = [row for row in rows if (row["usage_count"] or 0) >= kwargs["min_usage"]]
         if kwargs.get("max_usage") is not None:
@@ -31,6 +32,20 @@ class DummyRepo:
             rows = [row for row in rows if row["alias"] is kwargs["alias"]]
         if kwargs.get("deprecated") is not None:
             rows = [row for row in rows if row["deprecated"] is kwargs["deprecated"]]
+        if kwargs.get("format_names"):
+            fmts = set(kwargs["format_names"])
+            rows = [row for row in rows if any(f in (row.get("format_statuses") or {}) for f in fmts)]
+        if kwargs.get("type_names"):
+            types = set(kwargs["type_names"])
+            rows = [row for row in rows if row["type_name"] in types]
+        # build_row 相当の忠実化: 単一 concrete format でない呼び出しでは format 依存フィールドが
+        # 0/False/"" で返る (format_id=0)。これを再現しないと #45 の二重フィルタ不整合が
+        # テストで顕在化しない。
+        fmt_names = kwargs.get("format_names") or (
+            [kwargs["format_name"]] if kwargs.get("format_name") else []
+        )
+        if len(fmt_names) != 1:
+            rows = [{**row, "usage_count": 0, "deprecated": False, "type_name": ""} for row in rows]
         offset = kwargs.get("offset", 0)
         limit = kwargs.get("limit")
         rows = rows[offset:] if offset else rows
@@ -116,6 +131,25 @@ def test_search_tags_constrained_paginates_after_filter():
     assert [item.tag_id for item in result.items] == [3, 4]
     # bounded fetch のため total は不明
     assert result.total is None
+
+
+def test_search_tags_unqualified_usage_filter_not_dropped():
+    """#45: 無 format + min_usage で repository の一致が core_api 側で空にされない。
+
+    repository は実 DB 値で usage>=min を拾うが、無 format では build_row が usage_count=0 で
+    返す。core_api が Python で再フィルタすると usage_count(0) < min_usage で全 drop してしまう
+    ため、再フィルタしない (フィルタの正本は repository) ことを保証する回帰テスト。
+    """
+    rows = [_usage_row(1, 50), _usage_row(2, 80)]  # 実 usage は閾値以上
+    repo = DummyRepo(rows=rows)
+
+    result = core_api.search_tags(repo, TagSearchRequest(query="t", min_usage=10))
+
+    # repository の一致が保持され、空にならない
+    assert [item.tag_id for item in result.items] == [1, 2]
+    assert result.total == 2
+    # 無 format のため表示上の usage_count は 0 (build_row 既定) になる
+    assert all(item.usage_count == 0 for item in result.items)
 
 
 def test_search_tags_constrained_offset_returns_later_rows():
