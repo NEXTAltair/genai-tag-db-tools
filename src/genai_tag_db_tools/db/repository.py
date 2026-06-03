@@ -242,11 +242,14 @@ class TagReader:
         *,
         partial: bool = False,
         format_name: str | None = None,
+        format_names: list[str] | None = None,
         type_name: str | None = None,
+        type_names: list[str] | None = None,
         language: str | None = None,
         min_usage: int | None = None,
         max_usage: int | None = None,
         alias: bool | None = None,
+        deprecated: bool | None = None,
         resolve_preferred: bool = False,
         limit: int | None = None,
         offset: int = 0,
@@ -255,27 +258,21 @@ class TagReader:
 
         with self.session_factory() as session:
             builder = TagSearchQueryBuilder(session)
-            tag_ids = builder.initial_tag_ids(keyword, use_like, limit=limit, offset=offset)
-            if not tag_ids:
-                return []
-
-            tag_ids, format_id = builder.apply_format_filter(tag_ids, format_name)
-            if not tag_ids:
-                return []
-
-            tag_ids = builder.apply_usage_filter(tag_ids, format_id, min_usage, max_usage)
-            if not tag_ids:
-                return []
-
-            tag_ids = builder.apply_type_filter(tag_ids, format_id, type_name)
-            if not tag_ids:
-                return []
-
-            tag_ids = builder.apply_alias_filter(tag_ids, format_id, alias)
-            if not tag_ids:
-                return []
-
-            tag_ids = builder.apply_language_filter(tag_ids, language)
+            resolved_format_names = format_names or ([format_name] if format_name else None)
+            resolved_type_names = type_names or ([type_name] if type_name else None)
+            tag_ids, format_id = builder.filtered_tag_ids(
+                keyword,
+                use_like,
+                format_names=resolved_format_names,
+                type_names=resolved_type_names,
+                language=language,
+                min_usage=min_usage,
+                max_usage=max_usage,
+                alias=alias,
+                deprecated=deprecated,
+                limit=limit,
+                offset=offset,
+            )
             if not tag_ids:
                 return []
 
@@ -1324,6 +1321,63 @@ class MergedTagReader:
             return merged
         return list(merged.values())
 
+    def _merge_search_tags_adaptive(
+        self,
+        keyword: str,
+        *,
+        limit: int | None,
+        offset: int,
+        **kwargs: Any,
+    ) -> list[TagSearchRow]:
+        """Merge search pages after cross-repository deduplication."""
+        repos = [*self._iter_base_repos_low_to_high()]
+        if self._has_user():
+            assert self.user_repo is not None
+            repos.append(self.user_repo)
+
+        merged: dict[int, TagSearchRow] = {}
+
+        if limit is None:
+            for repo in repos:
+                for row in repo.search_tags(keyword, limit=None, offset=0, **kwargs):
+                    merged[row["tag_id"]] = row
+            rows = [merged[tag_id] for tag_id in sorted(merged)]
+            return rows[offset:] if offset else rows
+
+        if limit <= 0:
+            return []
+
+        target = offset + limit
+        chunk_size = max(target, 1)
+        repo_offsets = dict.fromkeys(range(len(repos)), 0)
+        exhausted: set[int] = set()
+
+        while len(merged) < target and len(exhausted) < len(repos):
+            made_progress = False
+            for index, repo in enumerate(repos):
+                if index in exhausted:
+                    continue
+                rows = repo.search_tags(
+                    keyword,
+                    limit=chunk_size,
+                    offset=repo_offsets[index],
+                    **kwargs,
+                )
+                if not rows:
+                    exhausted.add(index)
+                    continue
+                made_progress = True
+                repo_offsets[index] += len(rows)
+                if len(rows) < chunk_size:
+                    exhausted.add(index)
+                for row in rows:
+                    merged[row["tag_id"]] = row
+            if not made_progress:
+                break
+
+        rows = [merged[tag_id] for tag_id in sorted(merged)]
+        return rows[offset:target]
+
     def _accumulate_unique(
         self,
         method_name: str,
@@ -1437,29 +1491,33 @@ class MergedTagReader:
         *,
         partial: bool = False,
         format_name: str | None = None,
+        format_names: list[str] | None = None,
         type_name: str | None = None,
+        type_names: list[str] | None = None,
         language: str | None = None,
         min_usage: int | None = None,
         max_usage: int | None = None,
         alias: bool | None = None,
+        deprecated: bool | None = None,
         resolve_preferred: bool = False,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[TagSearchRow]:
-        return self._merge_by_key(
-            "search_tags",
-            lambda row: row["tag_id"],
+        return self._merge_search_tags_adaptive(
             keyword,
+            limit=limit,
+            offset=offset,
             partial=partial,
             format_name=format_name,
+            format_names=format_names,
             type_name=type_name,
+            type_names=type_names,
             language=language,
             min_usage=min_usage,
             max_usage=max_usage,
             alias=alias,
+            deprecated=deprecated,
             resolve_preferred=resolve_preferred,
-            limit=limit,
-            offset=offset,
         )
 
     def search_tags_bulk(

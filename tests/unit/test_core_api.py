@@ -22,7 +22,19 @@ class DummyRepo:
 
     def search_tags(self, keyword: str, **kwargs) -> list[dict]:
         self.calls.append({"keyword": keyword, **kwargs})
-        return list(self._rows)
+        rows = list(self._rows)
+        if kwargs.get("min_usage") is not None:
+            rows = [row for row in rows if (row["usage_count"] or 0) >= kwargs["min_usage"]]
+        if kwargs.get("max_usage") is not None:
+            rows = [row for row in rows if (row["usage_count"] or 0) <= kwargs["max_usage"]]
+        if kwargs.get("alias") is not None:
+            rows = [row for row in rows if row["alias"] is kwargs["alias"]]
+        if kwargs.get("deprecated") is not None:
+            rows = [row for row in rows if row["deprecated"] is kwargs["deprecated"]]
+        offset = kwargs.get("offset", 0)
+        limit = kwargs.get("limit")
+        rows = rows[offset:] if offset else rows
+        return rows[:limit] if limit is not None else rows
 
 
 class DummyService:
@@ -97,12 +109,13 @@ def test_search_tags_constrained_paginates_after_filter():
 
     result = core_api.search_tags(repo, TagSearchRequest(query="t", limit=2, offset=0, min_usage=10))
 
-    # 制約あり → SQL LIMIT は使わず全件取得
-    assert repo.calls[-1]["limit"] is None
+    # 制約ありでも repository が filter 後に limit する
+    assert repo.calls[-1]["limit"] == 2
+    assert repo.calls[-1]["min_usage"] == 10
     # usage>=10 の active 3 件 (3,4,5) 中、limit=2 → (3,4)
     assert [item.tag_id for item in result.items] == [3, 4]
-    # total は filter 後の全件数 (3)、limit でキャップされない
-    assert result.total == 3
+    # bounded fetch のため total は不明
+    assert result.total is None
 
 
 def test_search_tags_constrained_offset_returns_later_rows():
@@ -114,7 +127,7 @@ def test_search_tags_constrained_offset_returns_later_rows():
 
     # usage>=10 の (2,3,4) を offset=1 → (3,4)
     assert [item.tag_id for item in result.items] == [3, 4]
-    assert result.total == 3
+    assert result.total is None
 
 
 def test_search_tags_filters_and_maps():
@@ -201,7 +214,7 @@ def test_search_tags_filters_and_maps():
     assert result.total == 1
 
 
-def test_search_tags_applies_offset_and_limit_preserves_total():
+def test_search_tags_applies_offset_and_limit_in_repository():
     rows = [
         {
             "tag": f"tag{i}",
@@ -233,10 +246,11 @@ def test_search_tags_applies_offset_and_limit_preserves_total():
 
     result = core_api.search_tags(repo, request)
 
-    # 制約付き → unbounded fetch、Python で offset/limit、total は filter 後の全件数
-    assert repo.calls[-1]["limit"] is None
+    # 制約付きでも repository が filter 後に offset/limit する
+    assert repo.calls[-1]["limit"] == 2
+    assert repo.calls[-1]["offset"] == 1
     assert [item.tag_id for item in result.items] == [2, 3]
-    assert result.total == 5
+    assert result.total is None
 
 
 def test_search_tags_plain_keyword_bounds_repo_query():
@@ -250,10 +264,9 @@ def test_search_tags_plain_keyword_bounds_repo_query():
     request = TagSearchRequest(query="tag", partial=True, limit=2, offset=1)
     result = core_api.search_tags(repo, request)
 
-    # offset は repo に渡さず (MergedReader の per-DB offset 不正を回避)、limit+offset を渡す。
-    assert repo.calls[0].get("limit") == 3
-    assert repo.calls[0].get("offset", 0) == 0
-    # offset/limit は merge 後に Python でスライス: DummyRepo の全 5 件中 [1:3] = tag_id 2,3
+    # offset/limit は MergedTagReader が merge 後に扱うため core_api はそのまま渡す。
+    assert repo.calls[0].get("limit") == 2
+    assert repo.calls[0].get("offset") == 1
     assert [item.tag_id for item in result.items] == [2, 3]
     # bounded fetch のため total は不明 (None)
     assert result.total is None

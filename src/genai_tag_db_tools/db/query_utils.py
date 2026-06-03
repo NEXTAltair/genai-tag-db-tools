@@ -1,6 +1,7 @@
 from logging import Logger
 from typing import Any, TypedDict
 
+from sqlalchemy import exists, not_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import literal_column, or_
 
@@ -80,6 +81,160 @@ class TagSearchQueryBuilder:
             union_query = union_query.limit(limit)
 
         return {row[0] for row in union_query.all()}
+
+    def filtered_tag_ids(
+        self,
+        keyword: str,
+        use_like: bool,
+        *,
+        format_names: list[str] | None = None,
+        type_names: list[str] | None = None,
+        language: str | None = None,
+        min_usage: int | None = None,
+        max_usage: int | None = None,
+        alias: bool | None = None,
+        deprecated: bool | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[set[int], int]:
+        """Return tag ids after applying search filters before limit/offset.
+
+        The returned format id is only set when exactly one concrete format was
+        requested; result row construction uses that to expose format-specific
+        status fields.
+        """
+        format_ids = self._format_ids_for_names(format_names)
+        if format_names and not format_ids:
+            return set(), 0
+
+        type_name_ids = self._type_name_ids_for_names(type_names)
+        if type_names and not type_name_ids:
+            return set(), 0
+
+        candidate = self._keyword_candidate_query(keyword, use_like).subquery()
+        query = self.session.query(candidate.c.tag_id)
+        query = self._apply_status_exists_filters(
+            query,
+            candidate.c.tag_id,
+            format_ids=format_ids,
+            type_name_ids=type_name_ids,
+            alias=alias,
+            deprecated=deprecated,
+        )
+        query = self._apply_usage_exists_filter(
+            query,
+            candidate.c.tag_id,
+            format_ids=format_ids,
+            min_usage=min_usage,
+            max_usage=max_usage,
+        )
+        query = self._apply_language_exists_filter(query, candidate.c.tag_id, language)
+        query = query.order_by(candidate.c.tag_id)
+        if offset:
+            query = query.offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
+
+        format_id = format_ids[0] if len(format_ids) == 1 else 0
+        return {row[0] for row in query.all()}, format_id
+
+    def _keyword_candidate_query(self, keyword: str, use_like: bool) -> Any:
+        tag_conditions = or_(
+            Tag.tag.like(keyword) if use_like else Tag.tag == keyword,
+            Tag.source_tag.like(keyword) if use_like else Tag.source_tag == keyword,
+        )
+        translation_condition = (
+            TagTranslation.translation.like(keyword) if use_like else TagTranslation.translation == keyword
+        )
+
+        tag_query = self.session.query(Tag.tag_id.label("tag_id")).filter(tag_conditions)
+        translation_query = self.session.query(TagTranslation.tag_id.label("tag_id")).filter(
+            translation_condition
+        )
+        return tag_query.union(translation_query)
+
+    def _format_ids_for_names(self, format_names: list[str] | None) -> list[int]:
+        names = self._normalize_filter_names(format_names)
+        if not names:
+            return []
+        rows = self.session.query(TagFormat.format_id).filter(TagFormat.format_name.in_(names)).all()
+        return [row[0] for row in rows]
+
+    def _type_name_ids_for_names(self, type_names: list[str] | None) -> list[int]:
+        names = self._normalize_filter_names(type_names)
+        if not names:
+            return []
+        rows = self.session.query(TagTypeName.type_name_id).filter(TagTypeName.type_name.in_(names)).all()
+        return [row[0] for row in rows]
+
+    def _normalize_filter_names(self, names: list[str] | None) -> list[str]:
+        if not names:
+            return []
+        return [name for name in names if name and name.lower() != "all"]
+
+    def _apply_status_exists_filters(
+        self,
+        query: Any,
+        tag_id_column: Any,
+        *,
+        format_ids: list[int],
+        type_name_ids: list[int],
+        alias: bool | None,
+        deprecated: bool | None,
+    ) -> Any:
+        if not format_ids and not type_name_ids and alias is None and deprecated is None:
+            return query
+
+        status_select = select(TagStatus.tag_id).where(TagStatus.tag_id == tag_id_column)
+        if type_name_ids:
+            status_select = status_select.join(
+                TagTypeFormatMapping,
+                (TagStatus.format_id == TagTypeFormatMapping.format_id)
+                & (TagStatus.type_id == TagTypeFormatMapping.type_id),
+            ).where(TagTypeFormatMapping.type_name_id.in_(type_name_ids))
+        if format_ids:
+            status_select = status_select.where(TagStatus.format_id.in_(format_ids))
+        if alias is not None:
+            status_select = status_select.where(TagStatus.alias == alias)
+        if deprecated is not None:
+            status_select = status_select.where(TagStatus.deprecated == deprecated)
+        return query.filter(exists(status_select))
+
+    def _apply_usage_exists_filter(
+        self,
+        query: Any,
+        tag_id_column: Any,
+        *,
+        format_ids: list[int],
+        min_usage: int | None,
+        max_usage: int | None,
+    ) -> Any:
+        if min_usage is None and max_usage is None:
+            return query
+
+        matching_usage = select(TagUsageCounts.tag_id).where(TagUsageCounts.tag_id == tag_id_column)
+        any_usage = select(TagUsageCounts.tag_id).where(TagUsageCounts.tag_id == tag_id_column)
+        if format_ids:
+            matching_usage = matching_usage.where(TagUsageCounts.format_id.in_(format_ids))
+            any_usage = any_usage.where(TagUsageCounts.format_id.in_(format_ids))
+        if min_usage is not None:
+            matching_usage = matching_usage.where(TagUsageCounts.count >= min_usage)
+        if max_usage is not None:
+            matching_usage = matching_usage.where(TagUsageCounts.count <= max_usage)
+
+        condition: Any = exists(matching_usage)
+        if self._should_include_missing_usage(min_usage, max_usage):
+            condition = or_(condition, not_(exists(any_usage)))
+        return query.filter(condition)
+
+    def _apply_language_exists_filter(self, query: Any, tag_id_column: Any, language: str | None) -> Any:
+        if not language or language.lower() == "all":
+            return query
+        language_select = select(TagTranslation.tag_id).where(
+            TagTranslation.tag_id == tag_id_column,
+            TagTranslation.language == language,
+        )
+        return query.filter(exists(language_select))
 
     def initial_tag_ids_for_keywords(self, keywords: list[str]) -> dict[str, set[int]]:
         if not keywords:
