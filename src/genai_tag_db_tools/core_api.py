@@ -151,13 +151,14 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
     format_name = (
         request.format_names[0] if request.format_names and len(request.format_names) == 1 else None
     )
+    push_status_filters = bool(request.format_names or request.type_names)
 
     common_kwargs = {
         "partial": request.partial,
         "format_names": request.format_names,
         "type_names": request.type_names,
-        "alias": None if request.include_aliases else False,
-        "deprecated": None if request.include_deprecated else False,
+        "alias": False if push_status_filters and not request.include_aliases else None,
+        "deprecated": False if push_status_filters and not request.include_deprecated else None,
         "min_usage": request.min_usage,
         "max_usage": request.max_usage,
         "resolve_preferred": request.resolve_preferred,

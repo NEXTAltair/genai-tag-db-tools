@@ -103,12 +103,14 @@ class TagSearchQueryBuilder:
         requested; result row construction uses that to expose format-specific
         status fields.
         """
-        format_ids = self._format_ids_for_names(format_names)
-        if format_names and not format_ids:
+        concrete_format_names = self._normalize_filter_names(format_names)
+        format_ids = self._format_ids_for_names(concrete_format_names)
+        if concrete_format_names and not format_ids:
             return set(), 0
 
-        type_name_ids = self._type_name_ids_for_names(type_names)
-        if type_names and not type_name_ids:
+        concrete_type_names = self._normalize_filter_names(type_names)
+        type_name_ids = self._type_name_ids_for_names(concrete_type_names)
+        if concrete_type_names and not type_name_ids:
             return set(), 0
 
         candidate = self._keyword_candidate_query(keyword, use_like).subquery()

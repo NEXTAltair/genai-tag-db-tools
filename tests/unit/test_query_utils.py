@@ -117,6 +117,24 @@ def test_filtered_tag_ids_filters_alias_and_deprecated_before_limit(
     assert sorted(ids) == [3, 4]
 
 
+def test_filtered_tag_ids_treats_all_as_unfiltered(
+    session_factory: Callable[[], Session],
+) -> None:
+    with session_factory() as session:
+        _seed_minimal_schema(session, total_tags=4)
+        builder = TagSearchQueryBuilder(session)
+        ids, format_id = builder.filtered_tag_ids(
+            "%sample_%",
+            use_like=True,
+            format_names=["all"],
+            type_names=["all"],
+            limit=2,
+        )
+
+    assert sorted(ids) == [1, 2]
+    assert format_id == 0
+
+
 def test_preloader_load_handles_large_id_sets_with_chunking(
     session_factory: Callable[[], Session],
     monkeypatch: pytest.MonkeyPatch,
