@@ -17,7 +17,6 @@ from genai_tag_db_tools.models import (
     TagRegisterResult,
     TagSearchRequest,
     TagSearchResult,
-    TagSearchRow,
     TagStatisticsResult,
 )
 from genai_tag_db_tools.services.tag_register import TagRegisterService
@@ -122,31 +121,6 @@ def initialize_databases(
     return results
 
 
-def _filter_rows(rows: list[TagSearchRow], request: TagSearchRequest) -> list[TagSearchRow]:
-    filtered: list[TagSearchRow] = []
-    format_names = set(_concrete_filter_names(request.format_names))
-    type_names = set(_concrete_filter_names(request.type_names))
-
-    for row in rows:
-        usage_count = row["usage_count"] or 0
-        if not request.include_aliases and row["alias"] is True:
-            continue
-        if not request.include_deprecated and row["deprecated"] is True:
-            continue
-        if format_names:
-            format_statuses = row.get("format_statuses") or {}
-            if not any(fmt in format_statuses for fmt in format_names):
-                continue
-        if type_names and row["type_name"] not in type_names:
-            continue
-        if request.min_usage is not None and usage_count < request.min_usage:
-            continue
-        if request.max_usage is not None and usage_count > request.max_usage:
-            continue
-        filtered.append(row)
-    return filtered
-
-
 def _concrete_filter_names(names: list[str] | None) -> list[str]:
     if not names:
         return []
@@ -169,14 +143,16 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
         "resolve_preferred": request.resolve_preferred,
     }
 
+    # フィルタの正本は repository (filtered_tag_ids) に一元化する。core_api 側で行を再フィルタ
+    # しない: build_row は単一 format でないと usage_count/deprecated 等を 0/False で返すため、
+    # Python 側で再判定すると repository が正しく拾った行を落としてしまう (#45)。
     if request.limit is not None:
-        rows = repo.search_tags(
+        page = repo.search_tags(
             request.query,
             **common_kwargs,
             limit=request.limit,
             offset=request.offset,
         )
-        page = _filter_rows(rows, request)
         total: int | None = None  # bounded fetch のため全件数は不明
     else:
         rows = repo.search_tags(
@@ -185,9 +161,8 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
             limit=None,
             offset=0,
         )
-        filtered = _filter_rows(rows, request)
-        total = len(filtered)
-        page = filtered[request.offset :] if request.offset else filtered
+        total = len(rows)
+        page = rows[request.offset :] if request.offset else rows
 
     items = [
         TagRecordPublic(

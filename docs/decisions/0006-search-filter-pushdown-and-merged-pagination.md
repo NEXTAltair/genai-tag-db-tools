@@ -26,3 +26,19 @@ ADR 0004 では plain keyword 検索だけを bounded にし、format/type/usage
 autocomplete/typeahead は bounded のまま、制約付き検索も full candidate materialize を避けられる。
 複数DB検索では既存の `TagReader(session_factory)` 構成を維持するため、SQLite `ATTACH DATABASE`
 ではなく adaptive fetch を採用する。
+
+## Amendment (2026-06-03, #45)
+
+フィルタの正本を repository 層 (`filtered_tag_ids`) に一元化し、`core_api.search_tags` の
+Python 側再フィルタ (`_filter_rows`) を撤去した。
+
+`_filter_rows` は `row["usage_count"]` / `row["deprecated"]` 等で再判定していたが、
+`TagSearchResultBuilder.build_row` はこれらを**単一 concrete format のときだけ**埋める
+(無/複数 format = `format_id=0` では `usage_count=0` / `deprecated=False` / `type_name=""`)。
+そのため `tag-db search --query x --min-usage N`(format 無し)で、repository が `EXISTS` で
+正しく拾った行を `_filter_rows` が `usage_count(0) < N` で全 drop し、空を返していた (#45)。
+
+repository は本 ADR の `EXISTS` push-down で format/type/usage/alias/deprecated を既に適用済みの
+ため、`_filter_rows` は冗長かつ format 依存値で誤判定する。撤去により正本は repository 単一に
+なる。回帰テストでは `DummyRepo` を `build_row` 同様にゼロ詰め(無/複数 format で format 依存
+フィールドを 0/False/"")して、二重フィルタが再導入されたら落ちるようにした。
