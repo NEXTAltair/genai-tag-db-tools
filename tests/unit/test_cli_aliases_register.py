@@ -2,12 +2,6 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from unittest.mock import MagicMock
-
-import pytest
-
 from genai_tag_db_tools.models import AliasRegisterInput
 from genai_tag_db_tools.services.tag_register import TagRegisterService
 
@@ -69,8 +63,8 @@ class DummyReader:
         self._tags: dict[str, int] = {"wedding dress": 99}
         self._statuses: dict[tuple[int, int], DummyStatus] = {}
 
-    def get_tag_id_by_name(self, tag: str, partial: bool = False) -> int | None:
-        return self._tags.get(tag)
+    def get_tag_id_by_name(self, keyword: str, partial: bool = False) -> int | None:
+        return self._tags.get(keyword)
 
     def get_format_id(self, format_name: str) -> int:
         result = {"Lorairo": 1001}.get(format_name)
