@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -185,3 +187,99 @@ class TestAliasesRegisterIntrospection:
         model_names = [line["name"] for line in lines if line.get("kind") == "model"]
         assert "AliasRegisterInput" in model_names
         assert "AliasRegisterResult" in model_names
+
+
+class TestCmdAliasesRegister:
+    def _make_jsonl_file(self, tmp_path: Path, lines: list[dict]) -> Path:
+        f = tmp_path / "aliases.jsonl"
+        f.write_text("\n".join(json.dumps(line) for line in lines), encoding="utf-8")
+        return f
+
+    def _make_csv_file(self, tmp_path: Path, rows: list[dict]) -> Path:
+        import csv
+
+        f = tmp_path / "aliases.csv"
+        with open(f, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=["alias", "preferred", "format_name", "type_name"])
+            writer.writeheader()
+            writer.writerows(rows)
+        return f
+
+    @pytest.fixture(autouse=True)
+    def _patch_db(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from genai_tag_db_tools import cli
+
+        monkeypatch.setattr(cli, "_set_db_paths", lambda *a, **kw: None)
+
+    def _make_mock_service(self, status: str = "would_create") -> MagicMock:
+        from genai_tag_db_tools.models import AliasRegisterItemResult
+
+        svc = MagicMock()
+        svc.register_alias_entry.return_value = AliasRegisterItemResult(
+            alias="weding dress",
+            preferred="wedding dress",
+            status=status,
+            alias_tag_id=100 if status == "created" else None,
+            preferred_tag_id=99,
+        )
+        return svc
+
+    def test_dry_run_default_outputs_would_create(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from genai_tag_db_tools import cli
+        from genai_tag_db_tools.cli import main
+
+        mock_svc = self._make_mock_service("would_create")
+        monkeypatch.setattr(cli, "_build_register_service", lambda: mock_svc)
+        jsonl = self._make_jsonl_file(
+            tmp_path,
+            [{"alias": "weding dress", "preferred": "wedding dress", "format_name": "Lorairo", "type_name": "unknown"}],
+        )
+        main(["aliases", "register", "--file", str(jsonl), "--base-db", str(tmp_path / "x.db")])
+        out = capsys.readouterr().out
+        lines = [json.loads(line) for line in out.splitlines() if line.strip()]
+        item = next(line for line in lines if line["kind"] == "item")
+        result = next(line for line in lines if line["kind"] == "result")
+        assert item["status"] == "would_create"
+        assert result["dry_run"] is True
+        assert result["total"] == 1
+
+    def test_apply_flag_sets_dry_run_false(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from genai_tag_db_tools import cli
+        from genai_tag_db_tools.cli import main
+
+        mock_svc = self._make_mock_service("created")
+        monkeypatch.setattr(cli, "_build_register_service", lambda: mock_svc)
+        jsonl = self._make_jsonl_file(
+            tmp_path,
+            [{"alias": "weding dress", "preferred": "wedding dress", "format_name": "Lorairo", "type_name": "unknown"}],
+        )
+        main(["aliases", "register", "--file", str(jsonl), "--apply", "--base-db", str(tmp_path / "x.db")])
+        out = capsys.readouterr().out
+        lines = [json.loads(line) for line in out.splitlines() if line.strip()]
+        result = next(line for line in lines if line["kind"] == "result")
+        assert result["dry_run"] is False
+        call_args = mock_svc.register_alias_entry.call_args
+        assert call_args.kwargs["dry_run"] is False
+
+    def test_csv_input_parsed_correctly(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from genai_tag_db_tools import cli
+        from genai_tag_db_tools.cli import main
+
+        mock_svc = self._make_mock_service("would_create")
+        monkeypatch.setattr(cli, "_build_register_service", lambda: mock_svc)
+        csv_file = self._make_csv_file(
+            tmp_path,
+            [{"alias": "weding dress", "preferred": "wedding dress", "format_name": "Lorairo", "type_name": "unknown"}],
+        )
+        main(["aliases", "register", "--file", str(csv_file), "--base-db", str(tmp_path / "x.db")])
+        out = capsys.readouterr().out
+        lines = [json.loads(line) for line in out.splitlines() if line.strip()]
+        assert any(line["kind"] == "item" for line in lines)
+        result = next(line for line in lines if line["kind"] == "result")
+        assert result["total"] == 1

@@ -1,4 +1,5 @@
 import argparse
+import csv
 import json
 import sys
 import traceback
@@ -240,6 +241,80 @@ def cmd_stats(args: argparse.Namespace) -> None:
     emit_result("statistics", **result.model_dump())
 
 
+def _parse_alias_file(file_path: str) -> "list[AliasRegisterInput]":
+    """JSONL または CSV から AliasRegisterInput のリストを返す。"""
+    import json as _json
+    from pathlib import Path as _Path
+
+    from genai_tag_db_tools.models import AliasRegisterInput
+
+    path = _Path(file_path)
+    entries: list[AliasRegisterInput] = []
+
+    if path.suffix.lower() == ".csv":
+        with open(path, encoding="utf-8", newline="") as fh:
+            reader = csv.DictReader(fh)
+            for row in reader:
+                entries.append(
+                    AliasRegisterInput(
+                        alias=row["alias"],
+                        preferred=row["preferred"],
+                        format_name=row["format_name"],
+                        type_name=row.get("type_name") or "unknown",
+                    )
+                )
+    else:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                data = _json.loads(line)
+                entries.append(AliasRegisterInput(**data))
+
+    return entries
+
+
+def cmd_aliases_register(args: argparse.Namespace) -> None:
+    """aliases register サブコマンドのハンドラ。"""
+    if args.user_db_dir:
+        user_db_dir = args.user_db_dir
+    else:
+        from genai_tag_db_tools.io.hf_downloader import default_cache_dir
+
+        user_db_dir = str(default_cache_dir())
+
+    _set_db_paths(args.base_db, user_db_dir)
+    service = _build_register_service()
+    dry_run = not args.apply
+
+    entries = _parse_alias_file(args.file)
+
+    total = created = skipped = conflicts = missing_preferred = 0
+    for entry in entries:
+        total += 1
+        item_result = service.register_alias_entry(entry, dry_run=dry_run)
+        emit_item(item_result)
+        if item_result.status in ("would_create", "created"):
+            created += 1
+        elif item_result.status == "skipped":
+            skipped += 1
+        elif item_result.status == "conflict":
+            conflicts += 1
+        elif item_result.status == "missing_preferred":
+            missing_preferred += 1
+
+    emit_result(
+        "dry-run complete" if dry_run else "aliases registered",
+        dry_run=dry_run,
+        total=total,
+        created=created,
+        skipped=skipped,
+        conflicts=conflicts,
+        missing_preferred=missing_preferred,
+    )
+
+
 def cmd_convert(args: argparse.Namespace) -> None:
     """Convert tags to specified format."""
     from genai_tag_db_tools.core_api import convert_tags
@@ -380,6 +455,27 @@ def build_parser(prog: str = "tag-db") -> argparse.ArgumentParser:
         help="compact (default) for short field notation, json_schema for the full schema.",
     )
     describe_parser.set_defaults(func=cmd_describe)
+
+    aliases_parser = subparsers.add_parser("aliases", help="Manage tag aliases.")
+    aliases_subs = aliases_parser.add_subparsers(dest="aliases_command", required=True)
+
+    aliases_register_parser = aliases_subs.add_parser(
+        "register",
+        help="Bulk-register alias entries from JSONL/CSV file (dry-run by default).",
+    )
+    aliases_register_parser.add_argument(
+        "--file",
+        required=True,
+        help="Input file path (.jsonl or .csv).",
+    )
+    aliases_register_parser.add_argument(
+        "--apply",
+        action="store_true",
+        default=False,
+        help="Write to user DB. Omit for dry-run (default).",
+    )
+    _add_base_db_args(aliases_register_parser)
+    aliases_register_parser.set_defaults(func=cmd_aliases_register)
 
     list_commands_parser = subparsers.add_parser(
         "list-commands",
