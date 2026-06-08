@@ -12,7 +12,12 @@ from genai_tag_db_tools.utils.cleanup_str import TagCleaner
 
 if TYPE_CHECKING:
     from genai_tag_db_tools.db.repository import MergedTagReader
-    from genai_tag_db_tools.models import AliasRegisterInput, AliasRegisterItemResult, TagRegisterRequest, TagRegisterResult
+    from genai_tag_db_tools.models import (
+        AliasRegisterInput,
+        AliasRegisterItemResult,
+        TagRegisterRequest,
+        TagRegisterResult,
+    )
 
 
 class TagRegister:
