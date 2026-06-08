@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from genai_tag_db_tools.models import AliasRegisterInput
 from genai_tag_db_tools.services.tag_register import TagRegisterService
 
@@ -155,3 +159,29 @@ class TestRegisterAliasEntry:
         )
         result = service.register_alias_entry(entry, dry_run=False)
         assert result.status == "conflict"
+
+
+class TestAliasesRegisterIntrospection:
+    def test_aliases_register_appears_in_list_commands(self, capsys: pytest.CaptureFixture[str]) -> None:
+        import argparse
+
+        from genai_tag_db_tools.cli import cmd_list_commands
+
+        cmd_list_commands(argparse.Namespace())
+        output = capsys.readouterr().out
+        lines = [json.loads(line) for line in output.splitlines() if line.strip()]
+        tool_names = [line["name"] for line in lines if line.get("kind") == "tool"]
+        assert "aliases/register" in tool_names
+
+    def test_aliases_register_describe_outputs_models(self, capsys: pytest.CaptureFixture[str]) -> None:
+        import argparse
+
+        from genai_tag_db_tools.cli import cmd_describe
+
+        args = argparse.Namespace(target_command="aliases/register", schema="compact")
+        cmd_describe(args)
+        output = capsys.readouterr().out
+        lines = [json.loads(line) for line in output.splitlines() if line.strip()]
+        model_names = [line["name"] for line in lines if line.get("kind") == "model"]
+        assert "AliasRegisterInput" in model_names
+        assert "AliasRegisterResult" in model_names
