@@ -276,12 +276,27 @@ def _parse_alias_file(file_path: str) -> list[AliasRegisterInput]:
 
 def cmd_aliases_register(args: argparse.Namespace) -> None:
     """aliases register サブコマンドのハンドラ。"""
+    from pathlib import Path
+
     if args.user_db_dir:
         user_db_dir = args.user_db_dir
     else:
         from genai_tag_db_tools.io.hf_downloader import default_cache_dir
 
         user_db_dir = str(default_cache_dir())
+
+    # --base-db が user DB と同一ファイルを指す場合は拒否 (Issue #49)
+    user_db_path = Path(user_db_dir).resolve() / "user_tags.sqlite"
+    if args.base_db:
+        for base_db in args.base_db:
+            if Path(base_db).resolve() == user_db_path:
+                emit_error(
+                    errors.INVALID_INPUT,
+                    "--base-db must not point to the same user_tags.sqlite as --user-db-dir for aliases register",
+                    retryable=False,
+                    user_action_required=True,
+                )
+                sys.exit(2)
 
     _set_db_paths(args.base_db, user_db_dir)
     service = _build_register_service()
