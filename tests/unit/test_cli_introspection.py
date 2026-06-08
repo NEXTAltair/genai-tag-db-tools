@@ -26,8 +26,9 @@ class TestListCommands:
             "register",
             "stats",
             "convert",
+            "aliases/register",
         }
-        assert objs[-1] == {"kind": "result", "ok": True, "message": "commands listed", "count": 5}
+        assert objs[-1] == {"kind": "result", "ok": True, "message": "commands listed", "count": 6}
 
     def test_side_effects_and_read_only(self, capsys: pytest.CaptureFixture[str]) -> None:
         tools = {

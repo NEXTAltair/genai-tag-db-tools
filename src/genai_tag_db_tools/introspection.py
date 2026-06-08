@@ -23,6 +23,8 @@ from typing import Literal
 from pydantic import BaseModel
 
 from genai_tag_db_tools.models import (
+    AliasRegisterInput,
+    AliasRegisterResult,
     CliErrorResult,
     ConvertTagsRequest,
     ConvertTagsResult,
@@ -107,6 +109,14 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         read_only=True,
         input_model=ConvertTagsRequest,
         output_model=ConvertTagsResult,
+    ),
+    "aliases/register": ToolSpec(
+        name="aliases/register",
+        description="Bulk-register typo alias entries to user DB (dry-run by default).",
+        side_effects=("db_write",),
+        read_only=False,
+        input_model=AliasRegisterInput,
+        output_model=AliasRegisterResult,
     ),
 }
 

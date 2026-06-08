@@ -12,7 +12,12 @@ from genai_tag_db_tools.utils.cleanup_str import TagCleaner
 
 if TYPE_CHECKING:
     from genai_tag_db_tools.db.repository import MergedTagReader
-    from genai_tag_db_tools.models import TagRegisterRequest, TagRegisterResult
+    from genai_tag_db_tools.models import (
+        AliasRegisterInput,
+        AliasRegisterItemResult,
+        TagRegisterRequest,
+        TagRegisterResult,
+    )
 
 
 class TagRegister:
@@ -247,3 +252,79 @@ class TagRegisterService:
         )
 
         return TagRegisterResult(created=created, tag_id=tag_id)
+
+    def register_alias_entry(
+        self,
+        entry: "AliasRegisterInput",
+        dry_run: bool,
+    ) -> "AliasRegisterItemResult":
+        """alias 1エントリを user DB に登録する（または dry-run で確認する）。
+
+        Args:
+            entry: 登録対象のaliasエントリ。
+            dry_run: Trueの場合はDB変更を行わず would_create を返す。
+
+        Returns:
+            AliasRegisterItemResult: 処理結果。
+        """
+        from genai_tag_db_tools.models import AliasRegisterItemResult
+
+        # 1. preferred タグを lookup
+        preferred_tag_id = self._reader.get_tag_id_by_name(entry.preferred, partial=False)
+        if preferred_tag_id is None:
+            return AliasRegisterItemResult(
+                alias=entry.alias,
+                preferred=entry.preferred,
+                status="missing_preferred",
+            )
+
+        # 2. format / type を解決
+        fmt_id = self._resolve_format_id(entry.format_name)
+        type_id = self._resolve_type_id(entry.type_name, entry.format_name, fmt_id)
+
+        # 3. alias タグの既存チェック
+        alias_tag_id = self._reader.get_tag_id_by_name(entry.alias, partial=False)
+        if alias_tag_id is not None:
+            status = self._reader.get_tag_status(alias_tag_id, fmt_id)
+            if status is not None and status.alias:
+                if status.preferred_tag_id == preferred_tag_id:
+                    return AliasRegisterItemResult(
+                        alias=entry.alias,
+                        preferred=entry.preferred,
+                        status="skipped",
+                        alias_tag_id=alias_tag_id,
+                        preferred_tag_id=preferred_tag_id,
+                    )
+                return AliasRegisterItemResult(
+                    alias=entry.alias,
+                    preferred=entry.preferred,
+                    status="conflict",
+                    alias_tag_id=alias_tag_id,
+                    preferred_tag_id=preferred_tag_id,
+                )
+
+        # 4. dry_run モード: DB 変更なし
+        if dry_run:
+            return AliasRegisterItemResult(
+                alias=entry.alias,
+                preferred=entry.preferred,
+                status="would_create",
+                preferred_tag_id=preferred_tag_id,
+            )
+
+        # 5. 実際に作成
+        new_alias_tag_id = self._repo.create_tag(entry.alias, entry.alias)
+        self._repo.update_tag_status(
+            tag_id=new_alias_tag_id,
+            format_id=fmt_id,
+            alias=True,
+            preferred_tag_id=preferred_tag_id,
+            type_id=type_id,
+        )
+        return AliasRegisterItemResult(
+            alias=entry.alias,
+            preferred=entry.preferred,
+            status="created",
+            alias_tag_id=new_alias_tag_id,
+            preferred_tag_id=preferred_tag_id,
+        )
