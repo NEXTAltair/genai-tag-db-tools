@@ -283,3 +283,62 @@ class TestCmdAliasesRegister:
         assert any(line["kind"] == "item" for line in lines)
         result = next(line for line in lines if line["kind"] == "result")
         assert result["total"] == 1
+
+    def test_rejects_when_base_db_is_same_as_user_db(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """--base-db が --user-db-dir/user_tags.sqlite と同一なら INVALID_INPUT で拒否 (Issue #49)。"""
+        from genai_tag_db_tools.cli import main
+
+        user_db = tmp_path / "user_tags.sqlite"
+        with pytest.raises(SystemExit) as exc_info:
+            main(
+                [
+                    "aliases",
+                    "register",
+                    "--file",
+                    str(tmp_path / "dummy.jsonl"),
+                    "--base-db",
+                    str(user_db),
+                    "--user-db-dir",
+                    str(tmp_path),
+                ]
+            )
+        assert exc_info.value.code == 2
+        out = capsys.readouterr().out
+        error_line = json.loads(out.strip())
+        assert error_line["kind"] == "error"
+        assert error_line["code"] == "INVALID_INPUT"
+        assert error_line["user_action_required"] is True
+
+    def test_allows_when_base_db_differs_from_user_db(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--base-db が user_tags.sqlite と別パスなら通常通り動作する (Issue #49)。"""
+        from genai_tag_db_tools import cli
+        from genai_tag_db_tools.cli import main
+
+        mock_svc = self._make_mock_service("would_create")
+        monkeypatch.setattr(cli, "_build_register_service", lambda: mock_svc)
+        jsonl = self._make_jsonl_file(
+            tmp_path,
+            [{"alias": "weding dress", "preferred": "wedding dress", "format_name": "Lorairo", "type_name": "unknown"}],
+        )
+        base_db = tmp_path / "base.sqlite"
+        user_dir = tmp_path / "user"
+        user_dir.mkdir()
+        main(
+            [
+                "aliases",
+                "register",
+                "--file",
+                str(jsonl),
+                "--base-db",
+                str(base_db),
+                "--user-db-dir",
+                str(user_dir),
+            ]
+        )
+        out = capsys.readouterr().out
+        lines = [json.loads(line) for line in out.splitlines() if line.strip()]
+        assert any(line["kind"] == "result" for line in lines)
