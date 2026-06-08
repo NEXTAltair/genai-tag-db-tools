@@ -325,3 +325,37 @@ class PreloadedData(BaseModel):
 
 
 PreloadedData.model_rebuild()
+
+
+class AliasRegisterInput(BaseModel):
+    """alias一括登録の1エントリ入力。"""
+
+    alias: str = Field(..., description="エイリアスタグ（誤字・別名）")
+    preferred: str = Field(..., description="正規タグ（preferred_tag）")
+    format_name: str = Field(..., description="フォーマット名")
+    type_name: str = Field(default="unknown", description="タイプ名")
+
+
+class AliasRegisterItemResult(BaseModel):
+    """alias登録の1行処理結果。"""
+
+    alias: str = Field(..., description="エイリアスタグ")
+    preferred: str = Field(..., description="正規タグ")
+    status: str = Field(
+        ...,
+        description="処理結果: would_create / created / skipped / conflict / missing_preferred",
+    )
+    alias_tag_id: int | None = Field(default=None, description="aliasのタグID（apply後）")
+    preferred_tag_id: int | None = Field(default=None, description="preferredのタグID")
+
+
+class AliasRegisterResult(BaseModel):
+    """alias一括登録の最終サマリ。"""
+
+    ok: bool = Field(..., description="全体成功フラグ")
+    dry_run: bool = Field(..., description="dry-runモードか")
+    total: int = Field(..., description="入力行数")
+    created: int = Field(..., description="新規作成件数")
+    skipped: int = Field(..., description="スキップ件数（既存同一）")
+    conflicts: int = Field(..., description="衝突件数")
+    missing_preferred: int = Field(..., description="preferred未存在件数")
