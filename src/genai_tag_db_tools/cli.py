@@ -25,6 +25,7 @@ from genai_tag_db_tools.introspection import (
     tool_line,
 )
 from genai_tag_db_tools.models import (
+    AliasRegisterInput,
     DbCacheConfig,
     DbSourceRef,
     EnsureDbRequest,
@@ -241,12 +242,10 @@ def cmd_stats(args: argparse.Namespace) -> None:
     emit_result("statistics", **result.model_dump())
 
 
-def _parse_alias_file(file_path: str) -> "list[AliasRegisterInput]":
+def _parse_alias_file(file_path: str) -> list[AliasRegisterInput]:
     """JSONL または CSV から AliasRegisterInput のリストを返す。"""
     import json as _json
     from pathlib import Path as _Path
-
-    from genai_tag_db_tools.models import AliasRegisterInput
 
     path = _Path(file_path)
     entries: list[AliasRegisterInput] = []
