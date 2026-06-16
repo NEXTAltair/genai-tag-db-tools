@@ -17,6 +17,7 @@ from genai_tag_db_tools.models import (
     TagRegisterResult,
     TagSearchRequest,
     TagSearchResult,
+    TagSearchRow,
     TagStatisticsResult,
 )
 from genai_tag_db_tools.services.tag_register import TagRegisterService
@@ -209,7 +210,21 @@ def _normalize_prompt_tags(tags: str) -> list[str]:
     return cleaned_tags
 
 
-def _lookup_tags(repo: MergedTagReader, tags: list[str], format_name: str) -> dict[str, str]:
+def _lookup_tag_rows(repo: MergedTagReader, tags: list[str], format_name: str) -> dict[str, TagSearchRow]:
+    """入力タグを DB で検索し、keyword → 検索結果行の辞書を返す。
+
+    完全一致検索 (partial=False) は repository 層で大文字小文字を無視する
+    (COLLATE NOCASE / lower 照合) ため、入力の case が DB と異なっても解決される。
+
+    Args:
+        repo: タグ検索に用いる MergedTagReader。
+        tags: 検索対象のタグ文字列リスト。
+        format_name: 変換先フォーマット名。
+
+    Returns:
+        ヒットしたタグについて keyword をキー、TagSearchRow を値とする辞書。
+        ``tag`` フィールドが空の行は除外する。
+    """
     unique_tags = list(dict.fromkeys(tags))
     if not unique_tags:
         return {}
@@ -221,23 +236,54 @@ def _lookup_tags(repo: MergedTagReader, tags: list[str], format_name: str) -> di
             resolve_preferred=True,
         )
         return {
-            tag: rows_by_tag[tag]["tag"]
+            tag: rows_by_tag[tag]
             for tag in unique_tags
             if tag in rows_by_tag and rows_by_tag[tag].get("tag")
         }
 
-    tag_map: dict[str, str] = {}
+    tag_rows: dict[str, TagSearchRow] = {}
     for tag in unique_tags:
         rows = repo.search_tags(tag, partial=False, format_name=format_name, resolve_preferred=True)
         if rows:
-            tag_map[tag] = rows[0]["tag"]
-    return tag_map
+            tag_rows[tag] = rows[0]
+    return tag_rows
 
 
-def convert_tags(repo: MergedTagReader, tags: str, format_name: str, separator: str = ", ") -> str:
+def _is_excluded_type(row: TagSearchRow, exclude_types_lower: set[str]) -> bool:
+    """検索結果行の type_name が除外対象なら True を返す。"""
+    if not exclude_types_lower:
+        return False
+    type_name = row.get("type_name")
+    if not type_name:
+        return False
+    return type_name.lower() in exclude_types_lower
+
+
+def convert_tags(
+    repo: MergedTagReader,
+    tags: str,
+    format_name: str,
+    separator: str = ", ",
+    *,
+    exclude_types: list[str] | None = None,
+) -> str:
     """Convert comma-separated tags to the specified format.
+
     - Normalize input before lookup
     - Use batch lookup when available
+    - Exact-match lookup is case-insensitive (see ``_lookup_tag_rows``)
+
+    Args:
+        repo: タグ検索に用いる MergedTagReader。
+        tags: カンマ区切りの入力タグ文字列。
+        format_name: 変換先フォーマット名 (例: "danbooru")。
+        separator: 出力タグの結合文字列。
+        exclude_types: 出力から除外する type_name のリスト (例: ["meta"])。
+            None の場合は除外しない (デフォルト挙動)。指定タグが該当 type に
+            解決された場合、そのタグは出力から取り除かれる。
+
+    Returns:
+        変換後のタグ文字列。
     """
     if not tags.strip():
         return tags
@@ -250,22 +296,33 @@ def convert_tags(repo: MergedTagReader, tags: str, format_name: str, separator: 
     if not normalized_tags:
         return tags
 
-    tag_map = _lookup_tags(repo, normalized_tags, format_name)
-    word_map: dict[str, str] = {}
+    exclude_types_lower = {t.lower() for t in exclude_types} if exclude_types else set()
+
+    tag_rows = _lookup_tag_rows(repo, normalized_tags, format_name)
+    word_rows: dict[str, TagSearchRow] = {}
     converted_list: list[str] = []
 
     for tag in normalized_tags:
-        converted = tag_map.get(tag)
-        if converted:
-            converted_list.append(converted)
+        row = tag_rows.get(tag)
+        if row is not None and row.get("tag"):
+            if _is_excluded_type(row, exclude_types_lower):
+                continue
+            converted_list.append(row["tag"])
             continue
 
         if " " in tag:
             words = [word for word in tag.split(" ") if word]
-            missing = [word for word in words if word not in word_map]
+            missing = [word for word in words if word not in word_rows]
             if missing:
-                word_map.update(_lookup_tags(repo, missing, format_name))
-            converted_list.extend([word_map.get(word, word) for word in words])
+                word_rows.update(_lookup_tag_rows(repo, missing, format_name))
+            for word in words:
+                word_row = word_rows.get(word)
+                if word_row is not None and word_row.get("tag"):
+                    if _is_excluded_type(word_row, exclude_types_lower):
+                        continue
+                    converted_list.append(word_row["tag"])
+                else:
+                    converted_list.append(word)
             continue
 
         converted_list.append(tag)

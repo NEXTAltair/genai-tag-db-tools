@@ -60,6 +60,30 @@ def test_initial_tag_ids_respects_limit_and_offset(session_factory: Callable[[],
         assert len(ids) == 5
 
 
+def test_initial_tag_ids_exact_match_is_case_insensitive(
+    session_factory: Callable[[], Session],
+) -> None:
+    with session_factory() as session:
+        session.add(Tag(tag_id=1, source_tag="blue_hair", tag="blue hair"))
+        session.commit()
+        builder = TagSearchQueryBuilder(session)
+        ids = builder.initial_tag_ids("Blue Hair", use_like=False)
+
+    assert ids == {1}
+
+
+def test_initial_tag_ids_for_keywords_is_case_insensitive(
+    session_factory: Callable[[], Session],
+) -> None:
+    with session_factory() as session:
+        session.add(Tag(tag_id=1, source_tag="blue_hair", tag="blue hair"))
+        session.commit()
+        builder = TagSearchQueryBuilder(session)
+        result = builder.initial_tag_ids_for_keywords(["Blue Hair"])
+
+    assert result == {"Blue Hair": {1}}
+
+
 def test_filtered_tag_ids_applies_filters_before_limit(
     session_factory: Callable[[], Session],
 ) -> None:
