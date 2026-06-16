@@ -1,7 +1,7 @@
 from logging import Logger
 from typing import Any, TypedDict
 
-from sqlalchemy import exists, not_, select
+from sqlalchemy import exists, func, not_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import literal_column, or_
 
@@ -57,12 +57,16 @@ class TagSearchQueryBuilder:
         limit: int | None = None,
         offset: int = 0,
     ) -> set[int]:
+        # 完全一致 (use_like=False) は大文字小文字を無視して照合する (COLLATE NOCASE)。
+        # LIKE は SQLite 既定で ASCII 大文字小文字を無視するため挙動は変えない。
         tag_conditions = or_(
-            Tag.tag.like(keyword) if use_like else Tag.tag == keyword,
-            Tag.source_tag.like(keyword) if use_like else Tag.source_tag == keyword,
+            Tag.tag.like(keyword) if use_like else Tag.tag.collate("NOCASE") == keyword,
+            Tag.source_tag.like(keyword) if use_like else Tag.source_tag.collate("NOCASE") == keyword,
         )
         translation_condition = (
-            TagTranslation.translation.like(keyword) if use_like else TagTranslation.translation == keyword
+            TagTranslation.translation.like(keyword)
+            if use_like
+            else TagTranslation.translation.collate("NOCASE") == keyword
         )
 
         tag_query = self.session.query(Tag.tag_id.label("tag_id")).filter(tag_conditions)
@@ -141,12 +145,15 @@ class TagSearchQueryBuilder:
         return {row[0] for row in query.all()}, format_id
 
     def _keyword_candidate_query(self, keyword: str, use_like: bool) -> Any:
+        # 完全一致 (use_like=False) は COLLATE NOCASE で大文字小文字を無視する。
         tag_conditions = or_(
-            Tag.tag.like(keyword) if use_like else Tag.tag == keyword,
-            Tag.source_tag.like(keyword) if use_like else Tag.source_tag == keyword,
+            Tag.tag.like(keyword) if use_like else Tag.tag.collate("NOCASE") == keyword,
+            Tag.source_tag.like(keyword) if use_like else Tag.source_tag.collate("NOCASE") == keyword,
         )
         translation_condition = (
-            TagTranslation.translation.like(keyword) if use_like else TagTranslation.translation == keyword
+            TagTranslation.translation.like(keyword)
+            if use_like
+            else TagTranslation.translation.collate("NOCASE") == keyword
         )
 
         tag_query = self.session.query(Tag.tag_id.label("tag_id")).filter(tag_conditions)
@@ -265,26 +272,41 @@ class TagSearchQueryBuilder:
             return {}
 
         keyword_set = set(keywords)
+        # 大文字小文字を無視して照合するため lower 化したキーで突き合わせる。
+        # 同一 lower 値を持つ keyword が複数あっても、それぞれに tag_id を割り当てる。
+        keywords_by_lower: dict[str, set[str]] = {}
+        for keyword in keyword_set:
+            keywords_by_lower.setdefault(keyword.lower(), set()).add(keyword)
+        lower_keys = list(keywords_by_lower.keys())
+
         tag_rows = (
             self.session.query(Tag.tag_id, Tag.tag, Tag.source_tag)
-            .filter(or_(Tag.tag.in_(keyword_set), Tag.source_tag.in_(keyword_set)))
+            .filter(
+                or_(
+                    func.lower(Tag.tag).in_(lower_keys),
+                    func.lower(Tag.source_tag).in_(lower_keys),
+                )
+            )
             .all()
         )
         trans_rows = (
             self.session.query(TagTranslation.tag_id, TagTranslation.translation)
-            .filter(TagTranslation.translation.in_(keyword_set))
+            .filter(func.lower(TagTranslation.translation).in_(lower_keys))
             .all()
         )
 
         tag_ids_by_keyword: dict[str, set[int]] = {keyword: set() for keyword in keyword_set}
         for tag_id, tag, source_tag in tag_rows:
-            if tag in tag_ids_by_keyword:
-                tag_ids_by_keyword[tag].add(tag_id)
-            if source_tag in tag_ids_by_keyword:
-                tag_ids_by_keyword[source_tag].add(tag_id)
+            for value in (tag, source_tag):
+                if value is None:
+                    continue
+                for keyword in keywords_by_lower.get(value.lower(), ()):
+                    tag_ids_by_keyword[keyword].add(tag_id)
         for tag_id, translation in trans_rows:
-            if translation in tag_ids_by_keyword:
-                tag_ids_by_keyword[translation].add(tag_id)
+            if translation is None:
+                continue
+            for keyword in keywords_by_lower.get(translation.lower(), ()):
+                tag_ids_by_keyword[keyword].add(tag_id)
 
         return {keyword: ids for keyword, ids in tag_ids_by_keyword.items() if ids}
 
@@ -430,15 +452,11 @@ class TagSearchPreloader:
             row.preferred_tag_id for row in initial_status_rows if row.preferred_tag_id is not None
         }
         status_tag_ids = set(tag_ids) | preferred_ids
-        status_rows = self._query_in_chunks(
-            self.session.query(TagStatus), TagStatus.tag_id, status_tag_ids
-        )
+        status_rows = self._query_in_chunks(self.session.query(TagStatus), TagStatus.tag_id, status_tag_ids)
         format_ids = {row.format_id for row in status_rows}
         format_name_by_id = {
             fmt.format_id: fmt.format_name
-            for fmt in self._query_in_chunks(
-                self.session.query(TagFormat), TagFormat.format_id, format_ids
-            )
+            for fmt in self._query_in_chunks(self.session.query(TagFormat), TagFormat.format_id, format_ids)
         }
         type_name_by_key = {
             (mapping.format_id, mapping.type_id): (mapping.type_name.type_name if mapping.type_name else "")
@@ -455,8 +473,7 @@ class TagSearchPreloader:
             )
         }
         tags_by_id = {
-            t.tag_id: t
-            for t in self._query_in_chunks(self.session.query(Tag), Tag.tag_id, status_tag_ids)
+            t.tag_id: t for t in self._query_in_chunks(self.session.query(Tag), Tag.tag_id, status_tag_ids)
         }
         all_translations = self._query_in_chunks(
             self.session.query(TagTranslation), TagTranslation.tag_id, status_tag_ids
