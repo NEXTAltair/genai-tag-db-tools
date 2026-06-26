@@ -60,11 +60,14 @@ exclude = [
 ]
 
 ignore = [
-    "RUF002", # カタカナの `ノ` でのメッセージを無視
     "E501",   # Line too long (line-lengthで制御)
-    "F541",   # f-string in logging (同等のpylint警告W1203 - Ruffでは直接の対応がない)
     "C901",   # Function is too complex (複雑度チェックを無効化)
 ]
+
+# confusable 警告を許可する文字。日本語表記のカタカナ ノ (U+30CE)・全角括弧 （ ）・
+# UI/乗算で使う × (U+00D7)。残る全角記号は RUF001/002/003 で検出・半角化させる。
+allowed-confusables = ["ノ", "（", "）", "×"]
+
 fixable = ["ALL"]
 
 [tool.ruff.format]
