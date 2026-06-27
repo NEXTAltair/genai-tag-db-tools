@@ -16,11 +16,20 @@ from .core_api import (
     search_tags,
     update_tags_type_batch,
 )
-from .models import RefinementReason, RefinementRecommendation, RefinementSuggestion, TagTypeUpdate
+from .models import (
+    DbFeedbackProposal,
+    ProposalTarget,
+    RefinementReason,
+    RefinementRecommendation,
+    RefinementSuggestion,
+    TagTypeUpdate,
+)
 from .services.tag_search import TagSearcher
 from .utils.cleanup_str import TagCleaner
 
 __all__ = [
+    "DbFeedbackProposal",
+    "ProposalTarget",
     "RefinementReason",
     "RefinementRecommendation",
     "RefinementSuggestion",
