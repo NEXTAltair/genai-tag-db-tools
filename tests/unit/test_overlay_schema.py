@@ -6,18 +6,17 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 
+from genai_tag_db_tools.db.runtime import _create_engine
 from genai_tag_db_tools.db.schema import (
     USER_TAG_ID_OFFSET,
     UserOverlayBase,
     UserTag,
     UserTagStatusPatch,
 )
-from genai_tag_db_tools.db.runtime import _create_engine
 from genai_tag_db_tools.models import TagRef
-
 
 # --- fixtures ---
 
@@ -128,30 +127,30 @@ class TestUserTagConstraints:
 
 class TestUserTagStatusPatchConstraints:
     def _non_alias_patch(self, **kwargs) -> UserTagStatusPatch:
-        base = dict(
-            target_scope="base",
-            target_tag_id=100,
-            format_id=1000,
-            type_id=0,
-            alias=False,
-            preferred_scope="base",
-            preferred_tag_id=100,
-            deprecated=False,
-        )
+        base = {
+            "target_scope": "base",
+            "target_tag_id": 100,
+            "format_id": 1000,
+            "type_id": 0,
+            "alias": False,
+            "preferred_scope": "base",
+            "preferred_tag_id": 100,
+            "deprecated": False,
+        }
         base.update(kwargs)
         return UserTagStatusPatch(**base)
 
     def _alias_patch(self, **kwargs) -> UserTagStatusPatch:
-        base = dict(
-            target_scope="base",
-            target_tag_id=100,
-            format_id=1000,
-            type_id=0,
-            alias=True,
-            preferred_scope="base",
-            preferred_tag_id=200,
-            deprecated=False,
-        )
+        base = {
+            "target_scope": "base",
+            "target_tag_id": 100,
+            "format_id": 1000,
+            "type_id": 0,
+            "alias": True,
+            "preferred_scope": "base",
+            "preferred_tag_id": 200,
+            "deprecated": False,
+        }
         base.update(kwargs)
         return UserTagStatusPatch(**base)
 

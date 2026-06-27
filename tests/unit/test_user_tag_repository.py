@@ -19,7 +19,6 @@ from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
 from genai_tag_db_tools.models import TagRegisterRequest
 from genai_tag_db_tools.services.tag_register import TagRegisterService
 
-
 # --- fixtures ---
 
 
@@ -83,16 +82,16 @@ class TestCreateUserTag:
 
 class TestWritePatch:
     def _make_patch_kwargs(self, **overrides) -> dict:
-        base: dict = dict(
-            target_scope="user",
-            target_tag_id=USER_TAG_ID_OFFSET + 1,
-            format_id=1000,
-            type_id=0,
-            alias=False,
-            preferred_scope="user",
-            preferred_tag_id=USER_TAG_ID_OFFSET + 1,
-            deprecated=False,
-        )
+        base: dict = {
+            "target_scope": "user",
+            "target_tag_id": USER_TAG_ID_OFFSET + 1,
+            "format_id": 1000,
+            "type_id": 0,
+            "alias": False,
+            "preferred_scope": "user",
+            "preferred_tag_id": USER_TAG_ID_OFFSET + 1,
+            "deprecated": False,
+        }
         base.update(overrides)
         return base
 

@@ -126,7 +126,7 @@ class TagRegisterService:
         self._repo = repository if repository else get_default_repository()
         self._reader = reader or get_default_reader()
         if user_tag_repo is not None:
-            self._user_tag_repo: "UserTagRepository | None" = user_tag_repo
+            self._user_tag_repo: UserTagRepository | None = user_tag_repo
         else:
             from genai_tag_db_tools.db.runtime import get_user_session_factory_optional
             from genai_tag_db_tools.db.user_tag_repository import UserTagRepository as _UserTagRepository

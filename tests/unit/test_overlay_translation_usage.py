@@ -13,14 +13,12 @@ from genai_tag_db_tools.db.schema import (
     USER_TAG_ID_OFFSET,
     Base,
     UserOverlayBase,
-    UserTag,
     UserTagTranslationPatch,
     UserTagUsagePatch,
 )
 from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
 from genai_tag_db_tools.models import TagRegisterRequest, TagTranslationInput
 from genai_tag_db_tools.services.tag_register import TagRegisterService
-
 
 # --- fixtures ---
 

@@ -21,9 +21,7 @@ from genai_tag_db_tools.db.schema import (
     TagTypeName,
     UserOverlayBase,
     UserTag,
-    UserTagStatusPatch,
 )
-
 
 # --- fixtures ---
 
@@ -108,16 +106,16 @@ def _make_mock_session_factory(*, query_result=None, filter_result=None):
 def _insert_patch(db_path: Path, **kwargs) -> None:
     """USER_TAG_STATUS_PATCH を raw SQL で INSERT（CHECK 制約を回避するため）。"""
     engine = _create_engine(db_path)
-    defaults = dict(
-        target_scope="base",
-        target_tag_id=100,
-        format_id=1,
-        type_id=0,
-        alias=0,
-        preferred_scope="base",
-        preferred_tag_id=100,
-        deprecated=0,
-    )
+    defaults = {
+        "target_scope": "base",
+        "target_tag_id": 100,
+        "format_id": 1,
+        "type_id": 0,
+        "alias": 0,
+        "preferred_scope": "base",
+        "preferred_tag_id": 100,
+        "deprecated": 0,
+    }
     defaults.update(kwargs)
     with engine.connect() as conn:
         # SQLite の CHECK 制約は正常な行にのみ通る
