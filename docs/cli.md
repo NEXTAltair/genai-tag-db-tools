@@ -155,6 +155,45 @@ tag-db search --query cat --limit 2
 {"kind": "result", "ok": true, "message": "search completed", "query": "cat", "count": 2, "total": 2, "limit": 2, "offset": 0}
 ```
 
+#### Reading `search` item status fields
+
+Each `item` has two status views:
+
+- Top-level `format_name`, `type_id`, `type_name`, `alias`, `deprecated`, and
+  `usage_count` are the selected-format summary. They are meaningful when the
+  request identifies exactly one concrete format, such as `--format-name
+  danbooru` or `--format-name unknown`.
+- `format_statuses` is the per-format map for the same tag. Use this map when
+  comparing formats or when the query is unqualified (`--format-name` omitted or
+  `all`). Keys are format names, and each value carries that format's `type_id`,
+  `type_name`, `alias`, `deprecated`, and `usage_count`.
+
+For a single concrete format, the top-level fields should match the same entry
+inside `format_statuses`. For example, a query with `--format-name unknown` may
+return:
+
+```jsonl
+{"kind": "item", "tag": "sorceress", "format_name": "unknown", "type_id": 0, "type_name": "unknown", "alias": false, "deprecated": false, "usage_count": 1096310, "format_statuses": {"unknown": {"alias": false, "deprecated": false, "usage_count": 1096310, "type_id": 0, "type_name": "unknown"}, "danbooru": {"alias": true, "deprecated": true, "usage_count": 0, "type_id": 0, "type_name": "general"}}}
+```
+
+`unknown` in `--format-name unknown` is a format name, not the same thing as
+`--type-name unknown`. In the current distributed DBs, some tags have an
+`unknown` format status whose type is also `unknown`; that is why both
+`format_name` and `type_name` can read `"unknown"` in the same row.
+
+For issue #56 style data review, read CLI output as evidence, not as a final
+recommendation verdict:
+
+- Use the final `result.count` to decide whether the query found any usable rows.
+  `pixiv id` with `--exact --format-name unknown` and `pixiv` with
+  `--format-name unknown` can legitimately return `count:0` when the current DB
+  has no matching tag/translation in that format.
+- Use the selected-format top-level fields for the requested format's status.
+  For cross-format context, inspect `format_statuses`.
+- Do not infer training suitability or recommendation decisions from
+  `deprecated`, `alias`, or `type_name` alone; those policies are outside this
+  CLI contract.
+
 ### register — add a tag (`db_write`)
 
 ```bash

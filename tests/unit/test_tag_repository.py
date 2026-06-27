@@ -17,6 +17,7 @@ from genai_tag_db_tools.db.schema import (
     TagTranslation,
     TagTypeFormatMapping,
     TagTypeName,
+    TagUsageCounts,
 )
 
 pytestmark = pytest.mark.db_tools
@@ -119,6 +120,41 @@ def test_search_tags_handles_large_candidate_set_without_sqlite_variable_overflo
 
     rows = reader.search_tags("sa", partial=True, format_name="test")
     assert len(rows) == total_tags
+
+
+def test_search_tags_resolves_top_level_status_for_format_id_zero(
+    session_factory: Callable[[], Session],
+) -> None:
+    reader = TagReader(session_factory)
+
+    with session_factory() as session:
+        session.add(TagFormat(format_id=0, format_name="unknown"))
+        session.add(TagTypeName(type_name_id=1, type_name="unknown"))
+        session.add(TagTypeFormatMapping(format_id=0, type_id=0, type_name_id=1))
+        session.add(Tag(tag_id=1, source_tag="sorceress", tag="sorceress"))
+        session.add(
+            TagStatus(
+                tag_id=1,
+                format_id=0,
+                type_id=0,
+                alias=False,
+                preferred_tag_id=1,
+                deprecated=False,
+            )
+        )
+        session.add(TagUsageCounts(tag_id=1, format_id=0, count=42))
+        session.commit()
+
+    rows = reader.search_tags("sorceress", partial=False, format_name="unknown")
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["type_id"] == 0
+    assert row["type_name"] == "unknown"
+    assert row["alias"] is False
+    assert row["deprecated"] is False
+    assert row["usage_count"] == 42
+    assert row["format_statuses"]["unknown"]["type_name"] == "unknown"
 
 
 def test_get_next_type_id_returns_zero_for_empty_format(session_factory: Callable[[], Session]) -> None:

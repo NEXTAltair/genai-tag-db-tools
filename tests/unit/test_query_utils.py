@@ -156,7 +156,7 @@ def test_filtered_tag_ids_treats_all_as_unfiltered(
         )
 
     assert sorted(ids) == [1, 2]
-    assert format_id == 0
+    assert format_id is None
 
 
 def test_filtered_tag_ids_negative_status_filters_keep_statusless_tags(
