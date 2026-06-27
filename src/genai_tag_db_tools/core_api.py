@@ -3,16 +3,20 @@ from __future__ import annotations
 import hashlib
 import re
 from datetime import UTC, datetime
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from genai_tag_db_tools.db import runtime
 from genai_tag_db_tools.db.repository import MergedTagReader
+from genai_tag_db_tools.db.schema import USER_TAG_ID_OFFSET
 from genai_tag_db_tools.io import hf_downloader
 from genai_tag_db_tools.models import (
     DbCacheConfig,
+    DbFeedbackProposal,
     DbSourceRef,
     EnsureDbRequest,
     EnsureDbResult,
+    ProposalTarget,
     RefinementReason,
     RefinementRecommendation,
     RefinementSuggestion,
@@ -32,6 +36,11 @@ _REFINEMENT_REASON_MESSAGES = {
     "normalization_changes_tag": "既存の正規化でタグ表記が変わります。",
     "broad_single_word": "単語が広すぎるため、人による確認が必要です。",
     "site_info_token": "サイト情報トークンのため、通常タグとして扱うべきか確認が必要です。",
+    "alias_tag": "入力タグは alias です。preferred tag の利用候補があります。",
+    "non_preferred_tag": "入力タグは preferred tag ではありません。",
+    "typo_alias_candidate": "近い既存タグがあり、typo alias 候補として確認できます。",
+    "ambiguous_alias_candidates": "近い既存タグが複数あるため、alias 先を決め打ちできません。",
+    "missing_preferred_tag": "alias/preferred 関係の preferred tag が見つかりません。",
 }
 _BROAD_SINGLE_WORD_TAGS = {
     "animal",
@@ -89,8 +98,16 @@ def _refinement_score(reasons: list[RefinementReason], suggestions: list[Refinem
         return 0.0
     if "empty_normalized_tag" in codes:
         return 1.0
+    if "missing_preferred_tag" in codes:
+        return 1.0
+    if "alias_tag" in codes or "non_preferred_tag" in codes:
+        return 0.9
     if any(suggestion.kind == "correction_candidate" for suggestion in suggestions):
         return 0.8
+    if "typo_alias_candidate" in codes:
+        return 0.7
+    if "ambiguous_alias_candidates" in codes:
+        return 0.5
     return 0.6
 
 
@@ -258,17 +275,267 @@ def register_tag(service: TagRegisterService, request: TagRegisterRequest) -> Ta
     return service.register_tag(request)
 
 
-def recommend_manual_refinement(tag: str) -> RefinementRecommendation:
+def _tag_scope(tag_id: int) -> str:
+    return "user" if tag_id >= USER_TAG_ID_OFFSET else "base"
+
+
+def _resolve_recommendation_format_id(repo: MergedTagReader, format_name: str) -> int | None:
+    try:
+        format_id = repo.get_format_id(format_name)
+    except ValueError:
+        return None
+    return format_id or None
+
+
+def _search_exact_recommendation_rows(
+    repo: MergedTagReader,
+    tag: str,
+    *,
+    format_name: str,
+    format_id: int | None,
+) -> list[TagSearchRow]:
+    effective_format_name = format_name if format_id is not None else None
+    return repo.search_tags(
+        tag,
+        partial=False,
+        format_name=effective_format_name,
+        resolve_preferred=False,
+    )
+
+
+def _preferred_tag_for_status(repo: MergedTagReader, preferred_tag_id: int):
+    return repo.get_tag_by_id(preferred_tag_id)
+
+
+def _db_feedback_alias_proposal(
+    *,
+    source_tag: str,
+    normalized_tag: str,
+    preferred_tag_id: int,
+    preferred_tag: str,
+    format_name: str,
+    reason_code: str,
+    confidence: float,
+) -> DbFeedbackProposal:
+    return DbFeedbackProposal(
+        kind="alias_addition",
+        target=ProposalTarget(
+            kind="alias",
+            target_scope="user",
+            target_tag_id=None,
+            format_name=format_name,
+            preferred_scope=_tag_scope(preferred_tag_id),
+            preferred_tag_id=preferred_tag_id,
+        ),
+        current=None,
+        proposed={
+            "alias": True,
+            "alias_tag": normalized_tag,
+            "preferred_tag": preferred_tag,
+            "preferred_scope": _tag_scope(preferred_tag_id),
+            "preferred_tag_id": preferred_tag_id,
+        },
+        confidence=confidence,
+        source="recommend_manual_refinement",
+        reason_codes=[reason_code],
+        evidence=[{"source_tag": source_tag, "normalized_tag": normalized_tag}],
+    )
+
+
+def _edit_distance_at_most(left: str, right: str, limit: int) -> int | None:
+    if abs(len(left) - len(right)) > limit:
+        return None
+    previous = list(range(len(right) + 1))
+    for i, left_char in enumerate(left, start=1):
+        current = [i]
+        row_min = i
+        for j, right_char in enumerate(right, start=1):
+            cost = 0 if left_char == right_char else 1
+            value = min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost)
+            current.append(value)
+            row_min = min(row_min, value)
+        if row_min > limit:
+            return None
+        previous = current
+    distance = previous[-1]
+    return distance if distance <= limit else None
+
+
+def _typo_distance_limit(tag: str) -> int:
+    return 1 if len(tag) <= 5 else 2
+
+
+def _candidate_sort_key(input_tag: str, candidate: tuple[int, str, int]) -> tuple[int, float, str]:
+    tag_id, tag, distance = candidate
+    return (distance, -SequenceMatcher(None, input_tag, tag).ratio(), tag, tag_id)
+
+
+def _find_typo_candidates(
+    repo: MergedTagReader,
+    normalized_tag: str,
+    *,
+    format_id: int | None,
+    limit: int = 3,
+) -> list[tuple[int, str, int]]:
+    if not normalized_tag:
+        return []
+
+    distance_limit = _typo_distance_limit(normalized_tag)
+    candidates: list[tuple[int, str, int]] = []
+    seen_tags: set[str] = set()
+    for tag_obj in repo.list_tags():
+        candidate_tag = tag_obj.tag
+        if not candidate_tag:
+            continue
+        candidate_key = candidate_tag.lower()
+        if candidate_key == normalized_tag.lower() or candidate_key in seen_tags:
+            continue
+        seen_tags.add(candidate_key)
+
+        if format_id is not None:
+            status = repo.get_tag_status(tag_obj.tag_id, format_id)
+            if status is None or status.alias:
+                continue
+        distance = _edit_distance_at_most(normalized_tag.lower(), candidate_key, distance_limit)
+        if distance is None:
+            continue
+        candidates.append((tag_obj.tag_id, candidate_tag, distance))
+
+    return sorted(candidates, key=lambda candidate: _candidate_sort_key(normalized_tag, candidate))[
+        :limit
+    ]
+
+
+def _recommend_from_db(
+    *,
+    repo: MergedTagReader,
+    source_tag: str,
+    normalized_tag: str,
+    format_name: str,
+) -> RefinementRecommendation | None:
+    format_id = _resolve_recommendation_format_id(repo, format_name)
+    exact_rows = _search_exact_recommendation_rows(
+        repo,
+        normalized_tag,
+        format_name=format_name,
+        format_id=format_id,
+    )
+
+    if exact_rows:
+        row = exact_rows[0]
+        if format_id is None:
+            return RefinementRecommendation(
+                source_tag=source_tag,
+                normalized_tag=normalized_tag,
+                needs_refinement=False,
+                score=0.0,
+            )
+        status = repo.get_tag_status(row["tag_id"], format_id)
+        if status is None or (
+            not status.alias and status.preferred_tag_id in (None, row["tag_id"])
+        ):
+            return RefinementRecommendation(
+                source_tag=source_tag,
+                normalized_tag=normalized_tag,
+                needs_refinement=False,
+                score=0.0,
+            )
+
+        preferred_tag = _preferred_tag_for_status(repo, status.preferred_tag_id)
+        if preferred_tag is None:
+            reasons = [_refinement_reason("missing_preferred_tag")]
+            return RefinementRecommendation(
+                source_tag=source_tag,
+                normalized_tag=normalized_tag,
+                needs_refinement=True,
+                score=_refinement_score(reasons, []),
+                reasons=reasons,
+                suggestions=[RefinementSuggestion(kind="review_only")],
+            )
+
+        reason_code = "alias_tag" if status.alias else "non_preferred_tag"
+        reasons = [_refinement_reason(reason_code)]
+        suggestions = [RefinementSuggestion(kind="correction_candidate", tag=preferred_tag.tag)]
+        return RefinementRecommendation(
+            source_tag=source_tag,
+            normalized_tag=normalized_tag,
+            needs_refinement=True,
+            score=_refinement_score(reasons, suggestions),
+            reasons=reasons,
+            suggestions=suggestions,
+        )
+
+    candidates = _find_typo_candidates(repo, normalized_tag, format_id=format_id)
+    if not candidates:
+        return None
+
+    best_distance = candidates[0][2]
+    best_candidates = [candidate for candidate in candidates if candidate[2] == best_distance]
+    if len(best_candidates) == 1:
+        tag_id, candidate_tag, _distance = best_candidates[0]
+        reasons = [_refinement_reason("typo_alias_candidate")]
+        suggestions = [RefinementSuggestion(kind="correction_candidate", tag=candidate_tag)]
+        return RefinementRecommendation(
+            source_tag=source_tag,
+            normalized_tag=normalized_tag,
+            needs_refinement=True,
+            score=_refinement_score(reasons, suggestions),
+            reasons=reasons,
+            suggestions=suggestions,
+            proposals=[
+                _db_feedback_alias_proposal(
+                    source_tag=source_tag,
+                    normalized_tag=normalized_tag,
+                    preferred_tag_id=tag_id,
+                    preferred_tag=candidate_tag,
+                    format_name=format_name,
+                    reason_code="typo_alias_candidate",
+                    confidence=0.7,
+                )
+            ],
+        )
+
+    reasons = [_refinement_reason("ambiguous_alias_candidates")]
+    suggestions = [
+        RefinementSuggestion(kind="correction_candidate", tag=candidate_tag)
+        for _tag_id, candidate_tag, _distance in best_candidates
+    ]
+    return RefinementRecommendation(
+        source_tag=source_tag,
+        normalized_tag=normalized_tag,
+        needs_refinement=True,
+        score=_refinement_score(reasons, suggestions),
+        reasons=reasons,
+        suggestions=suggestions,
+    )
+
+
+def recommend_manual_refinement(
+    tag: str,
+    repo: MergedTagReader | None = None,
+    *,
+    format_name: str = "unknown",
+) -> RefinementRecommendation:
     """Recommend whether a tag needs manual refinement before registration.
 
-    This MVP is deterministic and DB independent. It only uses the existing tag
-    formatting normalization and does not resolve aliases, preferred tags, or
-    overlay state.
+    Without a repo this remains deterministic and DB independent. When a merged
+    reader is supplied, exact DB aliases/preferred relations and typo alias
+    candidates are read through the overlay-aware repository without mutating DBs.
     """
     normalized_tag = _normalize_refinement_tag(tag)
     source_candidate = tag.strip()
     reasons: list[RefinementReason] = []
     suggestions: list[RefinementSuggestion] = []
+
+    if repo is not None:
+        db_recommendation = _recommend_from_db(
+            repo=repo,
+            source_tag=tag,
+            normalized_tag=normalized_tag,
+            format_name=format_name,
+        )
+        if db_recommendation is not None:
+            return db_recommendation
 
     is_site_info_token = _looks_like_site_info_token(tag)
     if not normalized_tag:
