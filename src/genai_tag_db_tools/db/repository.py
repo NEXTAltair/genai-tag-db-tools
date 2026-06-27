@@ -1,7 +1,10 @@
 from collections.abc import Callable
 from datetime import datetime
 from logging import getLogger
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from genai_tag_db_tools.db.overlay_reader import OverlayTagReader
 
 import polars as pl
 from sqlalchemy import func
@@ -1218,7 +1221,7 @@ class MergedTagReader:
     def __init__(
         self,
         base_repo: TagReader | list[TagReader],
-        user_repo: TagReader | None = None,
+        user_repo: "TagReader | OverlayTagReader | None" = None,
     ):
         self.logger = getLogger(__name__)
         if isinstance(base_repo, list):
@@ -1239,8 +1242,8 @@ class MergedTagReader:
     def _iter_base_repos_low_to_high(self) -> list[TagReader]:
         return list(reversed(self.base_repos))
 
-    def _iter_repos(self) -> list[TagReader]:
-        repos: list[TagReader] = []
+    def _iter_repos(self) -> "list[TagReader | OverlayTagReader]":
+        repos: list[TagReader | OverlayTagReader] = []
         if self.user_repo is not None:
             repos.append(self.user_repo)
         repos.extend(self.base_repos)
@@ -1671,13 +1674,14 @@ class MergedTagReader:
 
 
 def get_default_reader() -> MergedTagReader:
+    from genai_tag_db_tools.db.overlay_reader import OverlayTagReader
     from genai_tag_db_tools.db.runtime import (
         get_base_session_factories,
         get_user_session_factory_optional,
     )
 
     user_factory = get_user_session_factory_optional()
-    user_repo = TagReader(session_factory=user_factory) if user_factory else None
+    user_repo = OverlayTagReader(session_factory=user_factory) if user_factory else None
 
     base_factories = get_base_session_factories()
     if not base_factories:
