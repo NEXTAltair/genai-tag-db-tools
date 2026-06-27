@@ -11,13 +11,25 @@ from genai_tag_db_tools.db.runtime import init_engine, set_database_path
 class DatabaseMaintenanceTool:
     """タグDBの保守チェックをまとめたユーティリティ。"""
 
-    def __init__(self, db_path: str):
-        """指定DBを対象にツールを初期化する。"""
+    def __init__(self, db_path: str, user_db_path: str | None = None):
+        """指定 DB を対象にツールを初期化する。
+
+        Args:
+            db_path: base DB パス
+            user_db_path: user DB パス (overlay チェックが必要な場合のみ指定)
+        """
         path = Path(db_path)
         set_database_path(path)
         init_engine(path)
         self.tag_repository = get_default_repository()
         self.reader = get_default_reader()
+
+        # user DB セッションファクトリ (overlay チェック用)
+        self._user_session_factory = None
+        if user_db_path is not None:
+            from genai_tag_db_tools.db.runtime import create_session_factory
+
+            self._user_session_factory = create_session_factory(Path(user_db_path))
 
     def detect_duplicates_in_tag_status(self) -> list[dict[str, Any]]:
         """TAG_STATUSの重複を検出して詳細を返す。"""
@@ -190,6 +202,142 @@ class DatabaseMaintenanceTool:
                         }
                     )
         return abnormal
+
+    def detect_overlay_orphan_records(self) -> dict[str, list[dict]]:
+        """overlay テーブルの孤立レコードを検出する。
+
+        USER_TAG_STATUS_PATCH の target_tag_id / preferred_tag_id が
+        対応する TAGS (base) または USER_TAGS (user) に存在するかを検証する。
+
+        Returns:
+            {
+                "orphan_target": [...],      # target が存在しないパッチ
+                "orphan_preferred": [...],   # preferred が存在しないパッチ
+            }
+        """
+        if self._user_session_factory is None:
+            return {"orphan_target": [], "orphan_preferred": []}
+
+        from genai_tag_db_tools.db.schema import UserTag, UserTagStatusPatch
+
+        orphan_target = []
+        orphan_preferred = []
+
+        with self._user_session_factory() as session:
+            patches = session.query(UserTagStatusPatch).all()
+            user_tag_ids = {row.tag_id for row in session.query(UserTag.tag_id).all()}
+
+        base_tag_ids = set(self.reader.get_all_tag_ids())
+
+        for patch in patches:
+            # target の存在チェック
+            if patch.target_scope == "base":
+                if patch.target_tag_id not in base_tag_ids:
+                    orphan_target.append({
+                        "target_scope": patch.target_scope,
+                        "target_tag_id": patch.target_tag_id,
+                        "format_id": patch.format_id,
+                        "reason": "base TAGS に存在しない target_tag_id",
+                    })
+            elif patch.target_scope == "user":
+                if patch.target_tag_id not in user_tag_ids:
+                    orphan_target.append({
+                        "target_scope": patch.target_scope,
+                        "target_tag_id": patch.target_tag_id,
+                        "format_id": patch.format_id,
+                        "reason": "USER_TAGS に存在しない target_tag_id",
+                    })
+
+            # preferred の存在チェック
+            if patch.preferred_scope == "base":
+                if patch.preferred_tag_id not in base_tag_ids:
+                    orphan_preferred.append({
+                        "target_scope": patch.target_scope,
+                        "target_tag_id": patch.target_tag_id,
+                        "format_id": patch.format_id,
+                        "preferred_scope": patch.preferred_scope,
+                        "preferred_tag_id": patch.preferred_tag_id,
+                        "reason": "base TAGS に存在しない preferred_tag_id",
+                    })
+            elif patch.preferred_scope == "user":
+                if patch.preferred_tag_id not in user_tag_ids:
+                    orphan_preferred.append({
+                        "target_scope": patch.target_scope,
+                        "target_tag_id": patch.target_tag_id,
+                        "format_id": patch.format_id,
+                        "preferred_scope": patch.preferred_scope,
+                        "preferred_tag_id": patch.preferred_tag_id,
+                        "reason": "USER_TAGS に存在しない preferred_tag_id",
+                    })
+
+        return {"orphan_target": orphan_target, "orphan_preferred": orphan_preferred}
+
+    def detect_overlay_inconsistent_alias(self) -> list[dict]:
+        """USER_TAG_STATUS_PATCH の alias 整合性が崩れているレコードを検出する。
+
+        CHECK 制約と重複するが application 層の二重確認として有用。
+
+        Returns:
+            整合性エラーがあるパッチ行のリスト。
+        """
+        if self._user_session_factory is None:
+            return []
+
+        from genai_tag_db_tools.db.schema import UserTagStatusPatch
+
+        inconsistencies = []
+        with self._user_session_factory() as session:
+            patches = session.query(UserTagStatusPatch).all()
+
+        for patch in patches:
+            is_self = (
+                patch.preferred_scope == patch.target_scope
+                and patch.preferred_tag_id == patch.target_tag_id
+            )
+            if not patch.alias and not is_self:
+                inconsistencies.append({
+                    "target_scope": patch.target_scope,
+                    "target_tag_id": patch.target_tag_id,
+                    "format_id": patch.format_id,
+                    "reason": "alias=False なのに preferred が自分自身でない",
+                })
+            if patch.alias and is_self:
+                inconsistencies.append({
+                    "target_scope": patch.target_scope,
+                    "target_tag_id": patch.target_tag_id,
+                    "format_id": patch.format_id,
+                    "reason": "alias=True なのに preferred が自分自身を指す",
+                })
+
+        return inconsistencies
+
+    def detect_user_tag_id_range(self) -> list[dict]:
+        """USER_TAGS の tag_id が USER_TAG_ID_OFFSET (1_000_000_000) 以上かを確認する。
+
+        CHECK 制約の二重確認として使用する。
+
+        Returns:
+            オフセット未満の tag_id を持つ行のリスト。
+        """
+        if self._user_session_factory is None:
+            return []
+
+        from genai_tag_db_tools.db.schema import USER_TAG_ID_OFFSET, UserTag
+
+        violations = []
+        with self._user_session_factory() as session:
+            out_of_range = (
+                session.query(UserTag)
+                .filter(UserTag.tag_id < USER_TAG_ID_OFFSET)
+                .all()
+            )
+        for tag in out_of_range:
+            violations.append({
+                "tag_id": tag.tag_id,
+                "tag": tag.tag,
+                "reason": f"tag_id < USER_TAG_ID_OFFSET ({USER_TAG_ID_OFFSET})",
+            })
+        return violations
 
     def optimize_indexes(self) -> None:
         """インデックスの最適化（未実装）。"""
