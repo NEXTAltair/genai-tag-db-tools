@@ -4,19 +4,23 @@ import hashlib
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 from genai_tag_db_tools.db import runtime
 from genai_tag_db_tools.db.repository import MergedTagReader
 from genai_tag_db_tools.io import hf_downloader
 from genai_tag_db_tools.models import (
     DbCacheConfig,
+    DbFeedbackProposal,
     DbSourceRef,
     EnsureDbRequest,
     EnsureDbResult,
+    ProposalTarget,
     RefinementReason,
     RefinementRecommendation,
     RefinementSuggestion,
     TagRecordPublic,
+    TagRef,
     TagRegisterRequest,
     TagRegisterResult,
     TagSearchRequest,
@@ -32,6 +36,12 @@ _REFINEMENT_REASON_MESSAGES = {
     "normalization_changes_tag": "既存の正規化でタグ表記が変わります。",
     "broad_single_word": "単語が広すぎるため、人による確認が必要です。",
     "site_info_token": "サイト情報トークンのため、通常タグとして扱うべきか確認が必要です。",
+    "wrong_language_translation": "翻訳の言語が対象言語と異なる可能性があります。",
+    "missing_translation": "翻訳が空です。",
+    "overlong_translation": "翻訳が長すぎるため、タグ翻訳として確認が必要です。",
+    "description_like_translation": "翻訳が説明文のように見えます。",
+    "translation_mismatch": "翻訳が元タグと一致していない可能性があります。",
+    "low_quality_translation": "翻訳品質が低い可能性があります。",
 }
 _BROAD_SINGLE_WORD_TAGS = {
     "animal",
@@ -52,10 +62,43 @@ _BROAD_SINGLE_WORD_TAGS = {
 }
 _ANGLE_BRACKET_PATTERN = re.compile(r"<[^>]+>")
 _SITE_INFO_TOKEN_SUFFIXES = ("_id", " id")
+_ASCII_ALPHA_PATTERN = re.compile(r"[A-Za-z]")
+_ASCII_ONLY_PATTERN = re.compile(r"^[\x00-\x7f]+$")
+_CJK_PATTERN = re.compile(r"[\u3400-\u9fff]")
+_JAPANESE_KANA_PATTERN = re.compile(r"[\u3040-\u30ff]")
+_JA_DESCRIPTION_PATTERN = re.compile(r"(です|ます|である|された|するため|について|。|、|:)")
+_ZH_SPECIFIC_CHARS = set(
+    "们这这为为么么后后发发头头见见观观蓝蓝绿绿红红黄黄龙龙马马门门风风"
+    "鸟鸟鱼鱼猫咪女孩男孩眼睛颜色身体脸发型长短个的了在是和与"
+)
+_LOW_QUALITY_TRANSLATIONS = {
+    "n/a",
+    "na",
+    "none",
+    "null",
+    "unknown",
+    "undefined",
+    "todo",
+    "tbd",
+    "不明",
+    "未定",
+}
+_MAX_TRANSLATION_CHARS = 30
+_MAX_TRANSLATION_WORDS = 8
 
 
-def _refinement_reason(code: str) -> RefinementReason:
-    return RefinementReason(code=code, message=_REFINEMENT_REASON_MESSAGES[code])
+def _refinement_reason(
+    code: str,
+    *,
+    field: str | None = None,
+    evidence: list[dict[str, str | int | float | bool | None]] | None = None,
+) -> RefinementReason:
+    return RefinementReason(
+        code=code,
+        message=_REFINEMENT_REASON_MESSAGES[code],
+        field=field,
+        evidence=evidence or [],
+    )
 
 
 def _looks_like_site_info_token(tag: str) -> bool:
@@ -298,6 +341,195 @@ def recommend_manual_refinement(tag: str) -> RefinementRecommendation:
 def needs_manual_refinement(tag: str) -> bool:
     """Compatibility helper returning only the recommendation boolean."""
     return recommend_manual_refinement(tag).needs_refinement
+
+
+def recommend_translation_quality(
+    source_tag: str,
+    translation: str | None,
+    *,
+    language: str = "ja",
+    target_scope: Literal["base", "user"] | None = None,
+    target_tag_id: int | None = None,
+    tag_ref: TagRef | None = None,
+) -> RefinementRecommendation:
+    """Advisory translation quality recommendation.
+
+    The helper is DB independent and does not apply or validate overlay changes.
+    When a target is supplied, proposals target the future
+    USER_TAG_TRANSLATION_PATCH shape through target_scope + target_tag_id.
+    """
+    target_scope, target_tag_id = _resolve_translation_target(target_scope, target_tag_id, tag_ref)
+    field = f"translation.{language}"
+    observed = "" if translation is None else translation
+    stripped = observed.strip()
+    evidence_base: dict[str, str | int | float | bool | None] = {
+        "field": field,
+        "language": language,
+        "source_tag": source_tag,
+        "translation": observed,
+    }
+    if target_scope is not None and target_tag_id is not None:
+        evidence_base["target_scope"] = target_scope
+        evidence_base["target_tag_id"] = target_tag_id
+
+    reasons: list[RefinementReason] = []
+    suggestions: list[RefinementSuggestion] = []
+
+    if not stripped:
+        reasons.append(_translation_reason("missing_translation", field, evidence_base))
+    else:
+        reason_codes = _detect_translation_quality_reasons(
+            source_tag=source_tag,
+            translation=stripped,
+            language=language,
+        )
+        reasons.extend(_translation_reason(code, field, evidence_base) for code in reason_codes)
+
+    if reasons:
+        suggestions.append(RefinementSuggestion(kind="review_only"))
+
+    score = _translation_quality_score(reasons)
+    proposals = _translation_quality_proposals(
+        target_scope=target_scope,
+        target_tag_id=target_tag_id,
+        language=language,
+        field=field,
+        current_translation=observed,
+        reason_codes=[reason.code for reason in reasons],
+        evidence=[evidence_base],
+        confidence=score,
+    )
+
+    return RefinementRecommendation(
+        source_tag=source_tag,
+        normalized_tag=_normalize_refinement_tag(source_tag),
+        needs_refinement=bool(reasons),
+        score=score,
+        reasons=reasons,
+        suggestions=suggestions,
+        proposals=proposals,
+    )
+
+
+def _resolve_translation_target(
+    target_scope: Literal["base", "user"] | None,
+    target_tag_id: int | None,
+    tag_ref: TagRef | None,
+) -> tuple[Literal["base", "user"] | None, int | None]:
+    if tag_ref is not None:
+        if target_scope is not None and target_scope != tag_ref.scope:
+            raise ValueError("target_scope conflicts with tag_ref.scope")
+        if target_tag_id is not None and target_tag_id != tag_ref.tag_id:
+            raise ValueError("target_tag_id conflicts with tag_ref.tag_id")
+        return tag_ref.scope, tag_ref.tag_id
+    if (target_scope is None) != (target_tag_id is None):
+        raise ValueError("target_scope and target_tag_id must be provided together")
+    return target_scope, target_tag_id
+
+
+def _translation_reason(
+    code: str,
+    field: str,
+    evidence: dict[str, str | int | float | bool | None],
+) -> RefinementReason:
+    return _refinement_reason(code, field=field, evidence=[evidence])
+
+
+def _detect_translation_quality_reasons(source_tag: str, translation: str, language: str) -> list[str]:
+    reasons: list[str] = []
+    lowered = translation.lower()
+    compact_translation = _compact_for_translation_compare(translation)
+    compact_source = _compact_for_translation_compare(source_tag)
+
+    if language == "ja" and _looks_like_chinese_for_ja(translation):
+        reasons.append("wrong_language_translation")
+    elif language == "ja" and _looks_like_english_only(translation):
+        reasons.append("wrong_language_translation")
+
+    if _is_overlong_translation(translation):
+        reasons.append("overlong_translation")
+    if _looks_description_like_translation(translation):
+        reasons.append("description_like_translation")
+    if compact_translation and compact_translation == compact_source and _ASCII_ALPHA_PATTERN.search(source_tag):
+        reasons.append("translation_mismatch")
+    if lowered in _LOW_QUALITY_TRANSLATIONS or _is_punctuation_only(translation):
+        reasons.append("low_quality_translation")
+
+    return reasons
+
+
+def _looks_like_english_only(value: str) -> bool:
+    return bool(_ASCII_ALPHA_PATTERN.search(value) and _ASCII_ONLY_PATTERN.fullmatch(value))
+
+
+def _looks_like_chinese_for_ja(value: str) -> bool:
+    if not _CJK_PATTERN.search(value) or _JAPANESE_KANA_PATTERN.search(value):
+        return False
+    return any(char in _ZH_SPECIFIC_CHARS for char in value)
+
+
+def _is_overlong_translation(value: str) -> bool:
+    return len(value) > _MAX_TRANSLATION_CHARS or len(value.split()) > _MAX_TRANSLATION_WORDS
+
+
+def _looks_description_like_translation(value: str) -> bool:
+    if _JA_DESCRIPTION_PATTERN.search(value):
+        return True
+    return len(value.split()) > 3 and _looks_like_english_only(value)
+
+
+def _is_punctuation_only(value: str) -> bool:
+    return bool(value) and not any(char.isalnum() for char in value)
+
+
+def _compact_for_translation_compare(value: str) -> str:
+    return re.sub(r"[\W_]+", "", value, flags=re.ASCII).lower()
+
+
+def _translation_quality_score(reasons: list[RefinementReason]) -> float:
+    if not reasons:
+        return 0.0
+    weights = {
+        "missing_translation": 1.0,
+        "wrong_language_translation": 0.9,
+        "translation_mismatch": 0.8,
+        "description_like_translation": 0.7,
+        "overlong_translation": 0.6,
+        "low_quality_translation": 0.6,
+    }
+    return max(weights.get(reason.code, 0.5) for reason in reasons)
+
+
+def _translation_quality_proposals(
+    *,
+    target_scope: Literal["base", "user"] | None,
+    target_tag_id: int | None,
+    language: str,
+    field: str,
+    current_translation: str,
+    reason_codes: list[str],
+    evidence: list[dict[str, str | int | float | bool | None]],
+    confidence: float,
+) -> list[DbFeedbackProposal]:
+    if target_scope is None or target_tag_id is None or not reason_codes:
+        return []
+    return [
+        DbFeedbackProposal(
+            kind="translation_correction",
+            target=ProposalTarget(
+                kind="translation",
+                target_scope=target_scope,
+                target_tag_id=target_tag_id,
+                language=language,
+            ),
+            current={"field": field, "language": language, "translation": current_translation},
+            proposed=None,
+            confidence=confidence,
+            source="translation_quality_recommendation",
+            reason_codes=reason_codes,
+            evidence=evidence,
+        )
+    ]
 
 
 def get_statistics(repo: MergedTagReader) -> TagStatisticsResult:
