@@ -155,6 +155,29 @@ def test_format_statuses_override_row_level_status_and_preserve_user_scope():
     assert recommendation.proposals == []
 
 
+def test_missing_requested_format_status_does_not_use_other_format_row_level_status():
+    row = {
+        "tag_id": 1_000_000_046,
+        "tag": "other only",
+        "deprecated": True,
+        "type_id": 5,
+        "type_name": "meta",
+        "format_statuses": {
+            "other_format": {
+                "deprecated": True,
+                "type_id": 5,
+                "type_name": "meta",
+            }
+        },
+    }
+
+    recommendation = recommend_tag_record_refinement(row, format_name="danbooru")
+
+    assert [reason.code for reason in recommendation.reasons] == ["missing_format_status"]
+    assert recommendation.suggestions[0].kind == "review_only"
+    assert recommendation.proposals == []
+
+
 def test_numeric_format_status_key_is_used_when_repo_resolves_format_id():
     row = {
         "tag_id": 1_000_000_044,

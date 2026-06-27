@@ -1111,6 +1111,23 @@ def recommend_tag_record_refinement(
     resolved_format_id = _resolve_recommendation_format_id(repo, resolved_format_name) if repo else None
     status = _format_status(data, resolved_format_name, resolved_format_id)
     repo_status = _repo_tag_status(repo, target_tag_id, resolved_format_id)
+    has_explicit_format_statuses = bool(data.get("format_statuses") or {})
+    if (
+        resolved_format_name != "unknown"
+        and repo_status is None
+        and not status
+        and has_explicit_format_statuses
+    ):
+        missing_status_reasons = [_refinement_reason("missing_format_status")]
+        missing_status_suggestions = [RefinementSuggestion(kind="review_only")]
+        return RefinementRecommendation(
+            source_tag=tag,
+            normalized_tag=_normalize_refinement_tag(tag),
+            needs_refinement=True,
+            score=_refinement_score(missing_status_reasons, missing_status_suggestions),
+            reasons=missing_status_reasons,
+            suggestions=missing_status_suggestions,
+        )
 
     type_id = repo_status.type_id if repo_status is not None else _status_value(data, status, "type_id")
     type_name_value = _status_value(data, status, "type_name")
