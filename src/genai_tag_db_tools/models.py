@@ -1,10 +1,27 @@
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
 from genai_tag_db_tools.db.schema import Tag, TagStatus, TagTranslation
+
+
+class TagRef(BaseModel):
+    """タグのスコープ付き内部参照。base DB / user DB を横断して一意にタグを指す。
+
+    Args:
+        scope: タグが属するDB種別。"base" = base DB、"user" = user DB。
+        tag_id: 対象DBにおけるタグID。
+
+    Note:
+        内部専用モデル。外部 API (TagRecordPublic 等) には露出しない。
+        user tag の tag_id は USER_TAG_ID_OFFSET (1_000_000_000) 以上が保証される。
+    """
+
+    scope: Literal["base", "user"]
+    tag_id: int
+    model_config = {"frozen": True}
 
 
 class DbSourceRef(BaseModel):

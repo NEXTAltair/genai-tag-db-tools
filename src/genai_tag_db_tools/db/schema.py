@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     UniqueConstraint,
     func,
 )
@@ -173,3 +174,80 @@ class DatabaseMetadata(Base):
 
     key: Mapped[str] = mapped_column(primary_key=True)
     value: Mapped[str] = mapped_column()
+
+
+# --- Overlay schema (user DB 専用) ---
+# Base とは別の DeclarativeBase を使い、user DB にのみ作成する。
+
+
+class UserOverlayBase(DeclarativeBase):
+    pass
+
+
+# user 独自タグの tag_id オフセット。base DB との ID 空間衝突を防ぐ。
+USER_TAG_ID_OFFSET = 1_000_000_000
+
+
+class UserTag(UserOverlayBase):
+    """user DB 独自タグ。base DB に存在しないユーザー定義タグを格納する。
+
+    tag_id は USER_TAG_ID_OFFSET (1_000_000_000) 以上で採番し、
+    base DB の tag_id との衝突を防ぐ。
+    """
+
+    __tablename__ = "USER_TAGS"
+
+    tag_id: Mapped[int] = mapped_column(primary_key=True)
+    source_tag: Mapped[str] = mapped_column()
+    tag: Mapped[str] = mapped_column()
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("tag", name="uix_user_tag"),
+        CheckConstraint("tag_id >= 1000000000", name="ck_user_tag_id_offset"),
+    )
+
+
+class UserTagStatusPatch(UserOverlayBase):
+    """base / user タグへの差分パッチ。
+
+    target_scope + target_tag_id でパッチ対象タグを特定し、
+    preferred_scope + preferred_tag_id でエイリアス先を cross-DB で指定する。
+
+    複合 PK (target_scope, target_tag_id, format_id) により
+    「同一タグ × フォーマットに付けられるパッチは1行のみ」を保証する。
+    """
+
+    __tablename__ = "USER_TAG_STATUS_PATCH"
+
+    target_scope: Mapped[str] = mapped_column(primary_key=True)
+    target_tag_id: Mapped[int] = mapped_column(primary_key=True)
+    format_id: Mapped[int] = mapped_column(primary_key=True)
+    type_id: Mapped[int] = mapped_column()
+    alias: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    preferred_scope: Mapped[str] = mapped_column()
+    preferred_tag_id: Mapped[int] = mapped_column()
+    deprecated: Mapped[bool] = mapped_column(Boolean, server_default="0", nullable=False)
+    deprecated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "target_scope IN ('base', 'user')",
+            name="ck_patch_target_scope",
+        ),
+        CheckConstraint(
+            "preferred_scope IN ('base', 'user')",
+            name="ck_patch_preferred_scope",
+        ),
+        CheckConstraint(
+            "(alias = 0 AND preferred_scope = target_scope AND preferred_tag_id = target_tag_id)"
+            " OR "
+            "(alias = 1 AND NOT (preferred_scope = target_scope AND preferred_tag_id = target_tag_id))",
+            name="ck_patch_preferred_consistency",
+        ),
+        Index("ix_patch_target", "target_scope", "target_tag_id"),
+        Index("ix_patch_preferred", "preferred_scope", "preferred_tag_id"),
+    )
