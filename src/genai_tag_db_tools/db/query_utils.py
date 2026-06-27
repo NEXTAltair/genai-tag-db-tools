@@ -100,7 +100,7 @@ class TagSearchQueryBuilder:
         deprecated: bool | None = None,
         limit: int | None = None,
         offset: int = 0,
-    ) -> tuple[set[int], int]:
+    ) -> tuple[set[int], int | None]:
         """Return tag ids after applying search filters before limit/offset.
 
         The returned format id is only set when exactly one concrete format was
@@ -110,12 +110,12 @@ class TagSearchQueryBuilder:
         concrete_format_names = self._normalize_filter_names(format_names)
         format_ids = self._format_ids_for_names(concrete_format_names)
         if concrete_format_names and not format_ids:
-            return set(), 0
+            return set(), None
 
         concrete_type_names = self._normalize_filter_names(type_names)
         type_name_ids = self._type_name_ids_for_names(concrete_type_names)
         if concrete_type_names and not type_name_ids:
-            return set(), 0
+            return set(), None
 
         candidate = self._keyword_candidate_query(keyword, use_like).subquery()
         query = self.session.query(candidate.c.tag_id)
@@ -141,7 +141,7 @@ class TagSearchQueryBuilder:
         if limit is not None:
             query = query.limit(limit)
 
-        format_id = format_ids[0] if len(format_ids) == 1 else 0
+        format_id = format_ids[0] if len(format_ids) == 1 else None
         return {row[0] for row in query.all()}, format_id
 
     def _keyword_candidate_query(self, keyword: str, use_like: bool) -> Any:
@@ -310,13 +310,13 @@ class TagSearchQueryBuilder:
 
         return {keyword: ids for keyword, ids in tag_ids_by_keyword.items() if ids}
 
-    def apply_format_filter(self, tag_ids: set[int], format_name: str | None) -> tuple[set[int], int]:
+    def apply_format_filter(self, tag_ids: set[int], format_name: str | None) -> tuple[set[int], int | None]:
         if not format_name or format_name.lower() == "all":
-            return tag_ids, 0
+            return tag_ids, None
 
         fmt_obj = self.session.query(TagFormat).filter(TagFormat.format_name == format_name).one_or_none()
         if not fmt_obj:
-            return set(), 0
+            return set(), None
 
         format_id = fmt_obj.format_id
         format_tag_ids = {
@@ -328,7 +328,7 @@ class TagSearchQueryBuilder:
     def apply_usage_filter(
         self,
         tag_ids: set[int],
-        format_id: int,
+        format_id: int | None,
         min_usage: int | None,
         max_usage: int | None,
     ) -> set[int]:
@@ -348,7 +348,7 @@ class TagSearchQueryBuilder:
         max_usage: int | None,
     ) -> set[int]:
         usage_query = self.session.query(TagUsageCounts.tag_id)
-        if format_id:
+        if format_id is not None:
             usage_query = usage_query.filter(TagUsageCounts.format_id == format_id)
         if min_usage is not None:
             usage_query = usage_query.filter(TagUsageCounts.count >= min_usage)
@@ -366,11 +366,11 @@ class TagSearchQueryBuilder:
     def _include_missing_usage_tag_ids(
         self,
         tag_ids: set[int],
-        format_id: int,
+        format_id: int | None,
         usage_tag_ids: set[int],
     ) -> set[int]:
         usage_all_query = self.session.query(TagUsageCounts.tag_id)
-        if format_id:
+        if format_id is not None:
             usage_all_query = usage_all_query.filter(TagUsageCounts.format_id == format_id)
         usage_all_tag_ids = {row[0] for row in usage_all_query.all()}
         return usage_tag_ids | (tag_ids - usage_all_tag_ids)
@@ -505,7 +505,7 @@ class TagSearchResultBuilder:
     def __init__(
         self,
         *,
-        format_id: int,
+        format_id: int | None,
         resolve_preferred: bool,
         logger: Logger | None = None,
     ) -> None:
@@ -569,7 +569,7 @@ class TagSearchResultBuilder:
         preferred_tag_id = tag_id
         deprecated = False
 
-        if self.format_id:
+        if self.format_id is not None:
             status_obj = status_by_tag_format.get((tag_id, self.format_id))
             if status_obj:
                 if status_obj.alias is None:
@@ -605,7 +605,7 @@ class TagSearchResultBuilder:
         tag_obj: Tag,
     ) -> tuple[int, Tag]:
         resolved_tag_id = tag_id
-        if self.resolve_preferred and self.format_id and preferred_tag_id != tag_id:
+        if self.resolve_preferred and self.format_id is not None and preferred_tag_id != tag_id:
             preferred_obj = tags_by_id.get(preferred_tag_id)
             if preferred_obj:
                 return preferred_tag_id, preferred_obj
