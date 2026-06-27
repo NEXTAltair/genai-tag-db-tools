@@ -258,6 +258,9 @@ class TagRegisterResult(BaseModel):
     tag_id: int = Field(..., description="登録されたタグID")
 
 
+ProposalValue = str | int | float | bool | None
+
+
 class RefinementReason(BaseModel):
     """手動 refinement 推奨理由。
 
@@ -271,8 +274,19 @@ class RefinementReason(BaseModel):
         "normalization_changes_tag",
         "broad_single_word",
         "site_info_token",
+        "wrong_language_translation",
+        "missing_translation",
+        "overlong_translation",
+        "description_like_translation",
+        "translation_mismatch",
+        "low_quality_translation",
     ] = Field(..., description="Stable reason code")
     message: str = Field(..., description="Human-readable Japanese message")
+    field: str | None = Field(default=None, description="Target field identifier, such as translation.ja")
+    evidence: list[dict[str, ProposalValue]] = Field(
+        default_factory=list,
+        description="Supporting evidence for the advisory reason",
+    )
 
 
 class RefinementSuggestion(BaseModel):
@@ -286,9 +300,6 @@ class RefinementSuggestion(BaseModel):
 
     kind: Literal["correction_candidate", "review_only"] = Field(..., description="Suggestion kind")
     tag: str | None = Field(default=None, description="Suggested normalized tag")
-
-
-ProposalValue = str | int | float | bool | None
 
 
 class ProposalTarget(BaseModel):
