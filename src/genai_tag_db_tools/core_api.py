@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -49,6 +50,8 @@ _BROAD_SINGLE_WORD_TAGS = {
     "style",
     "woman",
 }
+_ANGLE_BRACKET_PATTERN = re.compile(r"<[^>]+>")
+_SITE_INFO_TOKEN_SUFFIXES = ("_id", " id")
 
 
 def _refinement_reason(code: str) -> RefinementReason:
@@ -57,7 +60,38 @@ def _refinement_reason(code: str) -> RefinementReason:
 
 def _looks_like_site_info_token(tag: str) -> bool:
     stripped = tag.strip()
-    return stripped.startswith("__") or stripped.endswith("__")
+    lowered = stripped.lower()
+    return (
+        stripped.startswith("__")
+        or stripped.endswith("__")
+        or lowered.endswith(_SITE_INFO_TOKEN_SUFFIXES)
+    )
+
+
+def _normalize_refinement_tag(tag: str) -> str:
+    cleaned = TagCleaner.clean_format(tag)
+    if not cleaned:
+        return cleaned
+
+    parts: list[str] = []
+    position = 0
+    for match in _ANGLE_BRACKET_PATTERN.finditer(cleaned):
+        parts.append(cleaned[position : match.start()].lower())
+        parts.append(match.group(0))
+        position = match.end()
+    parts.append(cleaned[position:].lower())
+    return "".join(parts)
+
+
+def _refinement_score(reasons: list[RefinementReason], suggestions: list[RefinementSuggestion]) -> float:
+    codes = {reason.code for reason in reasons}
+    if not codes:
+        return 0.0
+    if "empty_normalized_tag" in codes:
+        return 1.0
+    if any(suggestion.kind == "correction_candidate" for suggestion in suggestions):
+        return 0.8
+    return 0.6
 
 
 def _compute_sha256(path: Path) -> str:
@@ -231,7 +265,7 @@ def recommend_manual_refinement(tag: str) -> RefinementRecommendation:
     formatting normalization and does not resolve aliases, preferred tags, or
     overlay state.
     """
-    normalized_tag = TagCleaner.clean_format(tag)
+    normalized_tag = _normalize_refinement_tag(tag)
     source_candidate = tag.strip()
     reasons: list[RefinementReason] = []
     suggestions: list[RefinementSuggestion] = []
@@ -255,6 +289,7 @@ def recommend_manual_refinement(tag: str) -> RefinementRecommendation:
         source_tag=tag,
         normalized_tag=normalized_tag,
         needs_refinement=bool(reasons),
+        score=_refinement_score(reasons, suggestions),
         reasons=reasons,
         suggestions=suggestions,
     )

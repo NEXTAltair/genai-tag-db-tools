@@ -294,6 +294,7 @@ class RefinementRecommendation(BaseModel):
     source_tag: str = Field(..., description="Original input tag")
     normalized_tag: str = Field(..., description="Normalized tag candidate for TAGS.tag / USER_TAGS.tag")
     needs_refinement: bool = Field(..., description="Whether any correction or review is needed")
+    score: float = Field(..., ge=0.0, le=1.0, description="Advisory confidence/severity score")
     reasons: list[RefinementReason] = Field(default_factory=list, description="Reasons for the recommendation")
     suggestions: list[RefinementSuggestion] = Field(
         default_factory=list,
