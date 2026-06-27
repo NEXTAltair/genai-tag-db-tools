@@ -42,6 +42,37 @@ def test_create_tag_returns_existing_id(session_factory: Callable[[], Session]) 
     assert first_id == second_id
 
 
+def test_create_tag_materializes_base_tag_in_user_repo() -> None:
+    def make_session_factory() -> Callable[[], Session]:
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        return sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    base_factory = make_session_factory()
+    user_factory = make_session_factory()
+    with base_factory() as session:
+        session.add(Tag(tag_id=42, source_tag="blue eyes", tag="blue eyes"))
+        session.commit()
+
+    base_reader = TagReader(base_factory)
+    user_reader = TagReader(user_factory)
+    merged = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+    repo = TagRepository(user_factory, reader=merged)
+
+    tag_id = repo.create_tag("blue__eyes", "blue eyes")
+
+    assert tag_id == 42
+    with user_factory() as session:
+        user_tag = session.get(Tag, 42)
+        assert user_tag is not None
+        assert user_tag.source_tag == "blue__eyes"
+        assert user_tag.tag == "blue eyes"
+
+
 def test_bulk_insert_tags_deduplicates_by_tag(session_factory: Callable[[], Session]) -> None:
     reader = TagReader(session_factory)
     repo = TagRepository(session_factory, reader=MergedTagReader(base_repo=reader))

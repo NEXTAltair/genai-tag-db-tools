@@ -465,7 +465,7 @@ class TagRepository:
 
         existing_id = self._reader.get_tag_id_by_name(tag, partial=False)
         if existing_id is not None:
-            return existing_id
+            return self.create_tag_with_id(existing_id, source_tag, tag)
 
         new_tag_data = {"source_tag": source_tag, "tag": tag}
         df = pl.DataFrame(new_tag_data)
