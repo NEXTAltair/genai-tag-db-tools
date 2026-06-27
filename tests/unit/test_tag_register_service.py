@@ -26,6 +26,11 @@ class DummyRepo:
         return self._tag_ids.get(tag)
 
     def create_tag(self, source_tag: str, tag: str) -> int:
+        if tag == "preferred":
+            self._tag_ids[tag] = 99
+            return 99
+        if tag in self._tag_ids:
+            return self._tag_ids[tag]
         self.created_tags.append((source_tag, tag))
         tag_id = 10
         self._tag_ids[tag] = tag_id

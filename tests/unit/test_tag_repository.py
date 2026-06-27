@@ -42,7 +42,7 @@ def test_create_tag_returns_existing_id(session_factory: Callable[[], Session]) 
     assert first_id == second_id
 
 
-def test_create_tag_materializes_base_tag_in_user_repo() -> None:
+def test_create_tag_materializes_base_tag_in_user_repo_with_local_id() -> None:
     def make_session_factory() -> Callable[[], Session]:
         engine = create_engine(
             "sqlite://",
@@ -65,11 +65,45 @@ def test_create_tag_materializes_base_tag_in_user_repo() -> None:
 
     tag_id = repo.create_tag("blue__eyes", "blue eyes")
 
-    assert tag_id == 42
+    assert tag_id != 42
     with user_factory() as session:
-        user_tag = session.get(Tag, 42)
+        user_tag = session.get(Tag, tag_id)
         assert user_tag is not None
         assert user_tag.source_tag == "blue__eyes"
+        assert user_tag.tag == "blue eyes"
+
+
+def test_create_tag_materializes_base_tag_without_user_id_collision() -> None:
+    def make_session_factory() -> Callable[[], Session]:
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        return sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    base_factory = make_session_factory()
+    user_factory = make_session_factory()
+    with base_factory() as session:
+        session.add(Tag(tag_id=1, source_tag="blue eyes", tag="blue eyes"))
+        session.commit()
+    with user_factory() as session:
+        session.add(Tag(tag_id=1, source_tag="custom", tag="custom"))
+        session.commit()
+
+    base_reader = TagReader(base_factory)
+    user_reader = TagReader(user_factory)
+    merged = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+    repo = TagRepository(user_factory, reader=merged)
+
+    tag_id = repo.create_tag("blue__eyes", "blue eyes")
+
+    assert tag_id != 1
+    with user_factory() as session:
+        assert session.get(Tag, 1).tag == "custom"  # type: ignore[union-attr]
+        user_tag = session.get(Tag, tag_id)
+        assert user_tag is not None
         assert user_tag.tag == "blue eyes"
 
 
@@ -708,6 +742,47 @@ def test_merged_reader_search_tags_applies_offset_after_merge(
     result = merged.search_tags("sample", partial=True, limit=2, offset=3)
 
     assert [row["tag_id"] for row in result] == [4, 5]
+
+
+def test_merged_reader_search_tags_merges_same_tag_format_statuses(
+    session_factory: Callable[[], Session],
+) -> None:
+    engine_b = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine_b)
+    session_factory_b: Callable[[], Session] = sessionmaker(
+        bind=engine_b, autoflush=False, autocommit=False
+    )
+
+    with session_factory() as session:
+        session.add(TagFormat(format_id=1, format_name="danbooru"))
+        session.add(TagTypeName(type_name_id=1, type_name="general"))
+        session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=1))
+        session.add(Tag(tag_id=1, tag="blue eyes", source_tag="blue eyes"))
+        session.add(TagStatus(tag_id=1, format_id=1, type_id=0, alias=False, preferred_tag_id=1))
+        session.commit()
+
+    with session_factory_b() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=1, type_name="general"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+        session.add(Tag(tag_id=100, tag="blue eyes", source_tag="blue__eyes"))
+        session.add(
+            TagStatus(tag_id=100, format_id=1000, type_id=0, alias=False, preferred_tag_id=100)
+        )
+        session.commit()
+
+    merged = MergedTagReader(
+        base_repo=TagReader(session_factory),
+        user_repo=TagReader(session_factory_b),
+    )
+
+    result = merged.search_tags("blue eyes", partial=False, limit=None)
+
+    assert len(result) == 1
+    assert result[0]["tag"] == "blue eyes"
+    assert set(result[0]["format_statuses"]) == {"danbooru", "Lorairo"}
 
 
 def _seed_search_rows(session: Session, tag_ids: range) -> None:

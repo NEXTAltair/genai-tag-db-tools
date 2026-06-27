@@ -251,6 +251,7 @@ class TagRegisterService:
             preferred_tag_id = self._reader.get_tag_id_by_name(preferred_tag, partial=False)
             if preferred_tag_id is None:
                 raise ValueError(f"推奨タグが見つかりません: {preferred_tag}")
+            preferred_tag_id = self._repo.create_tag(request.preferred_tag, preferred_tag)
 
         if request.translations:
             for tr in request.translations:
@@ -336,6 +337,7 @@ class TagRegisterService:
             )
 
         # 5. 実際に作成
+        preferred_tag_id = self._repo.create_tag(entry.preferred, preferred)
         new_alias_tag_id = self._repo.create_tag(entry.alias, alias)
         self._repo.update_tag_status(
             tag_id=new_alias_tag_id,

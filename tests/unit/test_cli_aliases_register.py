@@ -140,10 +140,10 @@ class TestRegisterAliasEntry:
         result = service.register_alias_entry(entry, dry_run=False)
         assert result.status == "created"
         assert result.alias_tag_id is not None
-        assert result.preferred_tag_id == 99
+        assert result.preferred_tag_id is not None
         assert len(repo.status_updates) == 1
         assert repo.status_updates[0]["alias"] is True
-        assert repo.status_updates[0]["preferred_tag_id"] == 99
+        assert repo.status_updates[0]["preferred_tag_id"] == result.preferred_tag_id
 
     def test_apply_stores_normalized_alias_tag(self) -> None:
         repo = DummyRepo()
@@ -156,7 +156,10 @@ class TestRegisterAliasEntry:
         )
         result = service.register_alias_entry(entry, dry_run=False)
         assert result.status == "created"
-        assert repo.created_tags == [("weding__dress", "weding dress")]
+        assert repo.created_tags == [
+            ("wedding dress", "wedding dress"),
+            ("weding__dress", "weding dress"),
+        ]
 
     def test_skipped_when_same_preferred_exists(self) -> None:
         reader = DummyReader()
