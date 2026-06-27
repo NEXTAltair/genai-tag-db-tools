@@ -314,14 +314,17 @@ class TestMigrateLegacyToOverlay:
         engine.dispose()
 
     def test_idempotent_second_run_skips(self, legacy_engine) -> None:
-        """2 回目の migrate は INSERT OR IGNORE で重複しない。"""
+        """移行後に detect_legacy_schema が False を返す（TAGS 削除による冪等性）。"""
         # 1 回目の移行
         result1 = migrate_legacy_to_overlay(legacy_engine, backup=False)
         assert result1.tags_migrated == 2
 
-        # 2 回目の移行（同じデータ → INSERT OR IGNORE で skip）
+        # 移行後は TAGS の行が削除されているため detect_legacy_schema が False を返す
+        assert not detect_legacy_schema(legacy_engine)
+
+        # 2 回目の直接呼び出しは TAGS が空なので 0 件（重複挿入もなし）
         result2 = migrate_legacy_to_overlay(legacy_engine, backup=False)
-        assert result2.tags_migrated == 2
+        assert result2.tags_migrated == 0
 
         # USER_TAGS の件数は変わらない（重複挿入なし）
         Session = sessionmaker(bind=legacy_engine, autoflush=False, autocommit=False)
