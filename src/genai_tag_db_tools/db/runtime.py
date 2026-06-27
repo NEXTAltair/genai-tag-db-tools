@@ -114,7 +114,15 @@ def init_user_db(user_db_dir: Path | None = None, *, format_name: str | None = N
 
     _user_db_path = user_db_path
     _user_engine = _create_engine(user_db_path)
-    Base.metadata.create_all(_user_engine)             # 旧テーブル（後方互換、#72 migration まで共存）
+
+    # 旧スキーマ検出 → 自動移行（overlay テーブル作成前に実行）
+    from genai_tag_db_tools.db.user_db_migration import detect_legacy_schema, migrate_legacy_to_overlay
+
+    if detect_legacy_schema(_user_engine):
+        migration_result = migrate_legacy_to_overlay(_user_engine, user_db_path, backup=True)
+        logger.info("legacy user DB を overlay schema へ移行しました: %s", migration_result)
+
+    Base.metadata.create_all(_user_engine)             # 後方互換（空テーブル）、将来削除予定
     UserOverlayBase.metadata.create_all(_user_engine)  # overlay テーブル追加
     _UserSessionLocal = sessionmaker(bind=_user_engine, autoflush=False, autocommit=False)
 
