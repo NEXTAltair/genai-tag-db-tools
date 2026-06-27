@@ -243,6 +243,7 @@ class TagRegisterRequest(BaseModel):
     alias: bool = Field(default=False, description="エイリアスかどうか")
     preferred_tag: str | None = Field(default=None, description="推奨タグ(alias時のみ)")
     translations: list[TagTranslationInput] | None = Field(default=None, description="翻訳の追加")
+    scope: Literal["base", "user"] = Field(default="base", description="登録先DB種別")
 
 
 class TagRegisterResult(BaseModel):

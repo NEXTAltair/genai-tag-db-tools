@@ -8,10 +8,12 @@ from genai_tag_db_tools.db.repository import (
     get_default_reader,
     get_default_repository,
 )
+from genai_tag_db_tools.db.schema import USER_TAG_ID_OFFSET
 from genai_tag_db_tools.utils.cleanup_str import TagCleaner
 
 if TYPE_CHECKING:
     from genai_tag_db_tools.db.repository import MergedTagReader
+    from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
     from genai_tag_db_tools.models import (
         AliasRegisterInput,
         AliasRegisterItemResult,
@@ -118,10 +120,19 @@ class TagRegisterService:
         self,
         repository: TagRepository | None = None,
         reader: "MergedTagReader | None" = None,
+        user_tag_repo: "UserTagRepository | None" = None,
     ):
         self.logger = logging.getLogger(self.__class__.__name__)
         self._repo = repository if repository else get_default_repository()
         self._reader = reader or get_default_reader()
+        if user_tag_repo is not None:
+            self._user_tag_repo: "UserTagRepository | None" = user_tag_repo
+        else:
+            from genai_tag_db_tools.db.runtime import get_user_session_factory_optional
+            from genai_tag_db_tools.db.user_tag_repository import UserTagRepository as _UserTagRepository
+
+            user_factory = get_user_session_factory_optional()
+            self._user_tag_repo = _UserTagRepository(user_factory) if user_factory else None
 
     def _resolve_format_id(self, format_name: str) -> int:
         """フォーマット名からformat_idを解決する。存在しない場合は自動作成。
@@ -208,12 +219,16 @@ class TagRegisterService:
 
         Automatically creates format_name and type_name if they don't exist.
         For unknown type_name, uses type_id=0 by default.
+        scope="user" のとき overlay path (USER_TAGS / USER_TAG_STATUS_PATCH) に書く。
 
         Args:
             request: Tag registration request.
         Returns:
             TagRegisterResult indicating whether the tag was created.
         """
+        if request.scope == "user":
+            return self._register_user_tag(request)
+
         from genai_tag_db_tools.models import TagRegisterResult
 
         tag = request.tag
@@ -249,6 +264,58 @@ class TagRegisterService:
             alias=request.alias,
             preferred_tag_id=preferred_tag_id,
             type_id=type_id,
+        )
+
+        return TagRegisterResult(created=created, tag_id=tag_id)
+
+    def _register_user_tag(self, request: "TagRegisterRequest") -> "TagRegisterResult":
+        """USER_TAGS / USER_TAG_STATUS_PATCH にタグを登録する。
+
+        Args:
+            request: scope="user" のタグ登録リクエスト。
+
+        Returns:
+            TagRegisterResult indicating whether the tag was created.
+
+        Raises:
+            RuntimeError: user DB が未初期化の場合。
+            ValueError: alias=True なのに preferred_tag が未指定/未存在の場合。
+        """
+        from genai_tag_db_tools.models import TagRegisterResult
+
+        if self._user_tag_repo is None:
+            raise RuntimeError("User DB が未初期化です。init_user_db() を先に呼んでください。")
+
+        tag = request.tag
+        source_tag = request.source_tag or request.tag
+
+        fmt_id = self._resolve_format_id(request.format_name)
+        type_name = request.type_name or "unknown"
+        type_id = self._resolve_type_id(type_name, request.format_name, fmt_id)
+
+        existing_id = self._reader.get_tag_id_by_name(tag, partial=False)
+        tag_id = self._user_tag_repo.create_user_tag(source_tag, tag)
+        created = existing_id is None
+
+        if request.alias:
+            if not request.preferred_tag:
+                raise ValueError("alias=True の場合 preferred_tag が必須です")
+            preferred_tag_id = self._reader.get_tag_id_by_name(request.preferred_tag, partial=False)
+            if preferred_tag_id is None:
+                raise ValueError(f"推奨タグが見つかりません: {request.preferred_tag}")
+            preferred_scope = "base" if preferred_tag_id < USER_TAG_ID_OFFSET else "user"
+        else:
+            preferred_tag_id = tag_id
+            preferred_scope = "user"
+
+        self._user_tag_repo.write_patch(
+            target_scope="user",
+            target_tag_id=tag_id,
+            format_id=fmt_id,
+            type_id=type_id,
+            alias=request.alias,
+            preferred_scope=preferred_scope,
+            preferred_tag_id=preferred_tag_id,
         )
 
         return TagRegisterResult(created=created, tag_id=tag_id)
