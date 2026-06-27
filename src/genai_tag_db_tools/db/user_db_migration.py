@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import logging
-import shutil
+import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -69,7 +69,15 @@ def backup_user_db(db_path: Path) -> Path:
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = db_path.parent / f"{db_path.stem}_backup_{timestamp}.sqlite"
-    shutil.copy2(db_path, backup_path)
+    # SQLite backup API を使用してバックアップを作成する。
+    # WAL モード DB でも -wal/-shm の未フラッシュページを含む一貫したスナップショットを取得できる。
+    src_conn = sqlite3.connect(str(db_path))
+    dst_conn = sqlite3.connect(str(backup_path))
+    try:
+        src_conn.backup(dst_conn)
+    finally:
+        dst_conn.close()
+        src_conn.close()
     logger.info("user DB バックアップ作成: %s", backup_path)
     return backup_path
 
@@ -372,6 +380,10 @@ def migrate_legacy_to_overlay(
             # 移行済みの旧データを削除する。
             # これにより detect_legacy_schema が 2 回目以降 False を返し、
             # TAGS + USER_TAGS が混在する DB でも「移行済み」と正しく判断できる。
+            # FK 制約の順序: TAGS を参照するテーブルを先に削除してから TAGS を削除する。
+            # NULL の language/translation 行は無効データ (USER_TAG_TRANSLATION_PATCH に
+            # 挿入不可) であり削除する。skipped_translations > 0 の場合は warning を
+            # 出力済みで、backup=True (既定値) による復旧が可能。
             for legacy_table in ("TAG_USAGE_COUNTS", "TAG_TRANSLATIONS", "TAG_STATUS", "TAGS"):
                 try:
                     session.execute(text(f"DELETE FROM {legacy_table}"))

@@ -89,7 +89,9 @@ class TestBackupUserDb:
     def test_creates_backup_with_timestamp(self, tmp_path: Path) -> None:
         """バックアップファイルが _backup_YYYYMMDD_HHMMSS.sqlite で作成される。"""
         db_path = tmp_path / "user_tags.sqlite"
-        db_path.write_bytes(b"dummy db content")
+        engine = _make_engine(db_path)
+        Base.metadata.create_all(engine)
+        engine.dispose()
 
         backup_path = backup_user_db(db_path)
 
@@ -99,14 +101,26 @@ class TestBackupUserDb:
         assert re.match(pattern, backup_path.name), f"Unexpected filename: {backup_path.name}"
 
     def test_backup_is_identical_copy(self, tmp_path: Path) -> None:
-        """バックアップファイルのバイト数が元ファイルと同じ。"""
+        """バックアップファイルが元 DB と同一内容を持つ (WAL 対応 SQLite backup API)。"""
         db_path = tmp_path / "user_tags.sqlite"
-        original_content = b"original database content 12345"
-        db_path.write_bytes(original_content)
+        engine = _make_engine(db_path)
+        Base.metadata.create_all(engine)
+        # サンプルデータを挿入してバックアップ対象を確認
+        Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+        with Session() as session:
+            session.add(Tag(tag_id=1, source_tag="cat", tag="cat"))
+            session.commit()
+        engine.dispose()
 
         backup_path = backup_user_db(db_path)
 
-        assert backup_path.read_bytes() == original_content
+        # バックアップ DB で同一データが読める
+        import sqlite3
+
+        conn = sqlite3.connect(str(backup_path))
+        row = conn.execute("SELECT tag FROM TAGS WHERE tag_id = 1").fetchone()
+        conn.close()
+        assert row is not None and row[0] == "cat"
 
 
 class TestMigrateLegacyToOverlay:
