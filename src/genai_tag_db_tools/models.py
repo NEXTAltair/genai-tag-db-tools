@@ -2,9 +2,16 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from genai_tag_db_tools.db.schema import Tag, TagStatus, TagTranslation
+
+
+def normalize_registered_tag(tag: str) -> str:
+    """Normalize a user-registered tag before storing it in TAGS.tag."""
+    from genai_tag_db_tools.utils.cleanup_str import TagCleaner
+
+    return TagCleaner.clean_format(tag)
 
 
 class DbSourceRef(BaseModel):
@@ -226,6 +233,13 @@ class TagRegisterRequest(BaseModel):
     alias: bool = Field(default=False, description="エイリアスかどうか")
     preferred_tag: str | None = Field(default=None, description="推奨タグ(alias時のみ)")
     translations: list[TagTranslationInput] | None = Field(default=None, description="翻訳の追加")
+
+    @field_validator("tag")
+    @classmethod
+    def tag_must_not_normalize_to_empty(cls, value: str) -> str:
+        if normalize_registered_tag(value) == "":
+            raise ValueError("tag must not be empty after normalization")
+        return value
 
 
 class TagRegisterResult(BaseModel):
