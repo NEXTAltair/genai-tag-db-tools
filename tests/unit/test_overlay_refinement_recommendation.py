@@ -25,6 +25,7 @@ from genai_tag_db_tools.db.schema import (
 
 _FORMAT_ID = 1000
 _OTHER_FORMAT_ID = 2000
+_USER_FORMAT_ID = 3000
 _BLUE_EYES_ID = 10
 _BLU_EYES_ID = 11
 _WEDDING_DRESS_ID = 20
@@ -57,6 +58,7 @@ def user_engine(tmp_path: Path):
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    Base.metadata.create_all(engine)
     UserOverlayBase.metadata.create_all(engine)
     return engine
 
@@ -140,6 +142,9 @@ def populated_base(base_session_factory):
 @pytest.fixture
 def populated_user(user_session_factory):
     with user_session_factory() as session:
+        _add_format(session, _FORMAT_ID, "test_format")
+        _add_format(session, _OTHER_FORMAT_ID, "other_format")
+        _add_format(session, _USER_FORMAT_ID, "user_format")
         session.add_all(
             [
                 UserTag(tag_id=_USER_ALIAS_ID, source_tag="user_blu", tag="user blu"),
@@ -252,6 +257,17 @@ def test_exact_tag_without_requested_format_status_needs_review(merged_reader):
     assert recommendation.suggestions[0].kind == "review_only"
 
 
+def test_user_db_format_is_resolved_for_exact_lookup_isolation(merged_reader):
+    recommendation = recommend_manual_refinement(
+        "user other",
+        merged_reader,
+        format_name="user_format",
+    )
+
+    assert _codes(recommendation) == ["missing_format_status"]
+    assert recommendation.suggestions[0].kind == "review_only"
+
+
 def test_translation_only_match_is_review_only_not_canonical_hit(merged_reader):
     recommendation = recommend_manual_refinement(
         "青い目",
@@ -271,6 +287,13 @@ def test_site_info_source_token_keeps_review_even_when_normalized_tag_exists(mer
     )
 
     assert _codes(recommendation) == ["site_info_token"]
+    assert recommendation.suggestions[0].kind == "review_only"
+
+
+def test_external_id_token_input_needs_review_without_repo():
+    recommendation = recommend_manual_refinement("pixiv-id")
+
+    assert _codes(recommendation) == ["external_id_tag"]
     assert recommendation.suggestions[0].kind == "review_only"
 
 
@@ -370,3 +393,14 @@ def test_deprecated_tag_is_not_used_as_typo_target(merged_reader):
 
     assert recommendation.needs_refinement is False
     assert recommendation.proposals == []
+
+
+def test_exact_deprecated_tag_needs_review(merged_reader):
+    recommendation = recommend_manual_refinement(
+        "old tag",
+        merged_reader,
+        format_name="test_format",
+    )
+
+    assert _codes(recommendation) == ["deprecated_tag"]
+    assert recommendation.suggestions[0].kind == "review_only"

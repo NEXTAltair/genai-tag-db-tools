@@ -5,11 +5,13 @@ from collections.abc import Callable
 from logging import getLogger
 
 from sqlalchemy import func
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from genai_tag_db_tools.db.query_utils import normalize_search_keyword
 from genai_tag_db_tools.db.schema import (
     Tag,
+    TagFormat,
     TagStatus,
     TagTranslation,
     TagUsageCounts,
@@ -273,16 +275,39 @@ class OverlayTagReader:
         return result
 
     def get_format_name(self, format_id: int) -> str | None:
-        return None
+        try:
+            with self.session_factory() as session:
+                row = (
+                    session.query(TagFormat.format_name)
+                    .filter(TagFormat.format_id == format_id)
+                    .one_or_none()
+                )
+        except OperationalError:
+            return None
+        return row[0] if row else None
 
     def get_format_id(self, format_name: str) -> int:
-        return 0
+        try:
+            with self.session_factory() as session:
+                row = (
+                    session.query(TagFormat.format_id)
+                    .filter(TagFormat.format_name == format_name)
+                    .one_or_none()
+                )
+        except OperationalError:
+            return 0
+        return int(row[0]) if row else 0
 
     def get_format_map(self) -> dict[int, str]:
-        return {}
+        try:
+            with self.session_factory() as session:
+                rows = session.query(TagFormat.format_id, TagFormat.format_name).all()
+        except OperationalError:
+            return {}
+        return {int(format_id): format_name for format_id, format_name in rows}
 
     def get_tag_format_ids(self) -> list[int]:
-        return []
+        return sorted(self.get_format_map())
 
     def get_tag_formats(self) -> list[str]:
         return []

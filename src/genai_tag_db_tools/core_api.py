@@ -84,8 +84,7 @@ _CJK_PATTERN = re.compile(r"[\u3400-\u9fff]")
 _JAPANESE_KANA_PATTERN = re.compile(r"[\u3040-\u30ff]")
 _JA_DESCRIPTION_PATTERN = re.compile(r"(です|ます|である|された|するため|について|。|、|:)")
 _ZH_SPECIFIC_CHARS = set(
-    "们这这为为么么后后发发头头见见观观蓝蓝绿绿红红黄黄龙龙马马门门风风"
-    "鸟鸟鱼鱼咪眼睛颜色身体脸发型长短个了在是和与"
+    "们这为么后发头见观蓝绿红黄龙马门风鸟鱼脸长与"
 )
 _LOW_QUALITY_TRANSLATIONS = {
     "n/a",
@@ -407,14 +406,18 @@ def _preferred_tag_for_status(repo: MergedTagReader, preferred_tag_id: int):
     return repo.get_tag_by_id(preferred_tag_id)
 
 
-def _status_from_row_for_unknown_format(row: TagSearchRow) -> tuple[bool, int | None]:
+def _status_from_row_for_unknown_format(row: TagSearchRow) -> tuple[bool, int | None, bool]:
     alias_preferred_tag_id = _alias_preferred_tag_id_from_format_status(row)
     if row["alias"] or alias_preferred_tag_id is not None:
-        return True, alias_preferred_tag_id or _preferred_tag_id_from_format_status(row) or row["tag_id"]
+        return (
+            True,
+            alias_preferred_tag_id or _preferred_tag_id_from_format_status(row) or row["tag_id"],
+            _deprecated_from_format_status(row),
+        )
     preferred_tag_id = _preferred_tag_id_from_format_status(row)
     if preferred_tag_id is not None and preferred_tag_id != row["tag_id"]:
-        return False, preferred_tag_id
-    return False, None
+        return False, preferred_tag_id, _deprecated_from_format_status(row)
+    return False, None, _deprecated_from_format_status(row)
 
 
 def _alias_preferred_tag_id_from_format_status(row: TagSearchRow) -> int | None:
@@ -435,6 +438,15 @@ def _preferred_tag_id_from_format_status(row: TagSearchRow) -> int | None:
         if isinstance(preferred_tag_id, int):
             return preferred_tag_id
     return None
+
+
+def _deprecated_from_format_status(row: TagSearchRow) -> bool:
+    if row["deprecated"]:
+        return True
+    return any(
+        isinstance(status, Mapping) and status.get("deprecated") is True
+        for status in (row.get("format_statuses") or {}).values()
+    )
 
 
 def _db_feedback_alias_proposal(
@@ -597,7 +609,17 @@ def _recommend_from_db(
     if exact_rows:
         row = exact_rows[0]
         if format_id is None:
-            alias, preferred_tag_id = _status_from_row_for_unknown_format(row)
+            alias, preferred_tag_id, deprecated = _status_from_row_for_unknown_format(row)
+            if deprecated and not alias:
+                reasons = [_refinement_reason("deprecated_tag")]
+                return RefinementRecommendation(
+                    source_tag=source_tag,
+                    normalized_tag=normalized_tag,
+                    needs_refinement=True,
+                    score=_refinement_score(reasons, []),
+                    reasons=reasons,
+                    suggestions=[RefinementSuggestion(kind="review_only")],
+                )
             if preferred_tag_id is not None and (alias or preferred_tag_id != row["tag_id"]):
                 preferred_tag = _preferred_tag_for_status(repo, preferred_tag_id)
                 if preferred_tag is None:
@@ -632,6 +654,16 @@ def _recommend_from_db(
         status = repo.get_tag_status(row["tag_id"], format_id)
         if status is None:
             reasons = [_refinement_reason("missing_format_status")]
+            return RefinementRecommendation(
+                source_tag=source_tag,
+                normalized_tag=normalized_tag,
+                needs_refinement=True,
+                score=_refinement_score(reasons, []),
+                reasons=reasons,
+                suggestions=[RefinementSuggestion(kind="review_only")],
+            )
+        if status.deprecated and not status.alias:
+            reasons = [_refinement_reason("deprecated_tag")]
             return RefinementRecommendation(
                 source_tag=source_tag,
                 normalized_tag=normalized_tag,
@@ -734,8 +766,9 @@ def recommend_manual_refinement(
     reasons: list[RefinementReason] = []
     suggestions: list[RefinementSuggestion] = []
     source_site_info_token = _looks_like_site_info_token(tag) or _looks_like_management_token(tag)
+    source_external_id_token = (not source_site_info_token) and _looks_like_external_id_tag(tag)
 
-    if repo is not None and not source_site_info_token:
+    if repo is not None and not source_site_info_token and not source_external_id_token:
         db_recommendation = _recommend_from_db(
             repo=repo,
             source_tag=tag,
@@ -750,6 +783,9 @@ def recommend_manual_refinement(
         suggestions.append(RefinementSuggestion(kind="review_only"))
     elif source_site_info_token:
         reasons.append(_refinement_reason("site_info_token"))
+        suggestions.append(RefinementSuggestion(kind="review_only"))
+    elif source_external_id_token:
+        reasons.append(_refinement_reason("external_id_tag"))
         suggestions.append(RefinementSuggestion(kind="review_only"))
     else:
         if normalized_tag != source_candidate:
