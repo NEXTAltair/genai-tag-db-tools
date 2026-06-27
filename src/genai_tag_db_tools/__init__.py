@@ -10,15 +10,20 @@ from .core_api import (
     get_tag_formats,
     get_unknown_type_tags,
     initialize_databases,
+    needs_manual_refinement,
+    recommend_manual_refinement,
     register_tag,
     search_tags,
     update_tags_type_batch,
 )
-from .models import TagTypeUpdate
+from .models import RefinementReason, RefinementRecommendation, RefinementSuggestion, TagTypeUpdate
 from .services.tag_search import TagSearcher
 from .utils.cleanup_str import TagCleaner
 
 __all__ = [
+    "RefinementReason",
+    "RefinementRecommendation",
+    "RefinementSuggestion",
     "TagCleaner",
     "TagSearcher",
     "TagTypeUpdate",
@@ -33,6 +38,8 @@ __all__ = [
     "initialize_databases",
     "initialize_tag_cleaner",
     "initialize_tag_searcher",
+    "needs_manual_refinement",
+    "recommend_manual_refinement",
     "register_tag",
     "search_tags",
     "update_tags_type_batch",
