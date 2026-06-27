@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from genai_tag_db_tools.db import runtime
 from genai_tag_db_tools.db.repository import MergedTagReader
@@ -37,6 +38,11 @@ _REFINEMENT_REASON_MESSAGES = {
     "empty_normalized_tag": "正規化後のタグが空です。",
     "normalization_changes_tag": "既存の正規化でタグ表記が変わります。",
     "broad_single_word": "単語が広すぎるため、人による確認が必要です。",
+    "deprecated_tag": "非推奨タグとして扱われています。",
+    "unknown_type": "タグ type が unknown です。",
+    "type_correction_candidate": "タグ type の見直し候補です。",
+    "status_type_conflict": "タグの用途と status/type の組み合わせに確認が必要です。",
+    "training_unsuitable": "学習タグとして不向きな情報タグまたは管理用 token の可能性があります。",
     "site_info_token": "サイト情報トークンのため、通常タグとして扱うべきか確認が必要です。",
     "wrong_language_translation": "翻訳の言語が対象言語と異なる可能性があります。",
     "missing_translation": "翻訳が空です。",
@@ -49,6 +55,7 @@ _REFINEMENT_REASON_MESSAGES = {
     "typo_alias_candidate": "近い既存タグがあり、typo alias 候補として確認できます。",
     "ambiguous_alias_candidates": "近い既存タグが複数あるため、alias 先を決め打ちできません。",
     "missing_preferred_tag": "alias/preferred 関係の preferred tag が見つかりません。",
+    "external_id_tag": "外部サイト ID を表す情報タグの可能性があります。",
 }
 _BROAD_SINGLE_WORD_TAGS = {
     "animal",
@@ -92,6 +99,29 @@ _LOW_QUALITY_TRANSLATIONS = {
 }
 _MAX_TRANSLATION_CHARS = 30
 _MAX_TRANSLATION_WORDS = 8
+_EXTERNAL_ID_SITES = {
+    "artstation",
+    "danbooru",
+    "deviantart",
+    "e621",
+    "gelbooru",
+    "instagram",
+    "nijie",
+    "pixiv",
+    "twitter",
+    "x",
+}
+_MANAGEMENT_TOKEN_PREFIXES = (
+    "rating:",
+    "score:",
+    "source:",
+    "parent:",
+    "child:",
+    "md5:",
+    "file:",
+    "order:",
+    "user:",
+)
 
 
 def _refinement_reason(
@@ -115,6 +145,23 @@ def _looks_like_site_info_token(tag: str) -> bool:
         stripped.startswith("__")
         or stripped.endswith("__")
         or lowered.endswith(_SITE_INFO_TOKEN_SUFFIXES)
+    )
+
+
+def _looks_like_external_id_tag(tag: str) -> bool:
+    lowered = tag.strip().lower().replace("-", "_").replace(" ", "_")
+    if not lowered.endswith("_id"):
+        return False
+    return lowered[:-3] in _EXTERNAL_ID_SITES
+
+
+def _looks_like_management_token(tag: str) -> bool:
+    stripped = tag.strip()
+    lowered = stripped.lower()
+    return (
+        stripped.startswith("__")
+        or stripped.endswith("__")
+        or lowered.startswith(_MANAGEMENT_TOKEN_PREFIXES)
     )
 
 
@@ -795,6 +842,193 @@ def _translation_quality_proposals(
             evidence=evidence,
         )
     ]
+
+
+def _row_mapping(row: TagSearchRow | TagRecordPublic | Mapping[str, Any]) -> Mapping[str, Any]:
+    if isinstance(row, TagRecordPublic):
+        return row.model_dump()
+    return row
+
+
+def _infer_target_scope(tag_id: int, target_scope: Literal["base", "user"] | None) -> Literal["base", "user"]:
+    if target_scope is not None:
+        return target_scope
+    return "user" if tag_id >= USER_TAG_ID_OFFSET else "base"
+
+
+def _format_status(
+    row: Mapping[str, Any],
+    format_name: str,
+) -> Mapping[str, Any]:
+    format_statuses = row.get("format_statuses") or {}
+    if isinstance(format_statuses, Mapping):
+        status = format_statuses.get(format_name)
+        if isinstance(status, Mapping):
+            return status
+    return {}
+
+
+def _status_value(row: Mapping[str, Any], status: Mapping[str, Any], key: str) -> Any:
+    return status.get(key, row.get(key))
+
+
+def _has_format_type(repo: MergedTagReader | None, format_name: str, type_name: str) -> bool:
+    if repo is None or format_name == "unknown":
+        return False
+    try:
+        format_id = repo.get_format_id(format_name)
+    except ValueError:
+        return False
+    return repo.get_type_id_for_format(type_name, format_id) is not None
+
+
+def _type_id_for_format(repo: MergedTagReader | None, format_name: str, type_name: str) -> int | None:
+    if repo is None or format_name == "unknown":
+        return None
+    try:
+        format_id = repo.get_format_id(format_name)
+    except ValueError:
+        return None
+    return repo.get_type_id_for_format(type_name, format_id)
+
+
+def _proposal_target(
+    *,
+    kind: Literal["tag_type", "tag_status"],
+    target_scope: Literal["base", "user"],
+    target_tag_id: int,
+    format_name: str,
+) -> ProposalTarget:
+    return ProposalTarget(
+        kind=kind,
+        target_scope=target_scope,
+        target_tag_id=target_tag_id,
+        format_name=format_name,
+    )
+
+
+def recommend_tag_record_refinement(
+    row: TagSearchRow | TagRecordPublic | Mapping[str, Any],
+    *,
+    format_name: str | None = None,
+    target_scope: Literal["base", "user"] | None = None,
+    repo: MergedTagReader | None = None,
+) -> RefinementRecommendation:
+    """Recommend DB-backed tag status/type refinements without mutating any DB.
+
+    The detector consumes an already overlay-composed search/status row. Format-specific
+    values are read from ``format_statuses[format_name]`` when available, then fall back
+    to the row-level fields. Unknown formats are represented as ``format_name="unknown"``
+    rather than ``None`` so proposals can still target USER_TAG_STATUS_PATCH shape.
+    """
+    data = _row_mapping(row)
+    tag = str(data.get("tag") or data.get("source_tag") or "")
+    target_tag_id = int(data["tag_id"])
+    resolved_scope = _infer_target_scope(target_tag_id, target_scope)
+    resolved_format_name = format_name or data.get("format_name") or "unknown"
+    status = _format_status(data, resolved_format_name)
+
+    type_id = _status_value(data, status, "type_id")
+    type_name = str(_status_value(data, status, "type_name") or "").lower()
+    deprecated = bool(_status_value(data, status, "deprecated"))
+
+    reasons: list[RefinementReason] = []
+    suggestions: list[RefinementSuggestion] = []
+    proposals: list[DbFeedbackProposal] = []
+    evidence: list[dict[str, str | int | float | bool | None]] = [
+        {
+            "tag": tag,
+            "target_scope": resolved_scope,
+            "target_tag_id": target_tag_id,
+            "format_name": resolved_format_name,
+            "type_id": type_id if isinstance(type_id, int) else None,
+            "type_name": type_name or None,
+            "deprecated": deprecated,
+        }
+    ]
+
+    def add_reason(code: str) -> None:
+        if code not in {reason.code for reason in reasons}:
+            reasons.append(_refinement_reason(code))
+
+    if deprecated:
+        add_reason("deprecated_tag")
+        suggestions.append(RefinementSuggestion(kind="review_only"))
+
+    unknown_type = type_name == "unknown" or (type_id == 0 and not type_name)
+    if unknown_type:
+        add_reason("unknown_type")
+        suggestions.append(RefinementSuggestion(kind="review_only"))
+
+    site_info = _looks_like_site_info_token(tag) or _looks_like_management_token(tag)
+    external_id = _looks_like_external_id_tag(tag)
+    training_unsuitable = site_info or external_id
+    if site_info:
+        add_reason("site_info_token")
+    if external_id:
+        add_reason("external_id_tag")
+    if training_unsuitable:
+        add_reason("training_unsuitable")
+        suggestions.append(RefinementSuggestion(kind="review_only"))
+        if not deprecated:
+            add_reason("status_type_conflict")
+            proposals.append(
+                DbFeedbackProposal(
+                    kind="status_correction",
+                    target=_proposal_target(
+                        kind="tag_status",
+                        target_scope=resolved_scope,
+                        target_tag_id=target_tag_id,
+                        format_name=resolved_format_name,
+                    ),
+                    current={"deprecated": deprecated},
+                    proposed={"deprecated": True},
+                    confidence=0.7,
+                    source="tag_record_refinement",
+                    reason_codes=["training_unsuitable"],
+                    evidence=evidence,
+                )
+            )
+
+    if training_unsuitable and type_name not in {"", "meta"} and _has_format_type(
+        repo, resolved_format_name, "meta"
+    ):
+        proposed_type_id = _type_id_for_format(repo, resolved_format_name, "meta")
+        add_reason("type_correction_candidate")
+        proposals.append(
+            DbFeedbackProposal(
+                kind="type_correction",
+                target=_proposal_target(
+                    kind="tag_type",
+                    target_scope=resolved_scope,
+                    target_tag_id=target_tag_id,
+                    format_name=resolved_format_name,
+                ),
+                current={
+                    "type_id": type_id if isinstance(type_id, int) else None,
+                    "type_name": type_name or None,
+                },
+                proposed={"type_id": proposed_type_id, "type_name": "meta"},
+                confidence=0.55,
+                source="tag_record_refinement",
+                reason_codes=["type_correction_candidate"],
+                evidence=evidence,
+            )
+        )
+
+    score = 0.0
+    if reasons:
+        score = 0.9 if deprecated else 0.7 if training_unsuitable else 0.5
+
+    return RefinementRecommendation(
+        source_tag=tag,
+        normalized_tag=tag,
+        needs_refinement=bool(reasons),
+        score=score,
+        reasons=reasons,
+        suggestions=suggestions,
+        proposals=proposals,
+    )
 
 
 def get_statistics(repo: MergedTagReader) -> TagStatisticsResult:

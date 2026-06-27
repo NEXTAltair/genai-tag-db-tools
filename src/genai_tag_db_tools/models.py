@@ -273,6 +273,11 @@ class RefinementReason(BaseModel):
         "empty_normalized_tag",
         "normalization_changes_tag",
         "broad_single_word",
+        "deprecated_tag",
+        "unknown_type",
+        "type_correction_candidate",
+        "status_type_conflict",
+        "training_unsuitable",
         "site_info_token",
         "wrong_language_translation",
         "missing_translation",
@@ -285,6 +290,7 @@ class RefinementReason(BaseModel):
         "typo_alias_candidate",
         "ambiguous_alias_candidates",
         "missing_preferred_tag",
+        "external_id_tag",
     ] = Field(..., description="Stable reason code")
     message: str = Field(..., description="Human-readable Japanese message")
     field: str | None = Field(default=None, description="Target field identifier, such as translation.ja")
