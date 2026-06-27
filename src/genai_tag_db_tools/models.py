@@ -280,6 +280,11 @@ class RefinementReason(BaseModel):
         "description_like_translation",
         "translation_mismatch",
         "low_quality_translation",
+        "alias_tag",
+        "non_preferred_tag",
+        "typo_alias_candidate",
+        "ambiguous_alias_candidates",
+        "missing_preferred_tag",
     ] = Field(..., description="Stable reason code")
     message: str = Field(..., description="Human-readable Japanese message")
     field: str | None = Field(default=None, description="Target field identifier, such as translation.ja")
@@ -320,7 +325,10 @@ class ProposalTarget(BaseModel):
         "format_relation",
     ] = Field(..., description="Target field or relation kind")
     target_scope: Literal["base", "user"] = Field(..., description="Patch target scope")
-    target_tag_id: int = Field(..., description="Patch target tag id in target_scope")
+    target_tag_id: int | None = Field(
+        default=None,
+        description="Patch target tag id in target_scope. None means the target tag does not exist yet.",
+    )
     format_name: str | None = Field(
         default=None,
         description='Format-specific target name. None means global target; use "unknown" when unknown.',
