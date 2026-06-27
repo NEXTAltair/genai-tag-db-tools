@@ -258,6 +258,50 @@ class TagRegisterResult(BaseModel):
     tag_id: int = Field(..., description="登録されたタグID")
 
 
+class RefinementReason(BaseModel):
+    """手動 refinement 推奨理由。
+
+    Args:
+        code: UI/テストが依存する安定コード。
+        message: 人間向けの日本語メッセージ。
+    """
+
+    code: Literal[
+        "empty_normalized_tag",
+        "normalization_changes_tag",
+        "broad_single_word",
+        "site_info_token",
+    ] = Field(..., description="Stable reason code")
+    message: str = Field(..., description="Human-readable Japanese message")
+
+
+class RefinementSuggestion(BaseModel):
+    """refinement の候補または確認アクション。
+
+    Args:
+        kind: 候補の種別。correction_candidate は自動補正候補、
+            review_only は人による確認のみ。
+        tag: 候補タグ。review_only では None。
+    """
+
+    kind: Literal["correction_candidate", "review_only"] = Field(..., description="Suggestion kind")
+    tag: str | None = Field(default=None, description="Suggested normalized tag")
+
+
+class RefinementRecommendation(BaseModel):
+    """タグを手で直すべきかを表す advisory API 結果。"""
+
+    source_tag: str = Field(..., description="Original input tag")
+    normalized_tag: str = Field(..., description="Normalized tag candidate for TAGS.tag / USER_TAGS.tag")
+    needs_refinement: bool = Field(..., description="Whether any correction or review is needed")
+    score: float = Field(..., ge=0.0, le=1.0, description="Advisory confidence/severity score")
+    reasons: list[RefinementReason] = Field(default_factory=list, description="Reasons for the recommendation")
+    suggestions: list[RefinementSuggestion] = Field(
+        default_factory=list,
+        description="Structured correction candidates or review-only actions",
+    )
+
+
 class ConvertTagsRequest(BaseModel):
     """タグ変換リクエスト（CLI/core契約用）。"""
 
