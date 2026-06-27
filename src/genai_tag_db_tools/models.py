@@ -270,7 +270,13 @@ class RefinementReason(BaseModel):
         "empty_normalized_tag",
         "normalization_changes_tag",
         "broad_single_word",
+        "deprecated_tag",
+        "unknown_type",
+        "type_correction_candidate",
+        "status_type_conflict",
+        "training_unsuitable",
         "site_info_token",
+        "external_id_tag",
     ] = Field(..., description="Stable reason code")
     message: str = Field(..., description="Human-readable Japanese message")
 
