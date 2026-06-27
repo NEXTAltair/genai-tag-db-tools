@@ -1488,6 +1488,72 @@ class MergedTagReader:
             format_id=format_id,
         )
 
+    def _resolve_cross_scope_preferred(
+        self,
+        rows: list[TagSearchRow],
+    ) -> list[TagSearchRow]:
+        """search_tags 結果のうち preferred が別 DB にあるものを解決する。
+
+        alias=True の行を対象に全リポをまたいだ preferred tag lookup を行い、
+        preferred が見つかれば row を差し替える。
+
+        OverlayTagReader は同一 DB 内の preferred しか解決しないため、
+        cross-scope alias (user → base 等) はこのメソッドで補完する。
+
+        Args:
+            rows: マージ済みの TagSearchRow リスト。
+
+        Returns:
+            preferred 解決後の TagSearchRow リスト。
+        """
+        result: list[TagSearchRow] = []
+        for row in rows:
+            if not row["alias"]:
+                result.append(row)
+                continue
+
+            tag_id = row["tag_id"]
+            preferred_tag_id: int | None = None
+
+            # 全リポからステータスを取得して preferred_tag_id を探す
+            for repo in self._iter_repos():
+                statuses = repo.list_tag_statuses(tag_id)
+                for status in statuses:
+                    if status.alias and status.preferred_tag_id != tag_id:
+                        preferred_tag_id = status.preferred_tag_id
+                        break
+                if preferred_tag_id is not None:
+                    break
+
+            if preferred_tag_id is None or preferred_tag_id == tag_id:
+                result.append(row)
+                continue
+
+            # preferred tag を全リポから取得
+            preferred_tag: Tag | None = None
+            for repo in self._iter_repos():
+                preferred_tag = repo.get_tag_by_id(preferred_tag_id)
+                if preferred_tag is not None:
+                    break
+
+            if preferred_tag is not None:
+                new_row: TagSearchRow = {
+                    "tag_id": preferred_tag_id,
+                    "tag": preferred_tag.tag,
+                    "source_tag": preferred_tag.source_tag,
+                    "usage_count": row["usage_count"],
+                    "alias": False,
+                    "deprecated": row["deprecated"],
+                    "type_id": row["type_id"],
+                    "type_name": row["type_name"],
+                    "translations": row["translations"],
+                    "format_statuses": row["format_statuses"],
+                }
+                result.append(new_row)
+            else:
+                result.append(row)
+        return result
+
     def search_tags(
         self,
         keyword: str,
@@ -1506,7 +1572,7 @@ class MergedTagReader:
         limit: int | None = None,
         offset: int = 0,
     ) -> list[TagSearchRow]:
-        return self._merge_search_tags_adaptive(
+        rows = self._merge_search_tags_adaptive(
             keyword,
             limit=limit,
             offset=offset,
@@ -1522,6 +1588,9 @@ class MergedTagReader:
             deprecated=deprecated,
             resolve_preferred=resolve_preferred,
         )
+        if resolve_preferred and self._has_user():
+            rows = self._resolve_cross_scope_preferred(rows)
+        return rows
 
     def search_tags_bulk(
         self,
@@ -1530,13 +1599,23 @@ class MergedTagReader:
         format_name: str | None = None,
         resolve_preferred: bool = False,
     ) -> dict[str, TagSearchRow]:
-        return self._merge_by_key(
+        merged: dict[str, TagSearchRow] = self._merge_by_key(
             "search_tags_bulk",
             None,
             keywords,
             format_name=format_name,
             resolve_preferred=resolve_preferred,
         )
+        if not resolve_preferred or not self._has_user():
+            return merged
+        # OverlayTagReader.search_tags_bulk がスタブのため、未解決キーワードを
+        # 個別 search_tags で補完する (cross-scope preferred 解決を含む)
+        missing = [kw for kw in keywords if kw not in merged]
+        for kw in missing:
+            rows = self.search_tags(kw, partial=False, format_name=format_name, resolve_preferred=True)
+            if rows:
+                merged[kw] = rows[0]
+        return merged
 
     def get_format_map(self) -> dict[int, str]:
         return self._merge_by_key("get_format_map", None)
