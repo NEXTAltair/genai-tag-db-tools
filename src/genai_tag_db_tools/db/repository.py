@@ -463,8 +463,7 @@ class TagRepository:
         if not self._reader:
             raise ValueError("MergedTagReader not injected")
 
-        existing_tag_map = self._fetch_existing_tags_as_map([tag])
-        existing_id = existing_tag_map.get(tag)
+        existing_id = self._reader.get_tag_id_by_name(tag, partial=False)
         if existing_id is not None:
             return existing_id
 
@@ -472,7 +471,7 @@ class TagRepository:
         df = pl.DataFrame(new_tag_data)
         self.bulk_insert_tags(df)
 
-        tag_id = self._fetch_existing_tags_as_map([tag]).get(tag)
+        tag_id = self._reader.get_tag_id_by_name(tag, partial=False)
         if tag_id is None:
             msg = ErrorMessages.TAG_ID_NOT_FOUND_AFTER_INSERT
             self.logger.error(msg)
@@ -1322,26 +1321,6 @@ class MergedTagReader:
             return merged
         return list(merged.values())
 
-    @staticmethod
-    def _merge_search_row(existing: TagSearchRow, incoming: TagSearchRow) -> TagSearchRow:
-        merged = {**existing, **incoming}
-
-        format_statuses: dict[str, dict[str, object]] = {}
-        format_statuses.update(existing.get("format_statuses") or {})
-        format_statuses.update(incoming.get("format_statuses") or {})
-        merged["format_statuses"] = format_statuses
-
-        translations: dict[str, list[str]] = {}
-        for source in (existing.get("translations") or {}, incoming.get("translations") or {}):
-            for language, values in source.items():
-                bucket = translations.setdefault(language, [])
-                for value in values:
-                    if value not in bucket:
-                        bucket.append(value)
-        merged["translations"] = translations
-
-        return merged
-
     def _merge_search_tags_adaptive(
         self,
         keyword: str,
@@ -1356,19 +1335,13 @@ class MergedTagReader:
             assert self.user_repo is not None
             repos.append(self.user_repo)
 
-        merged: dict[str, TagSearchRow] = {}
-        order_keys: dict[str, int] = {}
+        merged: dict[int, TagSearchRow] = {}
 
         def add_row(row: TagSearchRow) -> None:
-            key = row["tag"]
-            order_keys[key] = min(order_keys.get(key, row["tag_id"]), row["tag_id"])
-            if key in merged:
-                merged[key] = self._merge_search_row(merged[key], row)
-            else:
-                merged[key] = row
+            merged[row["tag_id"]] = row
 
         def merged_rows() -> list[TagSearchRow]:
-            return [merged[key] for key in sorted(merged, key=lambda tag: (order_keys[tag], tag))]
+            return [merged[tag_id] for tag_id in sorted(merged)]
 
         if limit is None:
             for repo in repos:

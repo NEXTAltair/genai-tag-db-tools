@@ -30,15 +30,15 @@ class Tag(Base):
 
     formats_status: Mapped[list[TagStatus]] = relationship(
         "TagStatus",
+        primaryjoin="Tag.tag_id == foreign(TagStatus.tag_id)",
         back_populates="tag",
-        foreign_keys="TagStatus.tag_id",
-        cascade="all, delete-orphan",
+        viewonly=True,
     )
     preferred_by: Mapped[list[TagStatus]] = relationship(
         "TagStatus",
+        primaryjoin="Tag.tag_id == foreign(TagStatus.preferred_tag_id)",
         back_populates="preferred_tag",
-        foreign_keys="TagStatus.preferred_tag_id",
-        cascade="all, delete-orphan",
+        viewonly=True,
     )
     translations: Mapped[list[TagTranslation]] = relationship(
         "TagTranslation",
@@ -91,11 +91,11 @@ class TagTypeFormatMapping(Base):
 class TagStatus(Base):
     __tablename__ = "TAG_STATUS"
 
-    tag_id: Mapped[int] = mapped_column(ForeignKey("TAGS.tag_id"), primary_key=True)
+    tag_id: Mapped[int] = mapped_column(primary_key=True)
     format_id: Mapped[int] = mapped_column(ForeignKey("TAG_FORMATS.format_id"), primary_key=True)
     type_id: Mapped[int] = mapped_column()
     alias: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    preferred_tag_id: Mapped[int] = mapped_column(ForeignKey("TAGS.tag_id"))
+    preferred_tag_id: Mapped[int] = mapped_column()
     deprecated: Mapped[bool] = mapped_column(Boolean, server_default="0", nullable=False)
     deprecated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     source_created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -104,8 +104,9 @@ class TagStatus(Base):
 
     tag: Mapped[Tag] = relationship(
         "Tag",
-        foreign_keys="TagStatus.tag_id",
+        primaryjoin="foreign(TagStatus.tag_id) == Tag.tag_id",
         back_populates="formats_status",
+        viewonly=True,
     )
     format: Mapped[TagFormat] = relationship(
         "TagFormat",
@@ -114,8 +115,9 @@ class TagStatus(Base):
     )
     preferred_tag: Mapped[Tag] = relationship(
         "Tag",
-        foreign_keys="TagStatus.preferred_tag_id",
+        primaryjoin="foreign(TagStatus.preferred_tag_id) == Tag.tag_id",
         back_populates="preferred_by",
+        viewonly=True,
     )
     type_mapping: Mapped[TagTypeFormatMapping] = relationship(
         "TagTypeFormatMapping",

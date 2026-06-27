@@ -156,10 +156,8 @@ class TestRegisterAliasEntry:
         )
         result = service.register_alias_entry(entry, dry_run=False)
         assert result.status == "created"
-        assert repo.created_tags == [
-            ("wedding dress", "wedding dress"),
-            ("weding__dress", "weding dress"),
-        ]
+        assert repo.created_tags == [("weding__dress", "weding dress")]
+        assert repo.status_updates[0]["preferred_tag_id"] == 99
 
     def test_skipped_when_same_preferred_exists(self) -> None:
         reader = DummyReader()
