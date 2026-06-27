@@ -8,6 +8,7 @@ from genai_tag_db_tools.db.repository import (
     get_default_reader,
     get_default_repository,
 )
+from genai_tag_db_tools.models import normalize_registered_tag
 from genai_tag_db_tools.utils.cleanup_str import TagCleaner
 
 if TYPE_CHECKING:
@@ -41,9 +42,12 @@ class TagRegister:
 
         df = df.with_columns(
             pl.when(pl.col("tag") == "")
-            .then(pl.col("source_tag").map_elements(TagCleaner.clean_format))
+            .then(pl.col("source_tag"))
             .otherwise(pl.col("tag"))
             .alias("tag")
+        )
+        df = df.with_columns(
+            pl.col("tag").map_elements(normalize_registered_tag, return_dtype=pl.String).alias("tag")
         )
         return df
 
@@ -51,6 +55,13 @@ class TagRegister:
         """タグを一括登録し、tag_id を付与する。"""
         if "tag" not in df.columns:
             return df
+
+        df = df.with_columns(
+            pl.col("tag").map_elements(normalize_registered_tag, return_dtype=pl.String).alias("tag")
+        )
+        invalid_rows = df.filter(pl.col("tag") == "")
+        if invalid_rows.height > 0:
+            raise ValueError("tag must not be empty after normalization")
 
         self._repo.bulk_insert_tags(df.select(["source_tag", "tag"]))
 
@@ -216,7 +227,9 @@ class TagRegisterService:
         """
         from genai_tag_db_tools.models import TagRegisterResult
 
-        tag = request.tag
+        tag = normalize_registered_tag(request.tag)
+        if tag == "":
+            raise ValueError("tag must not be empty after normalization")
         source_tag = request.source_tag or request.tag
 
         fmt_id = self._resolve_format_id(request.format_name)
