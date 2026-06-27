@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import Engine, StaticPool, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
-from genai_tag_db_tools.db.schema import Base
+from genai_tag_db_tools.db.schema import Base, UserOverlayBase
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,8 @@ def init_user_db(user_db_dir: Path | None = None, *, format_name: str | None = N
 
     _user_db_path = user_db_path
     _user_engine = _create_engine(user_db_path)
-    Base.metadata.create_all(_user_engine)
+    Base.metadata.create_all(_user_engine)             # 旧テーブル（後方互換、#72 migration まで共存）
+    UserOverlayBase.metadata.create_all(_user_engine)  # overlay テーブル追加
     _UserSessionLocal = sessionmaker(bind=_user_engine, autoflush=False, autocommit=False)
 
     _initialize_default_user_mappings(_UserSessionLocal, format_name=format_name)
