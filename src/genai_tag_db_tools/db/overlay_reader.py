@@ -15,6 +15,8 @@ from genai_tag_db_tools.db.schema import (
     TagUsageCounts,
     UserTag,
     UserTagStatusPatch,
+    UserTagTranslationPatch,
+    UserTagUsagePatch,
 )
 from genai_tag_db_tools.models import TagSearchRow
 
@@ -218,17 +220,57 @@ class OverlayTagReader:
         return rows
 
     # ------------------------------------------------------------------
-    # stub メソッド (フェーズ2以降で実装予定)
+    # 翻訳取得 (USER_TAG_TRANSLATION_PATCH)
     # ------------------------------------------------------------------
 
     def get_translations(self, tag_id: int) -> list[TagTranslation]:
-        return []
+        """USER_TAG_TRANSLATION_PATCH から翻訳を取得し TagTranslation オブジェクトに変換する。"""
+        with self.session_factory() as session:
+            rows = (
+                session.query(UserTagTranslationPatch)
+                .filter(
+                    UserTagTranslationPatch.target_scope == "user",
+                    UserTagTranslationPatch.target_tag_id == tag_id,
+                )
+                .all()
+            )
+            return [
+                TagTranslation(
+                    translation_id=r.patch_id,
+                    tag_id=r.target_tag_id,
+                    language=r.language,
+                    translation=r.translation,
+                )
+                for r in rows
+            ]
 
     def list_translations(self) -> list[TagTranslation]:
         return []
 
     def get_translations_batch(self, tag_ids: list[int]) -> dict[int, list[TagTranslation]]:
-        return {}
+        """複数 tag_id の翻訳をバッチ取得する。"""
+        if not tag_ids:
+            return {}
+        with self.session_factory() as session:
+            rows = (
+                session.query(UserTagTranslationPatch)
+                .filter(
+                    UserTagTranslationPatch.target_scope == "user",
+                    UserTagTranslationPatch.target_tag_id.in_(tag_ids),
+                )
+                .all()
+            )
+        result: dict[int, list[TagTranslation]] = {}
+        for r in rows:
+            result.setdefault(r.target_tag_id, []).append(
+                TagTranslation(
+                    translation_id=r.patch_id,
+                    tag_id=r.target_tag_id,
+                    language=r.language,
+                    translation=r.translation,
+                )
+            )
+        return result
 
     def get_format_name(self, format_id: int) -> str | None:
         return None
@@ -261,12 +303,36 @@ class OverlayTagReader:
         return None
 
     def get_usage_count(self, tag_id: int, format_id: int) -> int | None:
-        return None
+        """USER_TAG_USAGE_PATCH から usage count を取得する。"""
+        with self.session_factory() as session:
+            row = (
+                session.query(UserTagUsagePatch)
+                .filter(
+                    UserTagUsagePatch.target_scope == "user",
+                    UserTagUsagePatch.target_tag_id == tag_id,
+                    UserTagUsagePatch.format_id == format_id,
+                )
+                .one_or_none()
+            )
+            return row.count if row is not None else None
 
     def list_usage_counts(
         self, tag_id: int | None = None, format_id: int | None = None
     ) -> list[TagUsageCounts]:
-        return []
+        """USER_TAG_USAGE_PATCH を TagUsageCounts オブジェクトに変換して返す。"""
+        with self.session_factory() as session:
+            query = session.query(UserTagUsagePatch).filter(
+                UserTagUsagePatch.target_scope == "user"
+            )
+            if tag_id is not None:
+                query = query.filter(UserTagUsagePatch.target_tag_id == tag_id)
+            if format_id is not None:
+                query = query.filter(UserTagUsagePatch.format_id == format_id)
+            rows = query.all()
+            return [
+                TagUsageCounts(tag_id=r.target_tag_id, format_id=r.format_id, count=r.count)
+                for r in rows
+            ]
 
     def get_tag_types(self, format_id: int) -> list[str]:
         return []

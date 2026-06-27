@@ -251,3 +251,45 @@ class UserTagStatusPatch(UserOverlayBase):
         Index("ix_patch_target", "target_scope", "target_tag_id"),
         Index("ix_patch_preferred", "preferred_scope", "preferred_tag_id"),
     )
+
+
+class UserTagTranslationPatch(UserOverlayBase):
+    """base / user タグへの翻訳パッチ。
+    TAG_TRANSLATIONS の FK なし版。target_scope + target_tag_id で対象タグを指定する。
+    """
+
+    __tablename__ = "USER_TAG_TRANSLATION_PATCH"
+
+    patch_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    target_scope: Mapped[str] = mapped_column()
+    target_tag_id: Mapped[int] = mapped_column()
+    language: Mapped[str] = mapped_column()
+    translation: Mapped[str] = mapped_column()
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("target_scope", "target_tag_id", "language", "translation", name="uix_trans_patch"),
+        CheckConstraint("target_scope IN ('base', 'user')", name="ck_trans_patch_scope"),
+        Index("ix_trans_patch_target", "target_scope", "target_tag_id"),
+    )
+
+
+class UserTagUsagePatch(UserOverlayBase):
+    """base / user タグへの usage count パッチ。
+    TAG_USAGE_COUNTS の FK なし版。
+    """
+
+    __tablename__ = "USER_TAG_USAGE_PATCH"
+
+    target_scope: Mapped[str] = mapped_column(primary_key=True)
+    target_tag_id: Mapped[int] = mapped_column(primary_key=True)
+    format_id: Mapped[int] = mapped_column(primary_key=True)
+    count: Mapped[int] = mapped_column()
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("target_scope IN ('base', 'user')", name="ck_usage_patch_scope"),
+        Index("ix_usage_patch_target", "target_scope", "target_tag_id"),
+    )

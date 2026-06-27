@@ -6,7 +6,13 @@ from logging import getLogger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from genai_tag_db_tools.db.schema import USER_TAG_ID_OFFSET, UserTag, UserTagStatusPatch
+from genai_tag_db_tools.db.schema import (
+    USER_TAG_ID_OFFSET,
+    UserTag,
+    UserTagStatusPatch,
+    UserTagTranslationPatch,
+    UserTagUsagePatch,
+)
 
 
 class UserTagRepository:
@@ -102,4 +108,72 @@ class UserTagRepository:
                 )
                 session.add(patch)
 
+            session.commit()
+
+    def write_translation_patch(
+        self, target_scope: str, target_tag_id: int, language: str, translation: str
+    ) -> None:
+        """USER_TAG_TRANSLATION_PATCH に翻訳を追加する（重複は無視）。
+
+        Args:
+            target_scope: パッチ対象スコープ ("base" or "user")。
+            target_tag_id: パッチ対象タグID。
+            language: 言語コード（例: ja）。
+            translation: 翻訳文字列。
+        """
+        with self._session_factory() as session:
+            existing = (
+                session.query(UserTagTranslationPatch)
+                .filter(
+                    UserTagTranslationPatch.target_scope == target_scope,
+                    UserTagTranslationPatch.target_tag_id == target_tag_id,
+                    UserTagTranslationPatch.language == language,
+                    UserTagTranslationPatch.translation == translation,
+                )
+                .one_or_none()
+            )
+            if existing is not None:
+                return
+            session.add(
+                UserTagTranslationPatch(
+                    target_scope=target_scope,
+                    target_tag_id=target_tag_id,
+                    language=language,
+                    translation=translation,
+                )
+            )
+            session.commit()
+
+    def write_usage_patch(
+        self, target_scope: str, target_tag_id: int, format_id: int, count: int
+    ) -> None:
+        """USER_TAG_USAGE_PATCH に usage count を INSERT or UPDATE する。
+
+        Args:
+            target_scope: パッチ対象スコープ ("base" or "user")。
+            target_tag_id: パッチ対象タグID。
+            format_id: フォーマットID。
+            count: 使用回数。
+        """
+        with self._session_factory() as session:
+            existing = (
+                session.query(UserTagUsagePatch)
+                .filter(
+                    UserTagUsagePatch.target_scope == target_scope,
+                    UserTagUsagePatch.target_tag_id == target_tag_id,
+                    UserTagUsagePatch.format_id == format_id,
+                )
+                .one_or_none()
+            )
+            if existing is not None:
+                existing.count = count
+            else:
+                session.add(
+                    UserTagUsagePatch(
+                        target_scope=target_scope,
+                        target_tag_id=target_tag_id,
+                        format_id=format_id,
+                        count=count,
+                    )
+                )
             session.commit()
