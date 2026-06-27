@@ -116,6 +116,18 @@ class TestRegisterAliasEntry:
         assert result.status == "would_create"
         assert result.preferred_tag_id == 99
 
+    def test_dry_run_normalizes_preferred_before_lookup(self) -> None:
+        service = self._make_service()
+        entry = AliasRegisterInput(
+            alias="weding dress",
+            preferred="wedding__dress",
+            format_name="Lorairo",
+            type_name="unknown",
+        )
+        result = service.register_alias_entry(entry, dry_run=True)
+        assert result.status == "would_create"
+        assert result.preferred_tag_id == 99
+
     def test_apply_returns_created_and_writes_db(self) -> None:
         repo = DummyRepo()
         service = TagRegisterService(repository=repo, reader=DummyReader())
@@ -132,6 +144,19 @@ class TestRegisterAliasEntry:
         assert len(repo.status_updates) == 1
         assert repo.status_updates[0]["alias"] is True
         assert repo.status_updates[0]["preferred_tag_id"] == 99
+
+    def test_apply_stores_normalized_alias_tag(self) -> None:
+        repo = DummyRepo()
+        service = TagRegisterService(repository=repo, reader=DummyReader())
+        entry = AliasRegisterInput(
+            alias="weding__dress",
+            preferred="wedding dress",
+            format_name="Lorairo",
+            type_name="unknown",
+        )
+        result = service.register_alias_entry(entry, dry_run=False)
+        assert result.status == "created"
+        assert repo.created_tags == [("weding__dress", "weding dress")]
 
     def test_skipped_when_same_preferred_exists(self) -> None:
         reader = DummyReader()

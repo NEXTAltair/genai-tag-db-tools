@@ -285,8 +285,15 @@ class TagRegisterService:
         """
         from genai_tag_db_tools.models import AliasRegisterItemResult
 
+        alias = normalize_registered_tag(entry.alias)
+        preferred = normalize_registered_tag(entry.preferred)
+        if alias == "":
+            raise ValueError("alias must not be empty after normalization")
+        if preferred == "":
+            raise ValueError("preferred must not be empty after normalization")
+
         # 1. preferred タグを lookup
-        preferred_tag_id = self._reader.get_tag_id_by_name(entry.preferred, partial=False)
+        preferred_tag_id = self._reader.get_tag_id_by_name(preferred, partial=False)
         if preferred_tag_id is None:
             return AliasRegisterItemResult(
                 alias=entry.alias,
@@ -299,7 +306,7 @@ class TagRegisterService:
         type_id = self._resolve_type_id(entry.type_name, entry.format_name, fmt_id)
 
         # 3. alias タグの既存チェック
-        alias_tag_id = self._reader.get_tag_id_by_name(entry.alias, partial=False)
+        alias_tag_id = self._reader.get_tag_id_by_name(alias, partial=False)
         if alias_tag_id is not None:
             status = self._reader.get_tag_status(alias_tag_id, fmt_id)
             if status is not None and status.alias:
@@ -329,7 +336,7 @@ class TagRegisterService:
             )
 
         # 5. 実際に作成
-        new_alias_tag_id = self._repo.create_tag(entry.alias, entry.alias)
+        new_alias_tag_id = self._repo.create_tag(entry.alias, alias)
         self._repo.update_tag_status(
             tag_id=new_alias_tag_id,
             format_id=fmt_id,
