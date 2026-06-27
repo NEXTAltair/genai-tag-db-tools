@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from genai_tag_db_tools.core_api import recommend_tag_record_refinement
 
 
@@ -12,6 +14,30 @@ class _RepoWithMeta:
             (1, "meta"): 5,
             (2, "meta"): 7,
         }.get((format_id, type_name))
+
+    def get_type_name_by_format_type_id(self, format_id: int, type_id: int) -> str | None:
+        return {
+            (1, 0): "general",
+            (1, 1): "general",
+            (1, 5): "meta",
+            (2, 0): "general",
+            (2, 7): "meta",
+        }.get((format_id, type_id))
+
+    def get_tag_status(self, tag_id: int, format_id: int):
+        return None
+
+
+class _RepoWithDeprecatedOverlay(_RepoWithMeta):
+    def get_tag_status(self, tag_id: int, format_id: int):
+        return SimpleNamespace(
+            tag_id=tag_id,
+            format_id=format_id,
+            type_id=5,
+            alias=False,
+            preferred_tag_id=tag_id,
+            deprecated=True,
+        )
 
 
 def _reason_codes(row: dict, **kwargs) -> list[str]:
@@ -156,6 +182,51 @@ def test_numeric_format_status_key_is_used_when_repo_resolves_format_id():
         "site_info_token",
         "training_unsuitable",
     ]
+    assert recommendation.proposals == []
+
+
+def test_numeric_format_status_type_name_is_resolved_from_repo():
+    row = {
+        "tag_id": 1_000_000_045,
+        "tag": "custom token",
+        "deprecated": False,
+        "type_id": None,
+        "type_name": "",
+        "format_statuses": {
+            "1": {
+                "deprecated": False,
+                "type_id": 0,
+            }
+        },
+    }
+
+    recommendation = recommend_tag_record_refinement(
+        row,
+        format_name="danbooru",
+        repo=_RepoWithMeta(),
+    )
+
+    assert recommendation.needs_refinement is False
+    assert recommendation.reasons == []
+
+
+def test_repo_overlay_status_overrides_base_row_status():
+    row = {
+        "tag_id": 46,
+        "tag": "old tag",
+        "deprecated": False,
+        "type_id": 1,
+        "type_name": "general",
+        "format_statuses": {},
+    }
+
+    recommendation = recommend_tag_record_refinement(
+        row,
+        format_name="danbooru",
+        repo=_RepoWithDeprecatedOverlay(),
+    )
+
+    assert [reason.code for reason in recommendation.reasons] == ["deprecated_tag"]
     assert recommendation.proposals == []
 
 

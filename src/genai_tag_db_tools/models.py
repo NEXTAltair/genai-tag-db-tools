@@ -291,6 +291,7 @@ class RefinementReason(BaseModel):
         "ambiguous_alias_candidates",
         "missing_preferred_tag",
         "translation_match_tag",
+        "missing_format_status",
         "external_id_tag",
     ] = Field(..., description="Stable reason code")
     message: str = Field(..., description="Human-readable Japanese message")

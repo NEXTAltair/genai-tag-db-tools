@@ -56,6 +56,7 @@ _REFINEMENT_REASON_MESSAGES = {
     "ambiguous_alias_candidates": "近い既存タグが複数あるため、alias 先を決め打ちできません。",
     "missing_preferred_tag": "alias/preferred 関係の preferred tag が見つかりません。",
     "translation_match_tag": "入力が既存タグの翻訳に一致しています。通常タグとして扱うべきか確認が必要です。",
+    "missing_format_status": "指定 format でのタグ status が見つかりません。",
     "external_id_tag": "外部サイト ID を表す情報タグの可能性があります。",
 }
 _BROAD_SINGLE_WORD_TAGS = {
@@ -84,7 +85,7 @@ _JAPANESE_KANA_PATTERN = re.compile(r"[\u3040-\u30ff]")
 _JA_DESCRIPTION_PATTERN = re.compile(r"(です|ます|である|された|するため|について|。|、|:)")
 _ZH_SPECIFIC_CHARS = set(
     "们这这为为么么后后发发头头见见观观蓝蓝绿绿红红黄黄龙龙马马门门风风"
-    "鸟鸟鱼鱼猫咪女孩男孩眼睛颜色身体脸发型长短个的了在是和与"
+    "鸟鸟鱼鱼咪眼睛颜色身体脸发型长短个了在是和与"
 )
 _LOW_QUALITY_TRANSLATIONS = {
     "n/a",
@@ -407,20 +408,23 @@ def _preferred_tag_for_status(repo: MergedTagReader, preferred_tag_id: int):
 
 
 def _status_from_row_for_unknown_format(row: TagSearchRow) -> tuple[bool, int | None]:
-    format_alias = _alias_from_format_status(row)
-    if row["alias"] or format_alias:
-        return True, _preferred_tag_id_from_format_status(row) or row["tag_id"]
+    alias_preferred_tag_id = _alias_preferred_tag_id_from_format_status(row)
+    if row["alias"] or alias_preferred_tag_id is not None:
+        return True, alias_preferred_tag_id or _preferred_tag_id_from_format_status(row) or row["tag_id"]
     preferred_tag_id = _preferred_tag_id_from_format_status(row)
     if preferred_tag_id is not None and preferred_tag_id != row["tag_id"]:
         return False, preferred_tag_id
     return False, None
 
 
-def _alias_from_format_status(row: TagSearchRow) -> bool:
-    return any(
-        isinstance(status, Mapping) and status.get("alias") is True
-        for status in (row.get("format_statuses") or {}).values()
-    )
+def _alias_preferred_tag_id_from_format_status(row: TagSearchRow) -> int | None:
+    for status in (row.get("format_statuses") or {}).values():
+        if not isinstance(status, Mapping) or status.get("alias") is not True:
+            continue
+        preferred_tag_id = status.get("preferred_tag_id")
+        if isinstance(preferred_tag_id, int):
+            return preferred_tag_id
+    return None
 
 
 def _preferred_tag_id_from_format_status(row: TagSearchRow) -> int | None:
@@ -431,15 +435,6 @@ def _preferred_tag_id_from_format_status(row: TagSearchRow) -> int | None:
         if isinstance(preferred_tag_id, int):
             return preferred_tag_id
     return None
-
-
-def _is_alias_candidate_for_any_format(row: TagSearchRow) -> bool:
-    if row["alias"]:
-        return True
-    for status in (row.get("format_statuses") or {}).values():
-        if isinstance(status, Mapping) and status.get("alias") is True:
-            return True
-    return False
 
 
 def _db_feedback_alias_proposal(
@@ -505,6 +500,33 @@ def _candidate_sort_key(input_tag: str, candidate: tuple[int, str, int]) -> tupl
     return (distance, -SequenceMatcher(None, input_tag, tag).ratio(), tag, tag_id)
 
 
+def _recommendation_statuses_by_tag(
+    repo: MergedTagReader,
+    format_id: int | None,
+) -> dict[int, list[Any]]:
+    statuses = repo.list_tag_statuses()
+    result: dict[int, list[object]] = {}
+    for status in statuses:
+        if format_id is not None and status.format_id != format_id:
+            continue
+        result.setdefault(status.tag_id, []).append(status)
+    return result
+
+
+def _is_typo_candidate_status_usable(
+    statuses_by_tag: dict[int, list[Any]],
+    tag_id: int,
+    *,
+    format_id: int | None,
+) -> bool:
+    statuses = statuses_by_tag.get(tag_id, [])
+    if format_id is not None and not statuses:
+        return False
+    if not statuses:
+        return True
+    return not any(status.alias or status.deprecated for status in statuses)
+
+
 def _find_typo_candidates(
     repo: MergedTagReader,
     normalized_tag: str,
@@ -518,6 +540,7 @@ def _find_typo_candidates(
     distance_limit = _typo_distance_limit(normalized_tag)
     candidates: list[tuple[int, str, int]] = []
     seen_tags: set[str] = set()
+    statuses_by_tag = _recommendation_statuses_by_tag(repo, format_id)
     for tag_obj in repo.list_tags():
         candidate_tag = tag_obj.tag
         if not candidate_tag:
@@ -527,22 +550,12 @@ def _find_typo_candidates(
             continue
         seen_tags.add(candidate_key)
 
-        if format_id is not None:
-            status = repo.get_tag_status(tag_obj.tag_id, format_id)
-            if status is None or status.alias:
-                continue
-        else:
-            rows = _canonical_exact_recommendation_rows(
-                _search_exact_recommendation_rows(
-                    repo,
-                    candidate_tag,
-                    format_name="unknown",
-                    format_id=None,
-                ),
-                candidate_tag,
-            )
-            if rows and _is_alias_candidate_for_any_format(rows[0]):
-                continue
+        if not _is_typo_candidate_status_usable(
+            statuses_by_tag,
+            tag_obj.tag_id,
+            format_id=format_id,
+        ):
+            continue
         distance = _edit_distance_at_most(normalized_tag.lower(), candidate_key, distance_limit)
         if distance is None:
             continue
@@ -617,9 +630,17 @@ def _recommend_from_db(
                 score=0.0,
             )
         status = repo.get_tag_status(row["tag_id"], format_id)
-        if status is None or (
-            not status.alias and status.preferred_tag_id in (None, row["tag_id"])
-        ):
+        if status is None:
+            reasons = [_refinement_reason("missing_format_status")]
+            return RefinementRecommendation(
+                source_tag=source_tag,
+                normalized_tag=normalized_tag,
+                needs_refinement=True,
+                score=_refinement_score(reasons, []),
+                reasons=reasons,
+                suggestions=[RefinementSuggestion(kind="review_only")],
+            )
+        if not status.alias and status.preferred_tag_id in (None, row["tag_id"]):
             return RefinementRecommendation(
                 source_tag=source_tag,
                 normalized_tag=normalized_tag,
@@ -712,7 +733,7 @@ def recommend_manual_refinement(
     source_candidate = tag.strip()
     reasons: list[RefinementReason] = []
     suggestions: list[RefinementSuggestion] = []
-    source_site_info_token = _looks_like_site_info_token(tag)
+    source_site_info_token = _looks_like_site_info_token(tag) or _looks_like_management_token(tag)
 
     if repo is not None and not source_site_info_token:
         db_recommendation = _recommend_from_db(
@@ -975,6 +996,28 @@ def _status_value(row: Mapping[str, Any], status: Mapping[str, Any], key: str) -
     return status.get(key, row.get(key))
 
 
+def _repo_tag_status(
+    repo: MergedTagReader | None,
+    tag_id: int,
+    format_id: int | None,
+) -> Any:
+    if repo is None or format_id is None or not hasattr(repo, "get_tag_status"):
+        return None
+    return repo.get_tag_status(tag_id, format_id)
+
+
+def _type_name_for_format(
+    repo: MergedTagReader | None,
+    format_id: int | None,
+    type_id: Any,
+) -> str | None:
+    if repo is None or format_id is None or not isinstance(type_id, int):
+        return None
+    if not hasattr(repo, "get_type_name_by_format_type_id"):
+        return None
+    return repo.get_type_name_by_format_type_id(format_id, type_id)
+
+
 def _has_format_type(repo: MergedTagReader | None, format_name: str, type_name: str) -> bool:
     if repo is None or format_name == "unknown":
         return False
@@ -1031,10 +1074,15 @@ def recommend_tag_record_refinement(
     resolved_format_name = format_name or data.get("format_name") or "unknown"
     resolved_format_id = _resolve_recommendation_format_id(repo, resolved_format_name) if repo else None
     status = _format_status(data, resolved_format_name, resolved_format_id)
+    repo_status = _repo_tag_status(repo, target_tag_id, resolved_format_id)
 
-    type_id = _status_value(data, status, "type_id")
-    type_name = str(_status_value(data, status, "type_name") or "").lower()
-    deprecated = bool(_status_value(data, status, "deprecated"))
+    type_id = repo_status.type_id if repo_status is not None else _status_value(data, status, "type_id")
+    type_name_value = _status_value(data, status, "type_name")
+    resolved_type_name = _type_name_for_format(repo, resolved_format_id, type_id)
+    type_name = str(resolved_type_name or type_name_value or "").lower()
+    deprecated = bool(
+        repo_status.deprecated if repo_status is not None else _status_value(data, status, "deprecated")
+    )
 
     reasons: list[RefinementReason] = []
     suggestions: list[RefinementSuggestion] = []

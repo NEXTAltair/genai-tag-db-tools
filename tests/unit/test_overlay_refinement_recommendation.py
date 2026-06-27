@@ -31,8 +31,10 @@ _WEDDING_DRESS_ID = 20
 _WEDDING_CRESS_ID = 21
 _GREEN_HAIR_ID = 30
 _PIXIV_ID_ID = 40
+_OLD_TAG_ID = 50
 _USER_ALIAS_ID = USER_TAG_ID_OFFSET + 1
 _USER_PREFERRED_ID = USER_TAG_ID_OFFSET + 2
+_USER_OTHER_ONLY_ID = USER_TAG_ID_OFFSET + 3
 
 
 @pytest.fixture
@@ -84,6 +86,7 @@ def _add_base_status(
     format_id: int = _FORMAT_ID,
     alias: bool = False,
     preferred_tag_id: int | None = None,
+    deprecated: bool = False,
 ) -> None:
     session.add(
         TagStatus(
@@ -92,6 +95,7 @@ def _add_base_status(
             type_id=0,
             alias=alias,
             preferred_tag_id=preferred_tag_id if preferred_tag_id is not None else tag_id,
+            deprecated=deprecated,
         )
     )
 
@@ -117,15 +121,18 @@ def populated_base(base_session_factory):
                 ),
                 Tag(tag_id=_GREEN_HAIR_ID, source_tag="green_hair", tag="green hair"),
                 Tag(tag_id=_PIXIV_ID_ID, source_tag="pixiv_id", tag="pixiv id"),
+                Tag(tag_id=_OLD_TAG_ID, source_tag="old_tag", tag="old tag"),
             ]
         )
         session.flush()
         _add_base_status(session, _BLUE_EYES_ID)
+        _add_base_status(session, _BLU_EYES_ID, format_id=_OTHER_FORMAT_ID)
         _add_base_status(session, _BLU_EYES_ID, alias=True, preferred_tag_id=_BLUE_EYES_ID)
         _add_base_status(session, _WEDDING_DRESS_ID)
         _add_base_status(session, _WEDDING_CRESS_ID)
         _add_base_status(session, _GREEN_HAIR_ID, format_id=_OTHER_FORMAT_ID)
         _add_base_status(session, _PIXIV_ID_ID)
+        _add_base_status(session, _OLD_TAG_ID, deprecated=True)
         session.add(TagTranslation(tag_id=_BLUE_EYES_ID, language="ja", translation="青い目"))
         session.commit()
 
@@ -140,6 +147,11 @@ def populated_user(user_session_factory):
                     tag_id=_USER_PREFERRED_ID,
                     source_tag="user preferred",
                     tag="user preferred",
+                ),
+                UserTag(
+                    tag_id=_USER_OTHER_ONLY_ID,
+                    source_tag="user other",
+                    tag="user other",
                 ),
             ]
         )
@@ -165,6 +177,18 @@ def populated_user(user_session_factory):
                 alias=False,
                 preferred_scope="user",
                 preferred_tag_id=_USER_PREFERRED_ID,
+                deprecated=False,
+            )
+        )
+        session.add(
+            UserTagStatusPatch(
+                target_scope="user",
+                target_tag_id=_USER_OTHER_ONLY_ID,
+                format_id=_OTHER_FORMAT_ID,
+                type_id=0,
+                alias=False,
+                preferred_scope="user",
+                preferred_tag_id=_USER_OTHER_ONLY_ID,
                 deprecated=False,
             )
         )
@@ -217,6 +241,17 @@ def test_unknown_format_exact_alias_still_recommends_preferred_tag(merged_reader
     ]
 
 
+def test_exact_tag_without_requested_format_status_needs_review(merged_reader):
+    recommendation = recommend_manual_refinement(
+        "user other",
+        merged_reader,
+        format_name="test_format",
+    )
+
+    assert _codes(recommendation) == ["missing_format_status"]
+    assert recommendation.suggestions[0].kind == "review_only"
+
+
 def test_translation_only_match_is_review_only_not_canonical_hit(merged_reader):
     recommendation = recommend_manual_refinement(
         "青い目",
@@ -234,6 +269,13 @@ def test_site_info_source_token_keeps_review_even_when_normalized_tag_exists(mer
         merged_reader,
         format_name="test_format",
     )
+
+    assert _codes(recommendation) == ["site_info_token"]
+    assert recommendation.suggestions[0].kind == "review_only"
+
+
+def test_management_token_input_needs_review_without_repo():
+    recommendation = recommend_manual_refinement("rating:safe")
 
     assert _codes(recommendation) == ["site_info_token"]
     assert recommendation.suggestions[0].kind == "review_only"
@@ -317,3 +359,14 @@ def test_unknown_format_typo_candidate_does_not_prefer_existing_alias(merged_rea
     assert _codes(recommendation) == ["typo_alias_candidate"]
     assert recommendation.suggestions[0].tag == "blue eyes"
     assert recommendation.proposals[0].target.preferred_tag_id == _BLUE_EYES_ID
+
+
+def test_deprecated_tag_is_not_used_as_typo_target(merged_reader):
+    recommendation = recommend_manual_refinement(
+        "old teg",
+        merged_reader,
+        format_name="test_format",
+    )
+
+    assert recommendation.needs_refinement is False
+    assert recommendation.proposals == []

@@ -96,6 +96,12 @@ def test_low_quality_translation_is_review_only_without_auto_fix_candidate():
     assert recommendation.suggestions[0].tag is None
 
 
+def test_common_japanese_kanji_translation_is_not_marked_as_chinese():
+    recommendation = recommend_translation_quality("cat", "猫")
+
+    assert "wrong_language_translation" not in [reason.code for reason in recommendation.reasons]
+
+
 def test_tag_ref_can_supply_overlay_patch_target():
     recommendation = recommend_translation_quality(
         "cat",
