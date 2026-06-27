@@ -318,6 +318,15 @@ class TagRegisterService:
             preferred_tag_id=preferred_tag_id,
         )
 
+        if request.translations:
+            for tr in request.translations:
+                self._user_tag_repo.write_translation_patch(
+                    target_scope="user",
+                    target_tag_id=tag_id,
+                    language=tr.language,
+                    translation=tr.translation,
+                )
+
         return TagRegisterResult(created=created, tag_id=tag_id)
 
     def register_alias_entry(
