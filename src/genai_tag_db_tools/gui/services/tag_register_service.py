@@ -69,7 +69,7 @@ class GuiTagRegisterService(GuiServiceBase):
                 if language and translation:
                     translations = [TagTranslationInput(language=language, translation=translation)]
 
-                self.register_tag(
+                result = self.register_tag(
                     TagRegisterRequest(
                         tag=normalized_tag,
                         source_tag=source_tag,
@@ -78,9 +78,7 @@ class GuiTagRegisterService(GuiServiceBase):
                         translations=translations,
                     )
                 )
-                tag_id = self._reader.get_tag_id_by_name(normalized_tag, partial=False)
-                if tag_id is None:
-                    raise ValueError("登録後にタグIDが見つかりません")
+                tag_id = result.tag_id
                 if usage_count > 0:
                     fmt_id = self._reader.get_format_id(format_name)
                     self._repo.update_usage_count(tag_id, fmt_id, usage_count)

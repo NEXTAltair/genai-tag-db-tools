@@ -343,7 +343,7 @@ class TagSearchQueryBuilder:
 
     def _query_usage_tag_ids(
         self,
-        format_id: int,
+        format_id: int | None,
         min_usage: int | None,
         max_usage: int | None,
     ) -> set[int]:
@@ -375,7 +375,7 @@ class TagSearchQueryBuilder:
         usage_all_tag_ids = {row[0] for row in usage_all_query.all()}
         return usage_tag_ids | (tag_ids - usage_all_tag_ids)
 
-    def apply_type_filter(self, tag_ids: set[int], format_id: int, type_name: str | None) -> set[int]:
+    def apply_type_filter(self, tag_ids: set[int], format_id: int | None, type_name: str | None) -> set[int]:
         if not type_name or type_name.lower() == "all":
             return tag_ids
 
@@ -389,17 +389,17 @@ class TagSearchQueryBuilder:
             & (TagStatus.type_id == TagTypeFormatMapping.type_id),
         )
         type_query = type_query.filter(TagTypeFormatMapping.type_name_id == type_obj.type_name_id)
-        if format_id:
+        if format_id is not None:
             type_query = type_query.filter(TagStatus.format_id == format_id)
         type_tag_ids = {row[0] for row in type_query.all()}
         return tag_ids & type_tag_ids
 
-    def apply_alias_filter(self, tag_ids: set[int], format_id: int, alias: bool | None) -> set[int]:
+    def apply_alias_filter(self, tag_ids: set[int], format_id: int | None, alias: bool | None) -> set[int]:
         if alias is None:
             return tag_ids
 
         alias_query = self.session.query(TagStatus.tag_id).filter(TagStatus.alias == alias)
-        if format_id:
+        if format_id is not None:
             alias_query = alias_query.filter(TagStatus.format_id == format_id)
         alias_tag_ids = {row[0] for row in alias_query.all()}
         return tag_ids & alias_tag_ids

@@ -159,6 +159,52 @@ def test_filtered_tag_ids_treats_all_as_unfiltered(
     assert format_id is None
 
 
+def test_filtered_tag_ids_scopes_type_and_alias_filters_to_format_id_zero(
+    session_factory: Callable[[], Session],
+) -> None:
+    with session_factory() as session:
+        session.add(TagFormat(format_id=0, format_name="unknown"))
+        session.add(TagFormat(format_id=1, format_name="danbooru"))
+        session.add(TagTypeName(type_name_id=1, type_name="unknown"))
+        session.add(TagTypeName(type_name_id=2, type_name="general"))
+        session.add(TagTypeFormatMapping(format_id=0, type_id=0, type_name_id=1))
+        session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=2))
+        session.add(Tag(tag_id=1, source_tag="sorceress", tag="sorceress"))
+        session.add(
+            TagStatus(
+                tag_id=1,
+                format_id=0,
+                type_id=0,
+                alias=False,
+                preferred_tag_id=1,
+                deprecated=False,
+            )
+        )
+        session.add(
+            TagStatus(
+                tag_id=1,
+                format_id=1,
+                type_id=0,
+                alias=True,
+                preferred_tag_id=2,
+                deprecated=True,
+            )
+        )
+        session.commit()
+
+        builder = TagSearchQueryBuilder(session)
+        ids, format_id = builder.filtered_tag_ids(
+            "sorceress",
+            use_like=False,
+            format_names=["unknown"],
+            type_names=["unknown"],
+            alias=False,
+        )
+
+    assert ids == {1}
+    assert format_id == 0
+
+
 def test_filtered_tag_ids_negative_status_filters_keep_statusless_tags(
     session_factory: Callable[[], Session],
 ) -> None:

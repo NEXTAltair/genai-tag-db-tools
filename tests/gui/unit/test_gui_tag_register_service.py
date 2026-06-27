@@ -286,14 +286,13 @@ class TestGuiTagRegisterService:
         assert tag_id == 10
         assert service._repo.usage_updates == [(10, 1, 150)]
 
-    def test_register_or_update_tag_tag_id_not_found_raises_error(
+    def test_register_or_update_tag_register_failure_raises_error(
         self, service: GuiTagRegisterService, qtbot
     ):
-        """register_or_update_tag raises ValueError when tag_id not found after registration"""
+        """register_or_update_tag propagates core registration failures"""
         error_spy = qt_api.QtTest.QSignalSpy(service.error_occurred)
 
-        # Mock reader to return None for get_tag_id_by_name
-        service._reader.get_tag_id_by_name = Mock(return_value=None)
+        service.register_tag = Mock(side_effect=ValueError("registration failed"))
 
         tag_info = {
             "normalized_tag": "missing_tag",
@@ -303,7 +302,7 @@ class TestGuiTagRegisterService:
         }
 
         # Execute and expect exception
-        with pytest.raises(ValueError, match="登録後にタグIDが見つかりません"):
+        with pytest.raises(ValueError, match="registration failed"):
             service.register_or_update_tag(tag_info)
 
         # Verify error signal emitted
