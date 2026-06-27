@@ -35,10 +35,11 @@ class MigrationResult:
 
 
 def detect_legacy_schema(engine: Engine) -> bool:
-    """user DB に旧 TAGS テーブルが存在してデータがある場合 True を返す。
+    """旧スキーマのテーブルに未移行データが存在する場合 True を返す。
 
-    移行完了後は TAGS テーブルのデータが DELETE されるため、
-    2 回目以降の呼び出しでは False を返す（重複バックアップ防止）。
+    TAGS だけでなく TAG_STATUS / TAG_TRANSLATIONS / TAG_USAGE_COUNTS も検査する。
+    TAGS が空でも他テーブルに base タグへの上書き行が残っている場合を検出するため。
+    移行完了後は 4 テーブル全て DELETE されるため、2 回目以降は False を返す。
 
     Args:
         engine: 検査対象の SQLAlchemy Engine。
@@ -47,14 +48,21 @@ def detect_legacy_schema(engine: Engine) -> bool:
         未移行の旧スキーマデータが存在すれば True、そうでなければ False。
     """
     inspector = inspect(engine)
-    if "TAGS" not in inspector.get_table_names():
-        return False
-
+    existing = set(inspector.get_table_names())
+    _LEGACY_TABLES = (
+        ("TAGS", text("SELECT COUNT(*) FROM TAGS")),
+        ("TAG_STATUS", text("SELECT COUNT(*) FROM TAG_STATUS")),
+        ("TAG_TRANSLATIONS", text("SELECT COUNT(*) FROM TAG_TRANSLATIONS")),
+        ("TAG_USAGE_COUNTS", text("SELECT COUNT(*) FROM TAG_USAGE_COUNTS")),
+    )
     with engine.connect() as conn:
-        row = conn.execute(text("SELECT COUNT(*) FROM TAGS")).fetchone()
-        count = row[0] if row else 0
-
-    return count > 0
+        for table, stmt in _LEGACY_TABLES:
+            if table not in existing:
+                continue
+            row = conn.execute(stmt).fetchone()
+            if row and row[0] > 0:
+                return True
+    return False
 
 
 def backup_user_db(db_path: Path) -> Path:
@@ -232,14 +240,25 @@ def migrate_legacy_to_overlay(
                     updated_at,
                 ) = row
 
-                new_tag_id = id_map.get(old_tag_id, old_tag_id + USER_TAG_ID_OFFSET)
+                # user TAGS 内のタグ → user scope + offset ID。
+                # user TAGS にない (base DB のタグへの上書き) → base scope + 元 tag_id。
+                if old_tag_id in id_map:
+                    target_scope = "user"
+                    target_tag_id = id_map[old_tag_id]
+                else:
+                    target_scope = "base"
+                    target_tag_id = old_tag_id
+                    result.warnings.append(
+                        f"TAG_STATUS tag_id={old_tag_id}: user TAGS に存在しないため "
+                        "target_scope='base' として移行します（base タグへの上書き）。"
+                    )
 
                 # CHECK 制約:
                 # alias=0 → preferred_scope=target_scope AND preferred_tag_id=target_tag_id
                 # alias=1 → NOT (preferred_scope=target_scope AND preferred_tag_id=target_tag_id)
                 if not alias:
-                    preferred_scope = "user"
-                    preferred_tag_id = new_tag_id
+                    preferred_scope = target_scope
+                    preferred_tag_id = target_tag_id
                 elif old_preferred_tag_id in id_map:
                     # preferred が user TAGS 内 → user scope
                     preferred_scope = "user"
@@ -264,8 +283,8 @@ def migrate_legacy_to_overlay(
                         ":created_at, :updated_at)"
                     ),
                     {
-                        "target_scope": "user",
-                        "target_tag_id": new_tag_id,
+                        "target_scope": target_scope,
+                        "target_tag_id": target_tag_id,
                         "format_id": format_id,
                         "type_id": type_id,
                         "alias": 1 if alias else 0,
@@ -295,7 +314,6 @@ def migrate_legacy_to_overlay(
         if not dry_run:
             for row in old_translations:
                 old_tag_id, language, translation, created_at, updated_at = row
-                new_tag_id = id_map.get(old_tag_id, old_tag_id + USER_TAG_ID_OFFSET)
 
                 # NULL の language / translation は Mapped[str] (nullable=False) に挿入不可。
                 # "" への変換は SQLite UNIQUE 制約との整合性が崩れるためスキップする。
@@ -307,6 +325,13 @@ def migrate_legacy_to_overlay(
                     skipped_translations += 1
                     continue
 
+                if old_tag_id in id_map:
+                    tr_scope = "user"
+                    tr_tag_id = id_map[old_tag_id]
+                else:
+                    tr_scope = "base"
+                    tr_tag_id = old_tag_id
+
                 session.execute(
                     text(
                         "INSERT OR IGNORE INTO USER_TAG_TRANSLATION_PATCH "
@@ -316,8 +341,8 @@ def migrate_legacy_to_overlay(
                         ":created_at, :updated_at)"
                     ),
                     {
-                        "target_scope": "user",
-                        "target_tag_id": new_tag_id,
+                        "target_scope": tr_scope,
+                        "target_tag_id": tr_tag_id,
                         "language": language,
                         "translation": translation,
                         "created_at": created_at,
@@ -341,7 +366,13 @@ def migrate_legacy_to_overlay(
         if not dry_run:
             for row in old_usages:
                 old_tag_id, format_id, count, created_at, updated_at = row
-                new_tag_id = id_map.get(old_tag_id, old_tag_id + USER_TAG_ID_OFFSET)
+
+                if old_tag_id in id_map:
+                    us_scope = "user"
+                    us_tag_id = id_map[old_tag_id]
+                else:
+                    us_scope = "base"
+                    us_tag_id = old_tag_id
 
                 session.execute(
                     text(
@@ -352,8 +383,8 @@ def migrate_legacy_to_overlay(
                         ":created_at, :updated_at)"
                     ),
                     {
-                        "target_scope": "user",
-                        "target_tag_id": new_tag_id,
+                        "target_scope": us_scope,
+                        "target_tag_id": us_tag_id,
                         "format_id": format_id,
                         "count": count,
                         "created_at": created_at,
