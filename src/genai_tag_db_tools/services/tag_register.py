@@ -245,9 +245,12 @@ class TagRegisterService:
         if request.alias:
             if not request.preferred_tag:
                 raise ValueError("alias=True の場合 preferred_tag が必須です")
-            preferred_tag_id = self._reader.get_tag_id_by_name(request.preferred_tag, partial=False)
+            preferred_tag = normalize_registered_tag(request.preferred_tag)
+            if preferred_tag == "":
+                raise ValueError("preferred_tag must not be empty after normalization")
+            preferred_tag_id = self._reader.get_tag_id_by_name(preferred_tag, partial=False)
             if preferred_tag_id is None:
-                raise ValueError(f"推奨タグが見つかりません: {request.preferred_tag}")
+                raise ValueError(f"推奨タグが見つかりません: {preferred_tag}")
 
         if request.translations:
             for tr in request.translations:

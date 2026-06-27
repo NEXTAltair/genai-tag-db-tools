@@ -151,6 +151,27 @@ def test_register_tag_alias_resolves_preferred():
 
 
 @pytest.mark.db_tools
+def test_register_tag_alias_normalizes_preferred_before_lookup():
+    repo = DummyRepo()
+    repo._tag_ids["blue eyes"] = 99
+    reader = DummyReader(repo)
+    service = TagRegisterService(repository=repo, reader=reader)
+    request = TagRegisterRequest(
+        tag="blu_eyes",
+        source_tag=None,
+        format_name="danbooru",
+        type_name="character",
+        alias=True,
+        preferred_tag="blue__eyes",
+    )
+
+    result = service.register_tag(request)
+
+    assert result.created is True
+    assert repo.status_updates == [(10, 1, True, 99, 2)]
+
+
+@pytest.mark.db_tools
 def test_register_or_update_tag_routes_to_register_tag():
     repo = DummyRepo()
     reader = DummyReader(repo)
