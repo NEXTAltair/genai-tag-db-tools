@@ -642,5 +642,6 @@ class TagSearchResultBuilder:
                 "usage_count": usage_by_key.get((status.tag_id, status.format_id), 0),
                 "type_id": status.type_id,
                 "type_name": type_name_by_key.get((status.format_id, status.type_id), ""),
+                "preferred_tag_id": status.preferred_tag_id,
             }
         return format_statuses

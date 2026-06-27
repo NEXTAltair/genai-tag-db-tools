@@ -55,6 +55,7 @@ _REFINEMENT_REASON_MESSAGES = {
     "typo_alias_candidate": "近い既存タグがあり、typo alias 候補として確認できます。",
     "ambiguous_alias_candidates": "近い既存タグが複数あるため、alias 先を決め打ちできません。",
     "missing_preferred_tag": "alias/preferred 関係の preferred tag が見つかりません。",
+    "translation_match_tag": "入力が既存タグの翻訳に一致しています。通常タグとして扱うべきか確認が必要です。",
     "external_id_tag": "外部サイト ID を表す情報タグの可能性があります。",
 }
 _BROAD_SINGLE_WORD_TAGS = {
@@ -391,8 +392,54 @@ def _search_exact_recommendation_rows(
     )
 
 
+def _canonical_exact_recommendation_rows(rows: list[TagSearchRow], tag: str) -> list[TagSearchRow]:
+    normalized = tag.casefold()
+    return [
+        row
+        for row in rows
+        if row["tag"].casefold() == normalized
+        or (row["source_tag"] is not None and row["source_tag"].casefold() == normalized)
+    ]
+
+
 def _preferred_tag_for_status(repo: MergedTagReader, preferred_tag_id: int):
     return repo.get_tag_by_id(preferred_tag_id)
+
+
+def _status_from_row_for_unknown_format(row: TagSearchRow) -> tuple[bool, int | None]:
+    format_alias = _alias_from_format_status(row)
+    if row["alias"] or format_alias:
+        return True, _preferred_tag_id_from_format_status(row) or row["tag_id"]
+    preferred_tag_id = _preferred_tag_id_from_format_status(row)
+    if preferred_tag_id is not None and preferred_tag_id != row["tag_id"]:
+        return False, preferred_tag_id
+    return False, None
+
+
+def _alias_from_format_status(row: TagSearchRow) -> bool:
+    return any(
+        isinstance(status, Mapping) and status.get("alias") is True
+        for status in (row.get("format_statuses") or {}).values()
+    )
+
+
+def _preferred_tag_id_from_format_status(row: TagSearchRow) -> int | None:
+    for status in (row.get("format_statuses") or {}).values():
+        if not isinstance(status, Mapping):
+            continue
+        preferred_tag_id = status.get("preferred_tag_id")
+        if isinstance(preferred_tag_id, int):
+            return preferred_tag_id
+    return None
+
+
+def _is_alias_candidate_for_any_format(row: TagSearchRow) -> bool:
+    if row["alias"]:
+        return True
+    for status in (row.get("format_statuses") or {}).values():
+        if isinstance(status, Mapping) and status.get("alias") is True:
+            return True
+    return False
 
 
 def _db_feedback_alias_proposal(
@@ -484,6 +531,18 @@ def _find_typo_candidates(
             status = repo.get_tag_status(tag_obj.tag_id, format_id)
             if status is None or status.alias:
                 continue
+        else:
+            rows = _canonical_exact_recommendation_rows(
+                _search_exact_recommendation_rows(
+                    repo,
+                    candidate_tag,
+                    format_name="unknown",
+                    format_id=None,
+                ),
+                candidate_tag,
+            )
+            if rows and _is_alias_candidate_for_any_format(rows[0]):
+                continue
         distance = _edit_distance_at_most(normalized_tag.lower(), candidate_key, distance_limit)
         if distance is None:
             continue
@@ -508,10 +567,49 @@ def _recommend_from_db(
         format_name=format_name,
         format_id=format_id,
     )
+    raw_exact_rows = exact_rows
+    exact_rows = _canonical_exact_recommendation_rows(exact_rows, normalized_tag)
+
+    if raw_exact_rows and not exact_rows:
+        reasons = [_refinement_reason("translation_match_tag")]
+        return RefinementRecommendation(
+            source_tag=source_tag,
+            normalized_tag=normalized_tag,
+            needs_refinement=True,
+            score=_refinement_score(reasons, []),
+            reasons=reasons,
+            suggestions=[RefinementSuggestion(kind="review_only")],
+        )
 
     if exact_rows:
         row = exact_rows[0]
         if format_id is None:
+            alias, preferred_tag_id = _status_from_row_for_unknown_format(row)
+            if preferred_tag_id is not None and (alias or preferred_tag_id != row["tag_id"]):
+                preferred_tag = _preferred_tag_for_status(repo, preferred_tag_id)
+                if preferred_tag is None:
+                    reasons = [_refinement_reason("missing_preferred_tag")]
+                    return RefinementRecommendation(
+                        source_tag=source_tag,
+                        normalized_tag=normalized_tag,
+                        needs_refinement=True,
+                        score=_refinement_score(reasons, []),
+                        reasons=reasons,
+                        suggestions=[RefinementSuggestion(kind="review_only")],
+                    )
+                reason_code = "alias_tag" if alias else "non_preferred_tag"
+                reasons = [_refinement_reason(reason_code)]
+                suggestions = [
+                    RefinementSuggestion(kind="correction_candidate", tag=preferred_tag.tag)
+                ]
+                return RefinementRecommendation(
+                    source_tag=source_tag,
+                    normalized_tag=normalized_tag,
+                    needs_refinement=True,
+                    score=_refinement_score(reasons, suggestions),
+                    reasons=reasons,
+                    suggestions=suggestions,
+                )
             return RefinementRecommendation(
                 source_tag=source_tag,
                 normalized_tag=normalized_tag,
@@ -614,8 +712,9 @@ def recommend_manual_refinement(
     source_candidate = tag.strip()
     reasons: list[RefinementReason] = []
     suggestions: list[RefinementSuggestion] = []
+    source_site_info_token = _looks_like_site_info_token(tag)
 
-    if repo is not None:
+    if repo is not None and not source_site_info_token:
         db_recommendation = _recommend_from_db(
             repo=repo,
             source_tag=tag,
@@ -625,11 +724,10 @@ def recommend_manual_refinement(
         if db_recommendation is not None:
             return db_recommendation
 
-    is_site_info_token = _looks_like_site_info_token(tag)
     if not normalized_tag:
         reasons.append(_refinement_reason("empty_normalized_tag"))
         suggestions.append(RefinementSuggestion(kind="review_only"))
-    elif is_site_info_token:
+    elif source_site_info_token:
         reasons.append(_refinement_reason("site_info_token"))
         suggestions.append(RefinementSuggestion(kind="review_only"))
     else:
@@ -859,12 +957,17 @@ def _infer_target_scope(tag_id: int, target_scope: Literal["base", "user"] | Non
 def _format_status(
     row: Mapping[str, Any],
     format_name: str,
+    format_id: int | None = None,
 ) -> Mapping[str, Any]:
     format_statuses = row.get("format_statuses") or {}
     if isinstance(format_statuses, Mapping):
-        status = format_statuses.get(format_name)
-        if isinstance(status, Mapping):
-            return status
+        keys = [format_name]
+        if format_id is not None:
+            keys.append(str(format_id))
+        for key in keys:
+            status = format_statuses.get(key)
+            if isinstance(status, Mapping):
+                return status
     return {}
 
 
@@ -926,7 +1029,8 @@ def recommend_tag_record_refinement(
     target_tag_id = int(data["tag_id"])
     resolved_scope = _infer_target_scope(target_tag_id, target_scope)
     resolved_format_name = format_name or data.get("format_name") or "unknown"
-    status = _format_status(data, resolved_format_name)
+    resolved_format_id = _resolve_recommendation_format_id(repo, resolved_format_name) if repo else None
+    status = _format_status(data, resolved_format_name, resolved_format_id)
 
     type_id = _status_value(data, status, "type_id")
     type_name = str(_status_value(data, status, "type_name") or "").lower()

@@ -129,6 +129,36 @@ def test_format_statuses_override_row_level_status_and_preserve_user_scope():
     assert recommendation.proposals == []
 
 
+def test_numeric_format_status_key_is_used_when_repo_resolves_format_id():
+    row = {
+        "tag_id": 1_000_000_044,
+        "tag": "rating:safe",
+        "deprecated": False,
+        "type_id": 1,
+        "type_name": "general",
+        "format_statuses": {
+            "1": {
+                "deprecated": True,
+                "type_id": 5,
+                "type_name": "meta",
+            }
+        },
+    }
+
+    recommendation = recommend_tag_record_refinement(
+        row,
+        format_name="danbooru",
+        repo=_RepoWithMeta(),
+    )
+
+    assert [reason.code for reason in recommendation.reasons] == [
+        "deprecated_tag",
+        "site_info_token",
+        "training_unsuitable",
+    ]
+    assert recommendation.proposals == []
+
+
 def test_status_correction_preserves_user_target_scope_and_tag_id():
     row = {
         "tag_id": 1_000_000_043,

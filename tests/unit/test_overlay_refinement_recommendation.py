@@ -15,6 +15,7 @@ from genai_tag_db_tools.db.schema import (
     Tag,
     TagFormat,
     TagStatus,
+    TagTranslation,
     TagTypeFormatMapping,
     TagTypeName,
     UserOverlayBase,
@@ -29,6 +30,7 @@ _BLU_EYES_ID = 11
 _WEDDING_DRESS_ID = 20
 _WEDDING_CRESS_ID = 21
 _GREEN_HAIR_ID = 30
+_PIXIV_ID_ID = 40
 _USER_ALIAS_ID = USER_TAG_ID_OFFSET + 1
 _USER_PREFERRED_ID = USER_TAG_ID_OFFSET + 2
 
@@ -114,6 +116,7 @@ def populated_base(base_session_factory):
                     tag="wedding cress",
                 ),
                 Tag(tag_id=_GREEN_HAIR_ID, source_tag="green_hair", tag="green hair"),
+                Tag(tag_id=_PIXIV_ID_ID, source_tag="pixiv_id", tag="pixiv id"),
             ]
         )
         session.flush()
@@ -122,6 +125,8 @@ def populated_base(base_session_factory):
         _add_base_status(session, _WEDDING_DRESS_ID)
         _add_base_status(session, _WEDDING_CRESS_ID)
         _add_base_status(session, _GREEN_HAIR_ID, format_id=_OTHER_FORMAT_ID)
+        _add_base_status(session, _PIXIV_ID_ID)
+        session.add(TagTranslation(tag_id=_BLUE_EYES_ID, language="ja", translation="青い目"))
         session.commit()
 
 
@@ -203,6 +208,37 @@ def test_base_alias_recommends_preferred_tag(merged_reader):
     ]
 
 
+def test_unknown_format_exact_alias_still_recommends_preferred_tag(merged_reader):
+    recommendation = recommend_manual_refinement("blu eyes", merged_reader)
+
+    assert _codes(recommendation) == ["alias_tag"]
+    assert [(s.kind, s.tag) for s in recommendation.suggestions] == [
+        ("correction_candidate", "blue eyes")
+    ]
+
+
+def test_translation_only_match_is_review_only_not_canonical_hit(merged_reader):
+    recommendation = recommend_manual_refinement(
+        "青い目",
+        merged_reader,
+        format_name="test_format",
+    )
+
+    assert _codes(recommendation) == ["translation_match_tag"]
+    assert recommendation.suggestions[0].kind == "review_only"
+
+
+def test_site_info_source_token_keeps_review_even_when_normalized_tag_exists(merged_reader):
+    recommendation = recommend_manual_refinement(
+        "pixiv_id",
+        merged_reader,
+        format_name="test_format",
+    )
+
+    assert _codes(recommendation) == ["site_info_token"]
+    assert recommendation.suggestions[0].kind == "review_only"
+
+
 def test_user_alias_to_base_preferred_recommends_cross_scope_preferred(merged_reader):
     recommendation = recommend_manual_refinement(
         "user blu",
@@ -273,3 +309,11 @@ def test_unknown_format_does_not_crash_and_uses_unknown_in_proposal(merged_reade
 
     assert _codes(recommendation) == ["typo_alias_candidate"]
     assert recommendation.proposals[0].target.format_name == "unknown"
+
+
+def test_unknown_format_typo_candidate_does_not_prefer_existing_alias(merged_reader):
+    recommendation = recommend_manual_refinement("blu eyez", merged_reader)
+
+    assert _codes(recommendation) == ["typo_alias_candidate"]
+    assert recommendation.suggestions[0].tag == "blue eyes"
+    assert recommendation.proposals[0].target.preferred_tag_id == _BLUE_EYES_ID
