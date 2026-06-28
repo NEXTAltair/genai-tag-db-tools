@@ -12,15 +12,26 @@ from .core_api import (
     initialize_databases,
     needs_manual_refinement,
     recommend_manual_refinement,
+    recommend_tag_record_refinement,
+    recommend_translation_quality,
     register_tag,
     search_tags,
     update_tags_type_batch,
 )
-from .models import RefinementReason, RefinementRecommendation, RefinementSuggestion, TagTypeUpdate
+from .models import (
+    DbFeedbackProposal,
+    ProposalTarget,
+    RefinementReason,
+    RefinementRecommendation,
+    RefinementSuggestion,
+    TagTypeUpdate,
+)
 from .services.tag_search import TagSearcher
 from .utils.cleanup_str import TagCleaner
 
 __all__ = [
+    "DbFeedbackProposal",
+    "ProposalTarget",
     "RefinementReason",
     "RefinementRecommendation",
     "RefinementSuggestion",
@@ -40,6 +51,8 @@ __all__ = [
     "initialize_tag_searcher",
     "needs_manual_refinement",
     "recommend_manual_refinement",
+    "recommend_tag_record_refinement",
+    "recommend_translation_quality",
     "register_tag",
     "search_tags",
     "update_tags_type_batch",

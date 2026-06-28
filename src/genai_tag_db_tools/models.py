@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal, TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from genai_tag_db_tools.db.schema import Tag, TagStatus, TagTranslation
 
@@ -258,6 +258,9 @@ class TagRegisterResult(BaseModel):
     tag_id: int = Field(..., description="登録されたタグID")
 
 
+ProposalValue = str | int | float | bool | None
+
+
 class RefinementReason(BaseModel):
     """手動 refinement 推奨理由。
 
@@ -270,9 +273,33 @@ class RefinementReason(BaseModel):
         "empty_normalized_tag",
         "normalization_changes_tag",
         "broad_single_word",
+        "deprecated_tag",
+        "unknown_type",
+        "type_correction_candidate",
+        "status_type_conflict",
+        "training_unsuitable",
         "site_info_token",
+        "wrong_language_translation",
+        "missing_translation",
+        "overlong_translation",
+        "description_like_translation",
+        "translation_mismatch",
+        "low_quality_translation",
+        "alias_tag",
+        "non_preferred_tag",
+        "typo_alias_candidate",
+        "ambiguous_alias_candidates",
+        "missing_preferred_tag",
+        "translation_match_tag",
+        "missing_format_status",
+        "external_id_tag",
     ] = Field(..., description="Stable reason code")
     message: str = Field(..., description="Human-readable Japanese message")
+    field: str | None = Field(default=None, description="Target field identifier, such as translation.ja")
+    evidence: list[dict[str, ProposalValue]] = Field(
+        default_factory=list,
+        description="Supporting evidence for the advisory reason",
+    )
 
 
 class RefinementSuggestion(BaseModel):
@@ -288,6 +315,85 @@ class RefinementSuggestion(BaseModel):
     tag: str | None = Field(default=None, description="Suggested normalized tag")
 
 
+class ProposalTarget(BaseModel):
+    """DB feedback proposal target expressed without mutating any DB.
+
+    `format_name=None` means the proposal targets global tag data. Format-dependent data
+    with an unknown format must use `format_name="unknown"` instead.
+    """
+
+    kind: Literal[
+        "tag_name",
+        "source_tag",
+        "alias",
+        "tag_type",
+        "tag_status",
+        "translation",
+        "usage",
+        "format_relation",
+    ] = Field(..., description="Target field or relation kind")
+    target_scope: Literal["base", "user"] = Field(..., description="Patch target scope")
+    target_tag_id: int | None = Field(
+        default=None,
+        description="Patch target tag id in target_scope. None means the target tag does not exist yet.",
+    )
+    format_name: str | None = Field(
+        default=None,
+        description='Format-specific target name. None means global target; use "unknown" when unknown.',
+    )
+    language: str | None = Field(default=None, description="Translation language for translation targets")
+    preferred_scope: Literal["base", "user"] | None = Field(
+        default=None,
+        description="Preferred tag scope for alias/preferred relation proposals",
+    )
+    preferred_tag_id: int | None = Field(
+        default=None,
+        description="Preferred tag id for alias/preferred relation proposals",
+    )
+
+    @model_validator(mode="after")
+    def _validate_preferred_ref(self) -> ProposalTarget:
+        if (self.preferred_scope is None) != (self.preferred_tag_id is None):
+            raise ValueError("preferred_scope and preferred_tag_id must be provided together")
+        return self
+
+
+class DbFeedbackProposal(BaseModel):
+    """A proposed DB feedback action emitted by recommendation logic.
+
+    This is an advisory model only. It is intentionally not an overlay patch row and does
+    not apply, validate, or export mutations by itself.
+    """
+
+    kind: Literal[
+        "tag_name_correction",
+        "alias_addition",
+        "preferred_tag_correction",
+        "translation_correction",
+        "usage_correction",
+        "type_correction",
+        "status_correction",
+        "format_relation_review",
+    ] = Field(..., description="Proposal action kind")
+    target: ProposalTarget = Field(..., description="Overlay-aware proposal target")
+    current: dict[str, ProposalValue] | None = Field(
+        default=None,
+        description="Current observed values, if known",
+    )
+    proposed: dict[str, ProposalValue] | None = Field(
+        default=None,
+        description="Proposed values, if known",
+    )
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Proposal confidence")
+    source: str = Field(..., description="Recommendation or detector source")
+    reason_codes: list[str] = Field(default_factory=list, description="Stable reason codes")
+    evidence: list[dict[str, ProposalValue]] = Field(default_factory=list, description="Supporting evidence")
+    requires_human_approval: bool = Field(
+        default=True,
+        description="Whether a human must approve before any future DB mutation",
+    )
+
+
 class RefinementRecommendation(BaseModel):
     """タグを手で直すべきかを表す advisory API 結果。"""
 
@@ -299,6 +405,10 @@ class RefinementRecommendation(BaseModel):
     suggestions: list[RefinementSuggestion] = Field(
         default_factory=list,
         description="Structured correction candidates or review-only actions",
+    )
+    proposals: list[DbFeedbackProposal] = Field(
+        default_factory=list,
+        description="Future DB feedback proposals derived from the recommendation",
     )
 
 
