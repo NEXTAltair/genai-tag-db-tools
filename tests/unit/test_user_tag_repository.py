@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from genai_tag_db_tools.db.runtime import _create_engine
@@ -202,8 +203,16 @@ class TestLocalFeedbackRepositoryHelpers:
         with pytest.raises(ValueError, match=r"type_id=0.*'general'"):
             user_repo.get_or_create_type_id(1000, "unknown")
 
-    def test_has_applied_feedback_allows_duplicate_applied_rows(self, user_repo):
+    def test_has_applied_feedback_allows_legacy_duplicate_applied_rows(
+        self,
+        user_repo,
+        user_session_factory,
+    ):
         approved_at = datetime(2026, 6, 28, 12, 0, tzinfo=UTC)
+        with user_session_factory() as session:
+            session.execute(text("DROP INDEX IF EXISTS uix_local_feedback_applied_hash"))
+            session.commit()
+
         for _ in range(2):
             user_repo.record_feedback_application(
                 proposal_hash="duplicate",
