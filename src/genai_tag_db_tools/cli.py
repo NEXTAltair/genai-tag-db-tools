@@ -497,6 +497,11 @@ def build_parser(prog: str = "tag-db") -> argparse.ArgumentParser:
     )
     list_commands_parser.set_defaults(func=cmd_list_commands)
 
+    # Base DB correction patch pipeline (#58 / #60 / #61).
+    from genai_tag_db_tools.services.base_patch.cli import register_feedback_commands
+
+    register_feedback_commands(subparsers)
+
     return parser
 
 
