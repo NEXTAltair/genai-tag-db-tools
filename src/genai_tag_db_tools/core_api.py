@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -12,6 +13,9 @@ from genai_tag_db_tools.models import (
     DbSourceRef,
     EnsureDbRequest,
     EnsureDbResult,
+    RefinementReason,
+    RefinementRecommendation,
+    RefinementSuggestion,
     TagRecordPublic,
     TagRegisterRequest,
     TagRegisterResult,
@@ -22,6 +26,72 @@ from genai_tag_db_tools.models import (
 )
 from genai_tag_db_tools.services.tag_register import TagRegisterService
 from genai_tag_db_tools.utils.cleanup_str import TagCleaner
+
+_REFINEMENT_REASON_MESSAGES = {
+    "empty_normalized_tag": "正規化後のタグが空です。",
+    "normalization_changes_tag": "既存の正規化でタグ表記が変わります。",
+    "broad_single_word": "単語が広すぎるため、人による確認が必要です。",
+    "site_info_token": "サイト情報トークンのため、通常タグとして扱うべきか確認が必要です。",
+}
+_BROAD_SINGLE_WORD_TAGS = {
+    "animal",
+    "background",
+    "building",
+    "character",
+    "clothes",
+    "clothing",
+    "flower",
+    "food",
+    "girl",
+    "man",
+    "object",
+    "person",
+    "plant",
+    "style",
+    "woman",
+}
+_ANGLE_BRACKET_PATTERN = re.compile(r"<[^>]+>")
+_SITE_INFO_TOKEN_SUFFIXES = ("_id", " id")
+
+
+def _refinement_reason(code: str) -> RefinementReason:
+    return RefinementReason(code=code, message=_REFINEMENT_REASON_MESSAGES[code])
+
+
+def _looks_like_site_info_token(tag: str) -> bool:
+    stripped = tag.strip()
+    lowered = stripped.lower()
+    return (
+        stripped.startswith("__")
+        or stripped.endswith("__")
+        or lowered.endswith(_SITE_INFO_TOKEN_SUFFIXES)
+    )
+
+
+def _normalize_refinement_tag(tag: str) -> str:
+    cleaned = TagCleaner.clean_format(tag)
+    if not cleaned:
+        return cleaned
+
+    parts: list[str] = []
+    position = 0
+    for match in _ANGLE_BRACKET_PATTERN.finditer(cleaned):
+        parts.append(cleaned[position : match.start()].lower())
+        parts.append(match.group(0))
+        position = match.end()
+    parts.append(cleaned[position:].lower())
+    return "".join(parts)
+
+
+def _refinement_score(reasons: list[RefinementReason], suggestions: list[RefinementSuggestion]) -> float:
+    codes = {reason.code for reason in reasons}
+    if not codes:
+        return 0.0
+    if "empty_normalized_tag" in codes:
+        return 1.0
+    if any(suggestion.kind == "correction_candidate" for suggestion in suggestions):
+        return 0.8
+    return 0.6
 
 
 def _compute_sha256(path: Path) -> str:
@@ -186,6 +256,48 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
 
 def register_tag(service: TagRegisterService, request: TagRegisterRequest) -> TagRegisterResult:
     return service.register_tag(request)
+
+
+def recommend_manual_refinement(tag: str) -> RefinementRecommendation:
+    """Recommend whether a tag needs manual refinement before registration.
+
+    This MVP is deterministic and DB independent. It only uses the existing tag
+    formatting normalization and does not resolve aliases, preferred tags, or
+    overlay state.
+    """
+    normalized_tag = _normalize_refinement_tag(tag)
+    source_candidate = tag.strip()
+    reasons: list[RefinementReason] = []
+    suggestions: list[RefinementSuggestion] = []
+
+    is_site_info_token = _looks_like_site_info_token(tag)
+    if not normalized_tag:
+        reasons.append(_refinement_reason("empty_normalized_tag"))
+        suggestions.append(RefinementSuggestion(kind="review_only"))
+    elif is_site_info_token:
+        reasons.append(_refinement_reason("site_info_token"))
+        suggestions.append(RefinementSuggestion(kind="review_only"))
+    else:
+        if normalized_tag != source_candidate:
+            reasons.append(_refinement_reason("normalization_changes_tag"))
+            suggestions.append(RefinementSuggestion(kind="correction_candidate", tag=normalized_tag))
+        if normalized_tag.lower() in _BROAD_SINGLE_WORD_TAGS and " " not in normalized_tag:
+            reasons.append(_refinement_reason("broad_single_word"))
+            suggestions.append(RefinementSuggestion(kind="review_only"))
+
+    return RefinementRecommendation(
+        source_tag=tag,
+        normalized_tag=normalized_tag,
+        needs_refinement=bool(reasons),
+        score=_refinement_score(reasons, suggestions),
+        reasons=reasons,
+        suggestions=suggestions,
+    )
+
+
+def needs_manual_refinement(tag: str) -> bool:
+    """Compatibility helper returning only the recommendation boolean."""
+    return recommend_manual_refinement(tag).needs_refinement
 
 
 def get_statistics(repo: MergedTagReader) -> TagStatisticsResult:
