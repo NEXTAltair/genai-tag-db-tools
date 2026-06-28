@@ -224,6 +224,7 @@ class TestLocalFeedbackRepositoryHelpers:
             session.commit()
 
         assert user_repo.get_or_create_type_id(1000, "general") == 1
+        assert user_repo.get_type_id(1000, "general") == 1
 
     def test_has_applied_feedback_allows_legacy_duplicate_applied_rows(
         self,

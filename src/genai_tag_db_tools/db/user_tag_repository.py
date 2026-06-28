@@ -299,7 +299,8 @@ class UserTagRepository:
                     TagTypeFormatMapping.format_id == format_id,
                     TagTypeName.type_name == type_name,
                 )
-                .one_or_none()
+                .order_by(TagTypeFormatMapping.type_id)
+                .first()
             )
             return int(row[0]) if row else None
 
