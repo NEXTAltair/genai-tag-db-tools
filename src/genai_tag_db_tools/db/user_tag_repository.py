@@ -38,7 +38,14 @@ class UserTagRepository:
 
         Returns:
             採番または既存の tag_id。
+
+        Raises:
+            ValueError: tag / source_tag が空の場合（空の tag row を作らない）。
         """
+        missing_fields = [name for name, value in (("tag", tag), ("source_tag", source_tag)) if not value]
+        if missing_fields:
+            raise ValueError(f"Missing required fields: {', '.join(missing_fields)}")
+
         with self._session_factory() as session:
             existing = session.query(UserTag).filter(UserTag.tag == tag).one_or_none()
             if existing is not None:

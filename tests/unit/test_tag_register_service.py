@@ -1,5 +1,6 @@
 import pytest
 
+from genai_tag_db_tools.db.schema import USER_TAG_ID_OFFSET
 from genai_tag_db_tools.models import TagRegisterRequest, TagTranslationInput
 from genai_tag_db_tools.services.tag_register import TagRegisterService
 
@@ -389,3 +390,281 @@ class TestTypeInconsistencyDetection:
         assert type_id == 0
         assert any("type_id/type_name mismatch" in msg for msg in caplog.messages)
         assert any("type_name='character' resolved to type_id=0" in msg for msg in caplog.messages)
+
+
+# ==============================================================================
+# Dummies for scope="user" registration (Issue #78 / #62)
+# ==============================================================================
+
+
+class DummyUserTagRepo:
+    """USER_TAGS / patch 書き込みを記録するスタブ。"""
+
+    def __init__(self) -> None:
+        self.created_tags: list[tuple[str, str]] = []
+        self.patches: list[dict] = []
+        self.translation_patches: list[dict] = []
+        self._tags: dict[str, int] = {}
+        self._next_id = USER_TAG_ID_OFFSET
+
+    def create_user_tag(self, source_tag: str, tag: str) -> int:
+        missing = [name for name, value in (("tag", tag), ("source_tag", source_tag)) if not value]
+        if missing:
+            raise ValueError(f"Missing required fields: {', '.join(missing)}")
+        if tag in self._tags:
+            return self._tags[tag]
+        tag_id = self._next_id
+        self._next_id += 1
+        self._tags[tag] = tag_id
+        self.created_tags.append((source_tag, tag))
+        return tag_id
+
+    def write_patch(self, **kwargs) -> None:
+        self.patches.append(kwargs)
+
+    def write_translation_patch(self, **kwargs) -> None:
+        self.translation_patches.append(kwargs)
+
+
+class DummyUserReader:
+    """user scope 登録用の reader スタブ。
+
+    name_to_id / id_to_scope を差し替えて preferred 解決と scope 判定を制御する。
+    """
+
+    def __init__(
+        self,
+        name_to_id: dict[str, int] | None = None,
+        id_to_scope: dict[int, str] | None = None,
+    ) -> None:
+        self.name_to_id = name_to_id or {}
+        self.id_to_scope = id_to_scope or {}
+
+    def get_format_id(self, format_name: str) -> int:
+        result = {"danbooru": 1}.get(format_name)
+        if result is None:
+            raise ValueError(f"Format not found: {format_name}")
+        return result
+
+    def get_type_id_for_format(self, type_name: str, format_id: int) -> int | None:
+        return {"character": 2, "general": 1}.get(type_name)
+
+    def get_tag_id_by_name(self, tag: str, partial: bool = False) -> int | None:
+        return self.name_to_id.get(tag)
+
+    def get_tag_scope(self, tag_id: int) -> str | None:
+        return self.id_to_scope.get(tag_id)
+
+
+def _make_user_service(reader: DummyUserReader) -> tuple[TagRegisterService, DummyUserTagRepo]:
+    base_repo = DummyRepo()
+    user_repo = DummyUserTagRepo()
+    service = TagRegisterService(repository=base_repo, reader=reader, user_tag_repo=user_repo)
+    return service, user_repo
+
+
+# ==============================================================================
+# Issue #62 / #78-4: 正規化後に空になるタグの拒否
+# ==============================================================================
+
+
+class TestRejectEmptyNormalizedTag:
+    """空文字・空白のみ・正規化後空のタグ登録を拒否する。"""
+
+    @pytest.mark.db_tools
+    @pytest.mark.parametrize("bad_tag", ["", "   ", "___"])
+    def test_base_scope_rejects_empty_normalized(self, bad_tag):
+        repo = DummyRepo()
+        reader = DummyReader(repo)
+        service = TagRegisterService(repository=repo, reader=reader)
+        request = TagRegisterRequest(
+            tag=bad_tag,
+            source_tag="weird_source",
+            format_name="danbooru",
+            type_name="general",
+        )
+
+        with pytest.raises(ValueError, match="正規化後のタグが空"):
+            service.register_tag(request)
+
+        # 空の tag row は作られない
+        assert repo.created_tags == []
+
+    @pytest.mark.db_tools
+    @pytest.mark.parametrize("bad_tag", ["", "   ", "___"])
+    def test_user_scope_rejects_empty_normalized(self, bad_tag):
+        reader = DummyUserReader()
+        service, user_repo = _make_user_service(reader)
+        request = TagRegisterRequest(
+            tag=bad_tag,
+            source_tag="weird_source",
+            format_name="danbooru",
+            type_name="general",
+            scope="user",
+        )
+
+        with pytest.raises(ValueError, match="正規化後のタグが空"):
+            service.register_tag(request)
+
+        assert user_repo.created_tags == []
+        assert user_repo.patches == []
+
+    @pytest.mark.db_tools
+    def test_normalizable_tag_is_accepted(self):
+        """blue__eyes は blue eyes に正規化できるため登録可能。"""
+        reader = DummyUserReader()
+        service, user_repo = _make_user_service(reader)
+        request = TagRegisterRequest(
+            tag="blue__eyes",
+            source_tag="blue__eyes",
+            format_name="danbooru",
+            type_name="general",
+            scope="user",
+        )
+
+        result = service.register_tag(request)
+
+        assert result.created is True
+        assert user_repo.created_tags == [("blue__eyes", "blue__eyes")]
+
+
+# ==============================================================================
+# Issue #78-1: alias preferred 解決失敗時に user タグを作らない
+# ==============================================================================
+
+
+class TestUserAliasPreValidation:
+    @pytest.mark.db_tools
+    def test_missing_preferred_does_not_create_user_tag(self):
+        # preferred は解決できない (name_to_id 空)
+        reader = DummyUserReader()
+        service, user_repo = _make_user_service(reader)
+        request = TagRegisterRequest(
+            tag="alias_tag",
+            source_tag="alias_tag",
+            format_name="danbooru",
+            type_name="general",
+            alias=True,
+            preferred_tag="does_not_exist",
+            scope="user",
+        )
+
+        with pytest.raises(ValueError, match="推奨タグが見つかりません"):
+            service.register_tag(request)
+
+        # USER_TAGS 行も status patch も残らない (中途半端な状態を作らない)
+        assert user_repo.created_tags == []
+        assert user_repo.patches == []
+
+
+# ==============================================================================
+# Issue #78-3: preferred_scope を reader 経由で判定 (数値 offset 非依存)
+# ==============================================================================
+
+
+class TestPreferredScopeResolution:
+    @pytest.mark.db_tools
+    def test_low_id_user_tag_resolves_to_user_scope(self):
+        """offset 未満の ID でも reader が user と返せば preferred_scope=user。"""
+        # 旧 TAGS パスで登録された user DB タグ (offset 未満の ID) を模す
+        legacy_user_id = 500
+        reader = DummyUserReader(
+            name_to_id={"legacy_preferred": legacy_user_id},
+            id_to_scope={legacy_user_id: "user"},
+        )
+        service, user_repo = _make_user_service(reader)
+        request = TagRegisterRequest(
+            tag="alias_tag",
+            source_tag="alias_tag",
+            format_name="danbooru",
+            type_name="general",
+            alias=True,
+            preferred_tag="legacy_preferred",
+            scope="user",
+        )
+
+        result = service.register_tag(request)
+
+        assert result.created is True
+        assert len(user_repo.patches) == 1
+        patch = user_repo.patches[0]
+        # 数値 offset なら "base" になるが reader 判定で "user" になる
+        assert patch["preferred_scope"] == "user"
+        assert patch["preferred_tag_id"] == legacy_user_id
+
+    @pytest.mark.db_tools
+    def test_base_preferred_resolves_to_base_scope(self):
+        base_id = 100
+        reader = DummyUserReader(
+            name_to_id={"base_preferred": base_id},
+            id_to_scope={base_id: "base"},
+        )
+        service, user_repo = _make_user_service(reader)
+        request = TagRegisterRequest(
+            tag="alias_tag",
+            source_tag="alias_tag",
+            format_name="danbooru",
+            type_name="general",
+            alias=True,
+            preferred_tag="base_preferred",
+            scope="user",
+        )
+
+        service.register_tag(request)
+
+        assert user_repo.patches[0]["preferred_scope"] == "base"
+
+    @pytest.mark.db_tools
+    def test_scope_falls_back_to_numeric_offset_when_reader_silent(self):
+        """reader が scope を返せない場合は数値 offset にフォールバックする。"""
+        high_id = USER_TAG_ID_OFFSET + 5
+        reader = DummyUserReader(
+            name_to_id={"pref": high_id},
+            id_to_scope={},  # get_tag_scope -> None
+        )
+        service, user_repo = _make_user_service(reader)
+        request = TagRegisterRequest(
+            tag="alias_tag",
+            source_tag="alias_tag",
+            format_name="danbooru",
+            type_name="general",
+            alias=True,
+            preferred_tag="pref",
+            scope="user",
+        )
+
+        service.register_tag(request)
+
+        assert user_repo.patches[0]["preferred_scope"] == "user"
+
+
+# ==============================================================================
+# Issue #78-2: user scope で translations が保存される
+# ==============================================================================
+
+
+class TestUserScopeTranslations:
+    @pytest.mark.db_tools
+    def test_translations_saved_as_patches(self):
+        reader = DummyUserReader()
+        service, user_repo = _make_user_service(reader)
+        request = TagRegisterRequest(
+            tag="foo",
+            source_tag="foo",
+            format_name="danbooru",
+            type_name="general",
+            scope="user",
+            translations=[
+                TagTranslationInput(language="ja", translation="フー"),
+                TagTranslationInput(language="en", translation="foo-en"),
+            ],
+        )
+
+        result = service.register_tag(request)
+
+        assert result.created is True
+        langs = {(p["language"], p["translation"]) for p in user_repo.translation_patches}
+        assert langs == {("ja", "フー"), ("en", "foo-en")}
+        for patch in user_repo.translation_patches:
+            assert patch["target_scope"] == "user"
+            assert patch["target_tag_id"] == result.tag_id

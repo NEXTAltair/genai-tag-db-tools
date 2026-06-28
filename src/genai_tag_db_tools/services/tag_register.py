@@ -214,6 +214,45 @@ class TagRegisterService:
         )
         return resolved_type_id
 
+    @staticmethod
+    def _validate_normalized_tag(tag: str) -> None:
+        """正規化後の TAGS.tag が空になる入力を登録前に拒否する (Issue #62)。
+
+        source_tag は由来の値として奇妙な token を保持してよいが、正規化後の
+        TAGS.tag が空文字になる登録はデータとして不正なので InputError 扱いにする。
+        空文字・空白のみ・正規化後に空 (例: "___") のいずれもここで弾く。
+
+        Args:
+            tag: 登録対象の正規タグ（正規化前）。
+
+        Raises:
+            ValueError: 正規化後の tag が空文字になる場合。
+        """
+        normalized = TagCleaner.clean_format(tag or "")
+        if not normalized.strip():
+            raise ValueError(f"正規化後のタグが空です。空文字・空白のみのタグは登録できません: {tag!r}")
+
+    def _resolve_preferred_scope(self, preferred_tag_id: int) -> str:
+        """preferred タグがどの DB (scope) に属するかを判定する (Issue #78-3)。
+
+        `preferred_tag_id < USER_TAG_ID_OFFSET` という数値判定は、旧 TAGS パスで
+        登録された user DB タグが offset 未満の ID を持ちうるため脆い。可能なら
+        reader (MergedTagReader) に実際の所属 DB を問い合わせ、取得できない場合のみ
+        数値 offset のヒューリスティックにフォールバックする。
+
+        Args:
+            preferred_tag_id: 解決済みの preferred タグID。
+
+        Returns:
+            "base" または "user"。
+        """
+        get_tag_scope = getattr(self._reader, "get_tag_scope", None)
+        if callable(get_tag_scope):
+            scope = get_tag_scope(preferred_tag_id)
+            if scope in ("base", "user"):
+                return scope
+        return "user" if preferred_tag_id >= USER_TAG_ID_OFFSET else "base"
+
     def register_tag(self, request: "TagRegisterRequest") -> "TagRegisterResult":
         """Register a tag and optional metadata via the repository.
 
@@ -225,7 +264,12 @@ class TagRegisterService:
             request: Tag registration request.
         Returns:
             TagRegisterResult indicating whether the tag was created.
+
+        Raises:
+            ValueError: 正規化後の tag が空になる場合（空文字・空白のみ・正規化後空）。
         """
+        self._validate_normalized_tag(request.tag)
+
         if request.scope == "user":
             return self._register_user_tag(request)
 
@@ -286,6 +330,8 @@ class TagRegisterService:
         if self._user_tag_repo is None:
             raise RuntimeError("User DB が未初期化です。init_user_db() を先に呼んでください。")
 
+        self._validate_normalized_tag(request.tag)
+
         tag = request.tag
         source_tag = request.source_tag or request.tag
 
@@ -293,17 +339,27 @@ class TagRegisterService:
         type_name = request.type_name or "unknown"
         type_id = self._resolve_type_id(type_name, request.format_name, fmt_id)
 
+        # alias の preferred は USER_TAGS への書き込み前に解決する。
+        # 先にタグを作ってしまうと、preferred 解決失敗時に USER_TAGS 行だけ残り
+        # ステータスパッチの無い中途半端な状態になる (Issue #78-1)。
+        resolved_preferred_id: int | None = None
+        resolved_preferred_scope = "user"
+        if request.alias:
+            if not request.preferred_tag:
+                raise ValueError("alias=True の場合 preferred_tag が必須です")
+            resolved_preferred_id = self._reader.get_tag_id_by_name(request.preferred_tag, partial=False)
+            if resolved_preferred_id is None:
+                raise ValueError(f"推奨タグが見つかりません: {request.preferred_tag}")
+            resolved_preferred_scope = self._resolve_preferred_scope(resolved_preferred_id)
+
         existing_id = self._reader.get_tag_id_by_name(tag, partial=False)
         tag_id = self._user_tag_repo.create_user_tag(source_tag, tag)
         created = existing_id is None
 
         if request.alias:
-            if not request.preferred_tag:
-                raise ValueError("alias=True の場合 preferred_tag が必須です")
-            preferred_tag_id = self._reader.get_tag_id_by_name(request.preferred_tag, partial=False)
-            if preferred_tag_id is None:
-                raise ValueError(f"推奨タグが見つかりません: {request.preferred_tag}")
-            preferred_scope = "base" if preferred_tag_id < USER_TAG_ID_OFFSET else "user"
+            assert resolved_preferred_id is not None
+            preferred_tag_id = resolved_preferred_id
+            preferred_scope = resolved_preferred_scope
         else:
             preferred_tag_id = tag_id
             preferred_scope = "user"

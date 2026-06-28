@@ -82,6 +82,16 @@ class TestCreateUserTag:
         id2 = user_repo.create_user_tag("s2", "tag_b")
         assert id2 > id1
 
+    def test_empty_tag_rejected(self, user_repo):
+        """空の tag は拒否され、行は作られない (Issue #78-4)。"""
+        with pytest.raises(ValueError, match="tag"):
+            user_repo.create_user_tag("src", "")
+
+    def test_empty_source_tag_rejected(self, user_repo):
+        """空の source_tag は拒否される (Issue #78-4)。"""
+        with pytest.raises(ValueError, match="source_tag"):
+            user_repo.create_user_tag("", "tag")
+
 
 # --- TestWritePatch ---
 
