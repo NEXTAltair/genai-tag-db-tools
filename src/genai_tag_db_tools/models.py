@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal, TypedDict
 
 from pydantic import BaseModel, Field, model_validator
@@ -409,6 +410,54 @@ class RefinementRecommendation(BaseModel):
     proposals: list[DbFeedbackProposal] = Field(
         default_factory=list,
         description="Future DB feedback proposals derived from the recommendation",
+    )
+
+
+class ApprovedDbFeedback(BaseModel):
+    """人間承認済みの DB feedback proposal。"""
+
+    proposal: DbFeedbackProposal = Field(..., description="Approved proposal")
+    approved: bool = Field(..., description="Whether this proposal was approved by a human")
+    approved_by: str = Field(..., description="Human approver identifier")
+    approved_at: datetime = Field(..., description="Approval timestamp")
+    approval_note: str | None = Field(default=None, description="Optional approval note")
+
+
+class LocalFeedbackApplicationRecord(BaseModel):
+    """user-local feedback apply の audit record。"""
+
+    application_id: int
+    proposal_hash: str
+    proposal_kind: str
+    target_kind: str
+    target_scope: Literal["base", "user"] | None = None
+    target_tag_id: int | None = None
+    format_name: str | None = None
+    field: str | None = None
+    approved_by: str
+    approved_at: datetime
+    applied_at: datetime | None = None
+    status: Literal["applied", "dry_run", "skipped", "failed"]
+    dry_run: bool
+    proposal_json: str
+    before_json: str | None = None
+    after_json: str | None = None
+    error_message: str | None = None
+
+
+class LocalFeedbackApplyResult(BaseModel):
+    """user-local feedback apply の結果。"""
+
+    ok: bool = Field(..., description="Whether the operation completed without validation/apply error")
+    status: Literal["applied", "dry_run", "skipped", "failed"] = Field(..., description="Apply status")
+    dry_run: bool = Field(..., description="Whether this was a dry run")
+    proposal_hash: str = Field(..., description="Stable hash of the proposal payload")
+    proposal_kind: str = Field(..., description="Proposal kind")
+    message: str = Field(..., description="Human-readable result message")
+    changes: list[dict[str, ProposalValue]] = Field(default_factory=list, description="Planned or applied changes")
+    application: LocalFeedbackApplicationRecord | None = Field(
+        default=None,
+        description="Audit record for applied/dry-run/skipped proposals",
     )
 
 
