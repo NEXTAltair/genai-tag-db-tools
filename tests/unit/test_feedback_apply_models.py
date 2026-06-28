@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import create_engine, inspect
+from sqlalchemy.exc import IntegrityError
 
-from genai_tag_db_tools.db.schema import UserOverlayBase
+from genai_tag_db_tools.db.schema import LocalFeedbackApplication, UserOverlayBase
 from genai_tag_db_tools.models import (
     ApprovedDbFeedback,
     DbFeedbackProposal,
@@ -48,6 +51,18 @@ def test_approved_db_feedback_roundtrip():
     assert restored.approved_at == approved_at
 
 
+def test_approved_db_feedback_requires_approved_true():
+    approved_at = datetime(2026, 6, 28, 12, 0, tzinfo=UTC)
+
+    with pytest.raises(ValidationError):
+        ApprovedDbFeedback(
+            proposal=_proposal(),
+            approved=False,
+            approved_by="tester",
+            approved_at=approved_at,
+        )
+
+
 def test_local_feedback_application_record_and_result_roundtrip():
     approved_at = datetime(2026, 6, 28, 12, 0, tzinfo=UTC)
     record = LocalFeedbackApplicationRecord(
@@ -85,6 +100,29 @@ def test_local_feedback_application_record_and_result_roundtrip():
     assert restored.application.target_scope == "base"
 
 
+@pytest.mark.parametrize(
+    ("ok", "status"),
+    [
+        (True, "failed"),
+        (False, "applied"),
+        (False, "dry_run"),
+        (False, "skipped"),
+    ],
+)
+def test_local_feedback_apply_result_rejects_contradictory_ok_status(ok: bool, status: str):
+    with pytest.raises(ValidationError):
+        LocalFeedbackApplyResult(
+            ok=ok,
+            status=status,
+            dry_run=status == "dry_run",
+            proposal_hash="abc123",
+            proposal_kind="translation_correction",
+            message="feedback apply result",
+            changes=[],
+            application=None,
+        )
+
+
 def test_local_feedback_application_table_is_user_overlay_schema_only():
     engine = create_engine("sqlite:///:memory:")
     UserOverlayBase.metadata.create_all(engine)
@@ -92,3 +130,48 @@ def test_local_feedback_application_table_is_user_overlay_schema_only():
     table_names = set(inspect(engine).get_table_names())
 
     assert "LOCAL_FEEDBACK_APPLICATIONS" in table_names
+
+
+def test_local_feedback_application_prevents_duplicate_applied_hashes():
+    engine = create_engine("sqlite:///:memory:")
+    UserOverlayBase.metadata.create_all(engine)
+    approved_at = datetime(2026, 6, 28, 12, 0, tzinfo=UTC)
+
+    def application_values(*, proposal_hash: str, status: str, dry_run: bool) -> dict[str, object]:
+        return {
+            "proposal_hash": proposal_hash,
+            "proposal_kind": "translation_correction",
+            "target_kind": "translation",
+            "target_scope": "base",
+            "target_tag_id": 10,
+            "format_name": None,
+            "field": "translation.ja",
+            "approved_by": "tester",
+            "approved_at": approved_at,
+            "status": status,
+            "dry_run": dry_run,
+            "proposal_json": "{}",
+            "before_json": None,
+            "after_json": '{"changes":[]}',
+            "error_message": None,
+        }
+
+    with engine.begin() as conn:
+        conn.execute(
+            LocalFeedbackApplication.__table__.insert(),
+            application_values(proposal_hash="dry-run-can-repeat", status="dry_run", dry_run=True),
+        )
+        conn.execute(
+            LocalFeedbackApplication.__table__.insert(),
+            application_values(proposal_hash="dry-run-can-repeat", status="applied", dry_run=False),
+        )
+        conn.execute(
+            LocalFeedbackApplication.__table__.insert(),
+            application_values(proposal_hash="duplicate-applied", status="applied", dry_run=False),
+        )
+
+        with pytest.raises(IntegrityError):
+            conn.execute(
+                LocalFeedbackApplication.__table__.insert(),
+                application_values(proposal_hash="duplicate-applied", status="applied", dry_run=False),
+            )

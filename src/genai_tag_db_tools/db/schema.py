@@ -12,6 +12,7 @@ from sqlalchemy import (
     Index,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -322,6 +323,12 @@ class LocalFeedbackApplication(UserOverlayBase):
     error_message: Mapped[str | None] = mapped_column(nullable=True)
 
     __table_args__ = (
+        Index(
+            "uix_local_feedback_applied_hash",
+            "proposal_hash",
+            unique=True,
+            sqlite_where=text("status IN ('applied', 'skipped')"),
+        ),
         Index("ix_local_feedback_hash", "proposal_hash"),
         Index("ix_local_feedback_target", "target_scope", "target_tag_id"),
     )

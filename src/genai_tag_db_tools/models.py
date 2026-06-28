@@ -422,6 +422,12 @@ class ApprovedDbFeedback(BaseModel):
     approved_at: datetime = Field(..., description="Approval timestamp")
     approval_note: str | None = Field(default=None, description="Optional approval note")
 
+    @model_validator(mode="after")
+    def _validate_approved(self) -> ApprovedDbFeedback:
+        if not self.approved:
+            raise ValueError("approved feedback must have approved=true")
+        return self
+
 
 class LocalFeedbackApplicationRecord(BaseModel):
     """user-local feedback apply の audit record。"""
@@ -459,6 +465,12 @@ class LocalFeedbackApplyResult(BaseModel):
         default=None,
         description="Audit record for applied/dry-run/skipped proposals",
     )
+
+    @model_validator(mode="after")
+    def _validate_ok_status(self) -> LocalFeedbackApplyResult:
+        if self.ok != (self.status != "failed"):
+            raise ValueError("ok must be true unless status is failed")
+        return self
 
 
 class ConvertTagsRequest(BaseModel):
