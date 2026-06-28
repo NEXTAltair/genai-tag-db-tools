@@ -434,8 +434,26 @@ class LocalFeedbackApplicationRecord(BaseModel):
 
     application_id: int
     proposal_hash: str
-    proposal_kind: str
-    target_kind: str
+    proposal_kind: Literal[
+        "tag_name_correction",
+        "alias_addition",
+        "preferred_tag_correction",
+        "translation_correction",
+        "usage_correction",
+        "type_correction",
+        "status_correction",
+        "format_relation_review",
+    ]
+    target_kind: Literal[
+        "tag_name",
+        "alias",
+        "preferred_tag",
+        "tag_type",
+        "tag_status",
+        "translation",
+        "usage",
+        "format_relation",
+    ]
     target_scope: Literal["base", "user"] | None = None
     target_tag_id: int | None = None
     format_name: str | None = None
@@ -466,7 +484,16 @@ class LocalFeedbackApplyResult(BaseModel):
     status: Literal["applied", "dry_run", "skipped", "failed"] = Field(..., description="Apply status")
     dry_run: bool = Field(..., description="Whether this was a dry run")
     proposal_hash: str = Field(..., description="Stable hash of the proposal payload")
-    proposal_kind: str = Field(..., description="Proposal kind")
+    proposal_kind: Literal[
+        "tag_name_correction",
+        "alias_addition",
+        "preferred_tag_correction",
+        "translation_correction",
+        "usage_correction",
+        "type_correction",
+        "status_correction",
+        "format_relation_review",
+    ] = Field(..., description="Proposal kind")
     message: str = Field(..., description="Human-readable result message")
     changes: list[dict[str, ProposalValue]] = Field(default_factory=list, description="Planned or applied changes")
     application: LocalFeedbackApplicationRecord | None = Field(

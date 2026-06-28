@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.exc import IntegrityError
 
 from genai_tag_db_tools.db.schema import LocalFeedbackApplication, UserOverlayBase
@@ -38,20 +38,22 @@ def _application_values(
     *,
     proposal_hash: str = "abc123",
     proposal_kind: str = "translation_correction",
+    target_kind: str = "translation",
     target_scope: str | None = "base",
     status: str = "applied",
     dry_run: bool = False,
+    approved_at: datetime | None = None,
 ) -> dict[str, object]:
     return {
         "proposal_hash": proposal_hash,
         "proposal_kind": proposal_kind,
-        "target_kind": "translation",
+        "target_kind": target_kind,
         "target_scope": target_scope,
         "target_tag_id": 10,
         "format_name": None,
         "field": "translation.ja",
         "approved_by": "tester",
-        "approved_at": datetime(2026, 6, 28, 12, 0, tzinfo=UTC),
+        "approved_at": approved_at or datetime(2026, 6, 28, 12, 0, tzinfo=UTC),
         "status": status,
         "dry_run": dry_run,
         "proposal_json": "{}",
@@ -139,6 +141,21 @@ def test_local_feedback_application_record_rejects_contradictory_dry_run_status(
         LocalFeedbackApplicationRecord(
             application_id=1,
             **_application_values(status=status, dry_run=dry_run),
+        )
+
+
+@pytest.mark.parametrize(
+    "application_update",
+    [
+        {"proposal_kind": "typo_kind"},
+        {"target_kind": "typo_target"},
+    ],
+)
+def test_local_feedback_application_record_rejects_unknown_kinds(application_update: dict[str, object]):
+    with pytest.raises(ValidationError):
+        LocalFeedbackApplicationRecord(
+            application_id=1,
+            **(_application_values() | application_update),
         )
 
 
@@ -248,6 +265,21 @@ def test_local_feedback_application_prevents_duplicate_applied_hashes():
             )
 
 
+def test_local_feedback_application_allows_apply_after_dry_run_skip():
+    engine = create_engine("sqlite:///:memory:")
+    UserOverlayBase.metadata.create_all(engine)
+
+    with engine.begin() as conn:
+        conn.execute(
+            LocalFeedbackApplication.__table__.insert(),
+            _application_values(proposal_hash="dry-run-skip", status="skipped", dry_run=True),
+        )
+        conn.execute(
+            LocalFeedbackApplication.__table__.insert(),
+            _application_values(proposal_hash="dry-run-skip", status="applied", dry_run=False),
+        )
+
+
 def test_local_feedback_application_rejects_unknown_status():
     engine = create_engine("sqlite:///:memory:")
     UserOverlayBase.metadata.create_all(engine)
@@ -257,6 +289,25 @@ def test_local_feedback_application_rejects_unknown_status():
             conn.execute(
                 LocalFeedbackApplication.__table__.insert(),
                 _application_values(status="applyed"),
+            )
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"proposal_kind": "typo_kind"},
+        {"target_kind": "typo_target"},
+    ],
+)
+def test_local_feedback_application_rejects_unknown_kinds(values: dict[str, object]):
+    engine = create_engine("sqlite:///:memory:")
+    UserOverlayBase.metadata.create_all(engine)
+
+    with engine.begin() as conn:
+        with pytest.raises(IntegrityError):
+            conn.execute(
+                LocalFeedbackApplication.__table__.insert(),
+                _application_values(**values),
             )
 
 
@@ -289,3 +340,19 @@ def test_local_feedback_application_rejects_unknown_target_scope():
                 LocalFeedbackApplication.__table__.insert(),
                 _application_values(target_scope="usr"),
             )
+
+
+def test_local_feedback_application_normalizes_approved_at_to_utc():
+    engine = create_engine("sqlite:///:memory:")
+    UserOverlayBase.metadata.create_all(engine)
+    jst = timezone(timedelta(hours=9))
+    approved_at = datetime(2026, 6, 28, 21, 0, tzinfo=jst)
+
+    with engine.begin() as conn:
+        conn.execute(
+            LocalFeedbackApplication.__table__.insert(),
+            _application_values(approved_at=approved_at),
+        )
+        restored = conn.execute(select(LocalFeedbackApplication.__table__.c.approved_at)).scalar_one()
+
+    assert restored == datetime(2026, 6, 28, 12, 0, tzinfo=UTC)
