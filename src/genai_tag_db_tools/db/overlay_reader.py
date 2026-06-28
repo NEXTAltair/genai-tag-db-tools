@@ -233,7 +233,6 @@ class OverlayTagReader:
             rows = (
                 session.query(UserTagTranslationPatch)
                 .filter(
-                    UserTagTranslationPatch.target_scope == "user",
                     UserTagTranslationPatch.target_tag_id == tag_id,
                 )
                 .all()
@@ -259,7 +258,6 @@ class OverlayTagReader:
             rows = (
                 session.query(UserTagTranslationPatch)
                 .filter(
-                    UserTagTranslationPatch.target_scope == "user",
                     UserTagTranslationPatch.target_tag_id.in_(tag_ids),
                 )
                 .all()
@@ -389,7 +387,6 @@ class OverlayTagReader:
             row = (
                 session.query(UserTagUsagePatch)
                 .filter(
-                    UserTagUsagePatch.target_scope == "user",
                     UserTagUsagePatch.target_tag_id == tag_id,
                     UserTagUsagePatch.format_id == format_id,
                 )
@@ -402,9 +399,7 @@ class OverlayTagReader:
     ) -> list[TagUsageCounts]:
         """USER_TAG_USAGE_PATCH を TagUsageCounts オブジェクトに変換して返す。"""
         with self.session_factory() as session:
-            query = session.query(UserTagUsagePatch).filter(
-                UserTagUsagePatch.target_scope == "user"
-            )
+            query = session.query(UserTagUsagePatch)
             if tag_id is not None:
                 query = query.filter(UserTagUsagePatch.target_tag_id == tag_id)
             if format_id is not None:
