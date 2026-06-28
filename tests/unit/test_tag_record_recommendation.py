@@ -108,6 +108,24 @@ def test_training_unsuitable_external_id_uses_status_correction_proposal():
     assert proposal.reason_codes == ["training_unsuitable"]
 
 
+def test_source_tag_is_checked_for_training_unsuitable_tokens():
+    row = {
+        "tag_id": 14,
+        "source_tag": "__commentary_request",
+        "tag": "commentary request",
+        "deprecated": False,
+        "type_id": 1,
+        "type_name": "general",
+        "format_statuses": {},
+    }
+
+    recommendation = recommend_tag_record_refinement(row, format_name="unknown")
+
+    assert "site_info_token" in [reason.code for reason in recommendation.reasons]
+    assert "training_unsuitable" in [reason.code for reason in recommendation.reasons]
+    assert recommendation.proposals[0].kind == "status_correction"
+
+
 def test_type_correction_candidate_is_only_emitted_when_format_has_meta_type():
     row = {
         "tag_id": 13,

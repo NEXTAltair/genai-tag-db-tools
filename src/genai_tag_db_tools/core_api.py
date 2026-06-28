@@ -376,6 +376,14 @@ def _resolve_recommendation_format_id(repo: MergedTagReader, format_name: str) -
     return format_id or None
 
 
+def _effective_recommendation_format_name(repo: MergedTagReader, format_name: str) -> str:
+    if format_name != "unknown":
+        return format_name
+    if _resolve_recommendation_format_id(repo, "danbooru") is not None:
+        return "danbooru"
+    return format_name
+
+
 def _search_exact_recommendation_rows(
     repo: MergedTagReader,
     tag: str,
@@ -585,11 +593,12 @@ def _recommend_from_db(
     normalized_tag: str,
     format_name: str,
 ) -> RefinementRecommendation | None:
-    format_id = _resolve_recommendation_format_id(repo, format_name)
+    effective_format_name = _effective_recommendation_format_name(repo, format_name)
+    format_id = _resolve_recommendation_format_id(repo, effective_format_name)
     exact_rows = _search_exact_recommendation_rows(
         repo,
         normalized_tag,
-        format_name=format_name,
+        format_name=effective_format_name,
         format_id=format_id,
     )
     raw_exact_rows = exact_rows
@@ -727,7 +736,7 @@ def _recommend_from_db(
                     normalized_tag=normalized_tag,
                     preferred_tag_id=tag_id,
                     preferred_tag=candidate_tag,
-                    format_name=format_name,
+                    format_name=effective_format_name,
                     reason_code="typo_alias_candidate",
                     confidence=0.7,
                 )
@@ -1104,7 +1113,8 @@ def recommend_tag_record_refinement(
     rather than ``None`` so proposals can still target USER_TAG_STATUS_PATCH shape.
     """
     data = _row_mapping(row)
-    tag = str(data.get("tag") or data.get("source_tag") or "")
+    source_tag_value = str(data.get("source_tag") or "")
+    tag = str(data.get("tag") or source_tag_value)
     target_tag_id = int(data["tag_id"])
     resolved_scope = _infer_target_scope(target_tag_id, target_scope)
     resolved_format_name = format_name or data.get("format_name") or "unknown"
@@ -1165,8 +1175,14 @@ def recommend_tag_record_refinement(
         add_reason("unknown_type")
         suggestions.append(RefinementSuggestion(kind="review_only"))
 
-    site_info = _looks_like_site_info_token(tag) or _looks_like_management_token(tag)
-    external_id = _looks_like_external_id_tag(tag)
+    token_values = [tag]
+    if source_tag_value and source_tag_value != tag:
+        token_values.append(source_tag_value)
+    site_info = any(
+        _looks_like_site_info_token(value) or _looks_like_management_token(value)
+        for value in token_values
+    )
+    external_id = any(_looks_like_external_id_tag(value) for value in token_values)
     training_unsuitable = site_info or external_id
     if site_info:
         add_reason("site_info_token")

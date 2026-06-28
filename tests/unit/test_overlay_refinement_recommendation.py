@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import StaticPool, create_engine
@@ -25,7 +26,8 @@ from genai_tag_db_tools.db.schema import (
 
 _FORMAT_ID = 1000
 _OTHER_FORMAT_ID = 2000
-_USER_FORMAT_ID = 3000
+_USER_SHADOW_FORMAT_ID = 3000
+_USER_FORMAT_ID = 3001
 _BLUE_EYES_ID = 10
 _BLU_EYES_ID = 11
 _WEDDING_DRESS_ID = 20
@@ -142,7 +144,7 @@ def populated_base(base_session_factory):
 @pytest.fixture
 def populated_user(user_session_factory):
     with user_session_factory() as session:
-        _add_format(session, _FORMAT_ID, "test_format")
+        _add_format(session, _USER_SHADOW_FORMAT_ID, "test_format")
         _add_format(session, _OTHER_FORMAT_ID, "other_format")
         _add_format(session, _USER_FORMAT_ID, "user_format")
         session.add_all(
@@ -212,6 +214,46 @@ def _codes(recommendation) -> list[str]:
     return [reason.code for reason in recommendation.reasons]
 
 
+class _RepoWithDanbooruOverlayStatus:
+    def get_format_id(self, format_name: str) -> int:
+        if format_name == "danbooru":
+            return 1
+        raise ValueError(format_name)
+
+    def search_tags(self, keyword: str, **kwargs):
+        assert kwargs["format_name"] == "danbooru"
+        return [
+            {
+                "tag_id": _OLD_TAG_ID,
+                "source_tag": "old_tag",
+                "tag": "old tag",
+                "deprecated": False,
+                "alias": False,
+                "preferred_tag_id": _OLD_TAG_ID,
+                "format_statuses": {},
+            }
+        ] if keyword == "old tag" else []
+
+    def get_tag_status(self, tag_id: int, format_id: int):
+        return SimpleNamespace(
+            tag_id=tag_id,
+            format_id=format_id,
+            type_id=0,
+            alias=False,
+            preferred_tag_id=tag_id,
+            deprecated=True,
+        )
+
+    def get_tag_by_id(self, tag_id: int):
+        return None
+
+    def list_tags(self):
+        return []
+
+    def list_tag_statuses(self):
+        return []
+
+
 def test_exact_normal_tag_suppresses_extra_warning(merged_reader):
     recommendation = recommend_manual_refinement(
         "blue eyes",
@@ -222,6 +264,18 @@ def test_exact_normal_tag_suppresses_extra_warning(merged_reader):
     assert recommendation.needs_refinement is False
     assert recommendation.reasons == []
     assert recommendation.suggestions == []
+
+
+def test_base_format_wins_when_user_db_has_same_format_name(merged_reader):
+    assert merged_reader.get_format_id("test_format") == _FORMAT_ID
+
+    recommendation = recommend_manual_refinement(
+        "blue eyes",
+        merged_reader,
+        format_name="test_format",
+    )
+
+    assert recommendation.needs_refinement is False
 
 
 def test_base_alias_recommends_preferred_tag(merged_reader):
@@ -244,6 +298,17 @@ def test_unknown_format_exact_alias_still_recommends_preferred_tag(merged_reader
     assert [(s.kind, s.tag) for s in recommendation.suggestions] == [
         ("correction_candidate", "blue eyes")
     ]
+
+
+def test_unknown_format_uses_danbooru_as_default_status_format():
+    recommendation = recommend_manual_refinement(
+        "old tag",
+        _RepoWithDanbooruOverlayStatus(),
+        format_name="unknown",
+    )
+
+    assert _codes(recommendation) == ["deprecated_tag"]
+    assert recommendation.suggestions[0].kind == "review_only"
 
 
 def test_exact_tag_without_requested_format_status_needs_review(merged_reader):
