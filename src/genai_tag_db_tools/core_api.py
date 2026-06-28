@@ -8,8 +8,9 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Literal
 
+from genai_tag_db_tools.api import TagReaderProtocol as MergedTagReader
+from genai_tag_db_tools.api import TagRegisterServiceProtocol as TagRegisterService
 from genai_tag_db_tools.db import runtime
-from genai_tag_db_tools.db.repository import MergedTagReader
 from genai_tag_db_tools.db.schema import USER_TAG_ID_OFFSET
 from genai_tag_db_tools.io import hf_downloader
 from genai_tag_db_tools.models import (
@@ -31,7 +32,6 @@ from genai_tag_db_tools.models import (
     TagSearchRow,
     TagStatisticsResult,
 )
-from genai_tag_db_tools.services.tag_register import TagRegisterService
 from genai_tag_db_tools.utils.cleanup_str import TagCleaner
 
 _REFINEMENT_REASON_MESSAGES = {
