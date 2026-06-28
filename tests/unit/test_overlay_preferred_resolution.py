@@ -2,6 +2,7 @@
 
 user alias → base preferred の cross-scope 解決が機能することを検証する。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -212,6 +213,24 @@ class TestCrossScopePreferredResolution:
         assert rows[0]["tag"] == "preferred tag"
         assert rows[0]["tag_id"] == _USER_TAG_ID_PREFERRED
         assert rows[0]["alias"] is False
+
+
+# ------------------------------------------------------------------
+# Tests: get_tag_scope (Issue #78-3)
+# ------------------------------------------------------------------
+
+
+class TestGetTagScope:
+    """tag_id の所属 DB を数値 offset 非依存で判定する。"""
+
+    def test_base_tag_returns_base(self, merged_reader_cross_scope):
+        assert merged_reader_cross_scope.get_tag_scope(_BASE_TAG_ID_BLUE_EYES) == "base"
+
+    def test_user_tag_returns_user(self, merged_reader_cross_scope):
+        assert merged_reader_cross_scope.get_tag_scope(_USER_TAG_ID_BLU_EYES) == "user"
+
+    def test_unknown_tag_returns_none(self, merged_reader_cross_scope):
+        assert merged_reader_cross_scope.get_tag_scope(999_999) is None
 
 
 # ------------------------------------------------------------------

@@ -1624,6 +1624,28 @@ class MergedTagReader:
     def get_tag_by_id(self, tag_id: int) -> Tag | None:
         return self._first_found("get_tag_by_id", tag_id)
 
+    def get_tag_scope(self, tag_id: int) -> str | None:
+        """tag_id がどの DB (scope) に属するかを判定する。
+
+        数値 offset (USER_TAG_ID_OFFSET) に依存せず、実際にどのリポジトリが
+        その tag_id を保持しているかで scope を決める。user_repo を優先し、
+        見つかれば "user"、base repos にあれば "base"、どこにも無ければ None。
+
+        Args:
+            tag_id: 判定対象のタグID。
+
+        Returns:
+            "user" / "base" / None。
+        """
+        if self._has_user():
+            assert self.user_repo is not None
+            if self.user_repo.get_tag_by_id(tag_id) is not None:
+                return "user"
+        for repo in self._iter_base_repos():
+            if repo.get_tag_by_id(tag_id) is not None:
+                return "base"
+        return None
+
     def get_tag_status(self, tag_id: int, format_id: int) -> TagStatus | None:
         return self._first_found("get_tag_status", tag_id, format_id)
 
