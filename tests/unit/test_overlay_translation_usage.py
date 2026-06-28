@@ -179,6 +179,14 @@ class TestUserTagUsagePatch:
         result = overlay_reader.get_usage_count(tag_id, 1000)
         assert result == 77
 
+    def test_get_usage_count_returns_base_scope_patch(self, user_repo, overlay_reader):
+        """base tag に対する overlay usage patch も get_usage_count で取得できる。"""
+        tag_id = 13
+        user_repo.write_usage_patch("base", tag_id, 1000, 77)
+
+        result = overlay_reader.get_usage_count(tag_id, 1000)
+        assert result == 77
+
     def test_get_usage_count_returns_none_when_absent(self, overlay_reader):
         """存在しないエントリは None を返す。"""
         assert overlay_reader.get_usage_count(USER_TAG_ID_OFFSET + 999, 1000) is None
@@ -205,6 +213,17 @@ class TestUserTagUsagePatch:
         assert len(results) == 1
         assert results[0].format_id == 1000
 
+    def test_list_usage_counts_returns_base_scope_patch(self, user_repo, overlay_reader):
+        """base tag に対する overlay usage patch も list_usage_counts で取得できる。"""
+        tag_id = 21
+        user_repo.write_usage_patch("base", tag_id, 1000, 1)
+
+        results = overlay_reader.list_usage_counts(tag_id=tag_id, format_id=1000)
+        assert len(results) == 1
+        assert results[0].tag_id == tag_id
+        assert results[0].format_id == 1000
+        assert results[0].count == 1
+
 
 # --- TestOverlayReaderTranslations ---
 
@@ -216,6 +235,17 @@ class TestOverlayReaderTranslations:
         """write_translation_patch で保存した翻訳を get_translations で取得できる。"""
         tag_id = USER_TAG_ID_OFFSET + 100
         user_repo.write_translation_patch("user", tag_id, "ja", "犬")
+
+        results = overlay_reader.get_translations(tag_id)
+        assert len(results) == 1
+        assert results[0].tag_id == tag_id
+        assert results[0].language == "ja"
+        assert results[0].translation == "犬"
+
+    def test_get_translations_returns_base_scope_patch(self, user_repo, overlay_reader):
+        """base tag に対する overlay translation patch も get_translations で取得できる。"""
+        tag_id = 100
+        user_repo.write_translation_patch("base", tag_id, "ja", "犬")
 
         results = overlay_reader.get_translations(tag_id)
         assert len(results) == 1
@@ -239,6 +269,16 @@ class TestOverlayReaderTranslations:
         assert tag_id_b in result
         assert result[tag_id_a][0].translation == "猫"
         assert result[tag_id_b][0].translation == "犬"
+
+    def test_get_translations_batch_returns_base_scope_patch(self, user_repo, overlay_reader):
+        """base tag に対する overlay translation patch も batch で取得できる。"""
+        tag_id = 101
+        user_repo.write_translation_patch("base", tag_id, "ja", "猫")
+
+        result = overlay_reader.get_translations_batch([tag_id])
+        assert tag_id in result
+        assert result[tag_id][0].tag_id == tag_id
+        assert result[tag_id][0].translation == "猫"
 
     def test_get_translations_batch_empty_ids(self, overlay_reader):
         """空リストを渡した場合は空辞書を返す。"""
