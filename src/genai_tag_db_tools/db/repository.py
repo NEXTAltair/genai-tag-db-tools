@@ -1416,6 +1416,11 @@ class MergedTagReader:
             return None
         return sorted(patches, key=lambda patch: patch.format_id)[0]
 
+    def _format_status_dict(self, value: object) -> dict[str, object]:
+        if isinstance(value, dict):
+            return dict(value)
+        return {}
+
     def _apply_user_patches_to_search_rows(
         self,
         rows: list[TagSearchRow],
@@ -1440,7 +1445,7 @@ class MergedTagReader:
 
             for usage in usage_by_tag.get(row["tag_id"], []):
                 fmt_name = self._format_name_for_id(usage.format_id)
-                status = dict(format_statuses.get(fmt_name) or {})
+                status = self._format_status_dict(format_statuses.get(fmt_name))
                 status["usage_count"] = usage.count
                 format_statuses[fmt_name] = status
                 if requested_format_id == usage.format_id:
@@ -1448,7 +1453,8 @@ class MergedTagReader:
 
             for translation in translations_by_tag.get(row["tag_id"], []):
                 if translation.language and translation.translation:
-                    translations = dict(updated.get("translations") or {})
+                    translations_obj = updated.get("translations")
+                    translations = dict(cast(dict[str, list[str]], translations_obj)) if isinstance(translations_obj, dict) else {}
                     values = list(translations.get(translation.language) or [])
                     if translation.translation not in values:
                         values.append(translation.translation)
@@ -1464,7 +1470,7 @@ class MergedTagReader:
             for patch in patches:
                 fmt_name = self._format_name_for_id(patch.format_id)
                 type_name = self._type_name_for_format_type(patch.format_id, patch.type_id)
-                status = dict(format_statuses.get(fmt_name) or {})
+                status = self._format_status_dict(format_statuses.get(fmt_name))
                 status.update({
                     "alias": patch.alias,
                     "deprecated": patch.deprecated,
@@ -1472,9 +1478,12 @@ class MergedTagReader:
                     "type_name": type_name,
                     "preferred_tag_id": patch.preferred_tag_id,
                 })
-                usage = next((item for item in usage_by_tag.get(row["tag_id"], []) if item.format_id == patch.format_id), None)
-                if usage is not None:
-                    status["usage_count"] = usage.count
+                patch_usage = next(
+                    (item for item in usage_by_tag.get(row["tag_id"], []) if item.format_id == patch.format_id),
+                    None,
+                )
+                if patch_usage is not None:
+                    status["usage_count"] = patch_usage.count
                 format_statuses[fmt_name] = status
 
             active_patch = self._select_active_status(patches, requested_format_id)
