@@ -31,8 +31,9 @@ class LocalFeedbackApplyService:
         "tag_name_correction",
     }
 
-    def __init__(self, user_repository: UserTagRepository) -> None:
+    def __init__(self, user_repository: UserTagRepository, reader: Any | None = None) -> None:
         self._user_repository = user_repository
+        self._reader = reader
 
     def apply(self, feedback: ApprovedDbFeedback, *, dry_run: bool = False) -> LocalFeedbackApplyResult:
         proposal = feedback.proposal
@@ -44,6 +45,7 @@ class LocalFeedbackApplyService:
             raise ValueError(f"local apply unsupported proposal kind: {proposal.kind}")
         if proposal.kind == "format_relation_review":
             raise ValueError("format_relation_review is review-only and cannot be applied")
+        self._validate_proposal(proposal)
 
         if self._user_repository.has_applied_feedback(proposal_hash):
             application = self._record_application(
@@ -141,10 +143,19 @@ class LocalFeedbackApplyService:
         proposed = _require_proposed(proposal)
         format_id = self._format_id(target)
         existing = self._user_repository.get_status_patch(target.target_scope, target.target_tag_id, format_id)
-        alias = existing.alias if existing is not None else False
-        preferred_scope = existing.preferred_scope if existing is not None else target.target_scope
-        preferred_tag_id = existing.preferred_tag_id if existing is not None else target.target_tag_id
-        type_id = existing.type_id if existing is not None else 0
+        current = proposal.current or {}
+        alias = existing.alias if existing is not None else (_optional_bool_value(current, "alias") or False)
+        preferred_scope = (
+            existing.preferred_scope
+            if existing is not None
+            else (_optional_string_value(current, "preferred_scope") or target.target_scope)
+        )
+        preferred_tag_id = (
+            existing.preferred_tag_id
+            if existing is not None
+            else (_optional_int_value(current, "preferred_tag_id") or target.target_tag_id)
+        )
+        type_id = existing.type_id if existing is not None else (_optional_int_value(current, "type_id") or 0)
         deprecated = _bool_value(proposed, "deprecated")
         self._user_repository.write_patch(
             target_scope=target.target_scope,
@@ -165,10 +176,19 @@ class LocalFeedbackApplyService:
         proposed_type_id = _optional_int_value(proposed, "type_id")
         type_id = self._user_repository.get_or_create_type_id(format_id, type_name, proposed_type_id)
         existing = self._user_repository.get_status_patch(target.target_scope, target.target_tag_id, format_id)
-        alias = existing.alias if existing is not None else False
-        preferred_scope = existing.preferred_scope if existing is not None else target.target_scope
-        preferred_tag_id = existing.preferred_tag_id if existing is not None else target.target_tag_id
-        deprecated = existing.deprecated if existing is not None else False
+        current = proposal.current or {}
+        alias = existing.alias if existing is not None else (_optional_bool_value(current, "alias") or False)
+        preferred_scope = (
+            existing.preferred_scope
+            if existing is not None
+            else (_optional_string_value(current, "preferred_scope") or target.target_scope)
+        )
+        preferred_tag_id = (
+            existing.preferred_tag_id
+            if existing is not None
+            else (_optional_int_value(current, "preferred_tag_id") or target.target_tag_id)
+        )
+        deprecated = existing.deprecated if existing is not None else (_optional_bool_value(current, "deprecated") or False)
         self._user_repository.write_patch(
             target_scope=target.target_scope,
             target_tag_id=target.target_tag_id,
@@ -195,6 +215,7 @@ class LocalFeedbackApplyService:
         proposed = _require_proposed(proposal)
         if target.preferred_scope is None or target.preferred_tag_id is None:
             raise ValueError("alias_addition requires preferred_scope and preferred_tag_id")
+        format_id = self._format_id(target)
 
         alias_tag_id = target.target_tag_id
         if alias_tag_id is None:
@@ -205,7 +226,6 @@ class LocalFeedbackApplyService:
         else:
             target_scope = target.target_scope
 
-        format_id = self._format_id(target)
         type_name = _optional_string_value(proposed, "type_name") or "unknown"
         type_id = self._user_repository.get_or_create_type_id(
             format_id,
@@ -229,8 +249,9 @@ class LocalFeedbackApplyService:
             raise ValueError("preferred_tag_correction requires preferred_scope and preferred_tag_id")
         format_id = self._format_id(target)
         existing = self._user_repository.get_status_patch(target.target_scope, target.target_tag_id, format_id)
-        type_id = existing.type_id if existing is not None else 0
-        deprecated = existing.deprecated if existing is not None else False
+        current = proposal.current or {}
+        type_id = existing.type_id if existing is not None else (_optional_int_value(current, "type_id") or 0)
+        deprecated = existing.deprecated if existing is not None else (_optional_bool_value(current, "deprecated") or False)
         self._user_repository.write_patch(
             target_scope=target.target_scope,
             target_tag_id=target.target_tag_id,
@@ -257,7 +278,55 @@ class LocalFeedbackApplyService:
     def _format_id(self, target: ProposalTarget) -> int:
         if target.format_name is None:
             raise ValueError("format-dependent local apply requires format_name")
-        return self._user_repository.get_or_create_format_id(target.format_name)
+        base_format_id = self._reader_format_id(target.format_name)
+        return self._user_repository.get_or_create_format_id(target.format_name, base_format_id)
+
+    def _reader_format_id(self, format_name: str) -> int | None:
+        if self._reader is None:
+            return None
+        try:
+            return int(self._reader.get_format_id(format_name))
+        except ValueError:
+            return None
+
+    def _validate_proposal(self, proposal: DbFeedbackProposal) -> None:
+        match proposal.kind:
+            case "translation_correction":
+                _require_target_tag(proposal.target)
+                proposed = _require_proposed(proposal)
+                _string_value(proposed, "language", fallback=proposal.target.language)
+                _string_value(proposed, "translation")
+            case "status_correction":
+                target = _require_target_tag(proposal.target)
+                _bool_value(_require_proposed(proposal), "deprecated")
+                _require_format_name(target)
+            case "type_correction":
+                target = _require_target_tag(proposal.target)
+                _require_proposed(proposal)
+                _require_format_name(target)
+            case "usage_correction":
+                target = _require_target_tag(proposal.target)
+                _int_value(_require_proposed(proposal), "count")
+                _require_format_name(target)
+            case "alias_addition":
+                target = proposal.target
+                proposed = _require_proposed(proposal)
+                if target.preferred_scope is None or target.preferred_tag_id is None:
+                    raise ValueError("alias_addition requires preferred_scope and preferred_tag_id")
+                _require_format_name(target)
+                if target.target_tag_id is None:
+                    _string_value(proposed, "alias_tag", fallback=_optional_string_value(proposed, "tag"))
+            case "preferred_tag_correction":
+                target = _require_target_tag(proposal.target)
+                if target.preferred_scope is None or target.preferred_tag_id is None:
+                    raise ValueError("preferred_tag_correction requires preferred_scope and preferred_tag_id")
+                _require_format_name(target)
+            case "tag_name_correction":
+                if proposal.target.target_tag_id is not None:
+                    raise ValueError("tag_name_correction can only create a new user tag locally")
+                _string_value(_require_proposed(proposal), "tag")
+            case _:
+                raise ValueError(f"local apply unsupported proposal kind: {proposal.kind}")
 
     def _snapshot_before(self, proposal: DbFeedbackProposal) -> dict[str, ProposalValue]:
         return {
@@ -315,9 +384,10 @@ def apply_approved_feedback(
     feedback: ApprovedDbFeedback,
     *,
     user_repository: UserTagRepository,
+    reader: Any | None = None,
     dry_run: bool = False,
 ) -> LocalFeedbackApplyResult:
-    return LocalFeedbackApplyService(user_repository).apply(feedback, dry_run=dry_run)
+    return LocalFeedbackApplyService(user_repository, reader=reader).apply(feedback, dry_run=dry_run)
 
 
 def list_local_feedback_applications(
@@ -357,6 +427,12 @@ def _require_target_tag(target: ProposalTarget) -> ProposalTarget:
     if target.target_tag_id is None:
         raise ValueError(f"{target.kind} proposal requires target_tag_id")
     return target
+
+
+def _require_format_name(target: ProposalTarget) -> str:
+    if target.format_name is None:
+        raise ValueError("format-dependent local apply requires format_name")
+    return target.format_name
 
 
 def _require_proposed(proposal: DbFeedbackProposal) -> Mapping[str, ProposalValue]:

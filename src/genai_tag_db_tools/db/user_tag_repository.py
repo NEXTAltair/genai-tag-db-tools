@@ -182,14 +182,33 @@ class UserTagRepository:
                 )
             session.commit()
 
-    def get_or_create_format_id(self, format_name: str) -> int:
+    def get_format_id(self, format_name: str) -> int | None:
+        """user DB 内の TAG_FORMATS から format_id を取得する。"""
+        with self._session_factory() as session:
+            row = session.query(TagFormat.format_id).filter(TagFormat.format_name == format_name).one_or_none()
+            return int(row[0]) if row else None
+
+    def get_or_create_format_id(self, format_name: str, format_id: int | None = None) -> int:
         """user DB 内の TAG_FORMATS から format_id を取得し、無ければ作る。"""
         with self._session_factory() as session:
             existing = session.query(TagFormat).filter(TagFormat.format_name == format_name).one_or_none()
             if existing is not None:
+                if format_id is not None and int(existing.format_id) != format_id:
+                    raise ValueError(
+                        f"format_name={format_name!r} already exists with format_id={existing.format_id}, "
+                        f"not {format_id}"
+                    )
                 return int(existing.format_id)
-            max_id = session.query(func.max(TagFormat.format_id)).scalar()
-            next_id = 1000 if max_id is None else max(int(max_id) + 1, 1000)
+            if format_id is not None:
+                id_owner = session.query(TagFormat).filter(TagFormat.format_id == format_id).one_or_none()
+                if id_owner is not None and id_owner.format_name != format_name:
+                    raise ValueError(
+                        f"format_id={format_id} already belongs to format_name={id_owner.format_name!r}"
+                    )
+                next_id = format_id
+            else:
+                max_id = session.query(func.max(TagFormat.format_id)).scalar()
+                next_id = 1000 if max_id is None else max(int(max_id) + 1, 1000)
             session.add(
                 TagFormat(
                     format_id=next_id,
@@ -236,6 +255,25 @@ class UserTagRepository:
                         .scalar()
                     )
                     type_id = 1 if max_type_id is None else max(int(max_type_id) + 1, 1)
+            else:
+                id_owner = (
+                    session.query(TagTypeFormatMapping)
+                    .filter(
+                        TagTypeFormatMapping.format_id == format_id,
+                        TagTypeFormatMapping.type_id == type_id,
+                    )
+                    .one_or_none()
+                )
+                if id_owner is not None and id_owner.type_name_id != type_name_row.type_name_id:
+                    owner_name = (
+                        session.query(TagTypeName.type_name)
+                        .filter(TagTypeName.type_name_id == id_owner.type_name_id)
+                        .scalar()
+                    )
+                    raise ValueError(
+                        f"type_id={type_id} for format_id={format_id} already belongs to "
+                        f"type_name={owner_name!r}"
+                    )
 
             session.add(
                 TagTypeFormatMapping(

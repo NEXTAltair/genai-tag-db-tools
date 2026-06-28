@@ -26,6 +26,13 @@ from genai_tag_db_tools.services.feedback_apply import (
 )
 
 
+class _ReaderWithBaseFormats:
+    def get_format_id(self, format_name: str) -> int:
+        if format_name == "danbooru":
+            return 1
+        raise ValueError(format_name)
+
+
 @pytest.fixture()
 def user_engine(tmp_path: Path):
     db_path = tmp_path / "feedback_apply.sqlite"
@@ -105,6 +112,20 @@ def test_dry_run_does_not_write_patch_but_records_audit(user_repo, user_session_
     assert audit.dry_run is True
 
 
+def test_dry_run_validates_invalid_proposal(user_repo, user_session_factory):
+    proposal = _proposal(
+        "translation_correction",
+        target=ProposalTarget(kind="translation", target_scope="base", target_tag_id=10, language="ja"),
+        proposed=None,
+    )
+
+    with pytest.raises(ValueError, match="proposed"):
+        apply_approved_feedback(_approved(proposal), user_repository=user_repo, dry_run=True)
+
+    with user_session_factory() as session:
+        assert session.query(LocalFeedbackApplication).count() == 0
+
+
 def test_translation_correction_applies_to_base_scope_without_user_tag_shadow(
     user_repo,
     user_session_factory,
@@ -125,6 +146,22 @@ def test_translation_correction_applies_to_base_scope_without_user_tag_shadow(
         assert patch.language == "ja"
         assert patch.translation == "青い目"
         assert session.query(UserTag).count() == 0
+
+
+def test_overlay_reader_returns_base_scope_translation_patch(user_repo, user_session_factory):
+    from genai_tag_db_tools.db.overlay_reader import OverlayTagReader
+
+    proposal = _proposal(
+        "translation_correction",
+        target=ProposalTarget(kind="translation", target_scope="base", target_tag_id=10, language="ja"),
+        proposed={"language": "ja", "translation": "青い目"},
+    )
+    apply_approved_feedback(_approved(proposal), user_repository=user_repo)
+
+    reader = OverlayTagReader(session_factory=user_session_factory)
+
+    assert [row.translation for row in reader.get_translations(10)] == ["青い目"]
+    assert [row.translation for row in reader.get_translations_batch([10])[10]] == ["青い目"]
 
 
 def test_status_correction_writes_deprecated_overlay_patch(user_repo, user_session_factory):
@@ -151,6 +188,41 @@ def test_status_correction_writes_deprecated_overlay_patch(user_repo, user_sessi
         assert patch.preferred_scope == "base"
         assert patch.preferred_tag_id == 20
         assert session.query(TagFormat).filter_by(format_name="unknown").one()
+
+
+def test_status_correction_preserves_current_base_status_fields(user_repo, user_session_factory):
+    proposal = _proposal(
+        "status_correction",
+        target=ProposalTarget(
+            kind="tag_status",
+            target_scope="base",
+            target_tag_id=20,
+            format_name="danbooru",
+        ),
+        current={
+            "type_id": 5,
+            "alias": True,
+            "preferred_scope": "base",
+            "preferred_tag_id": 99,
+            "deprecated": False,
+        },
+        proposed={"deprecated": True},
+    )
+
+    apply_approved_feedback(
+        _approved(proposal),
+        user_repository=user_repo,
+        reader=_ReaderWithBaseFormats(),
+    )
+
+    with user_session_factory() as session:
+        patch = session.query(UserTagStatusPatch).one()
+    assert patch.format_id == 1
+    assert patch.type_id == 5
+    assert patch.alias is True
+    assert patch.preferred_scope == "base"
+    assert patch.preferred_tag_id == 99
+    assert patch.deprecated is True
 
 
 def test_type_correction_preserves_existing_status_fields(user_repo, user_session_factory):
@@ -187,6 +259,24 @@ def test_type_correction_preserves_existing_status_fields(user_repo, user_sessio
         assert mapping is not None
 
 
+def test_type_correction_rejects_type_id_collision(user_repo):
+    format_id = user_repo.get_or_create_format_id("danbooru")
+    user_repo.get_or_create_type_id(format_id, "general", 1)
+    proposal = _proposal(
+        "type_correction",
+        target=ProposalTarget(
+            kind="tag_type",
+            target_scope="base",
+            target_tag_id=21,
+            format_name="danbooru",
+        ),
+        proposed={"type_id": 1, "type_name": "character"},
+    )
+
+    with pytest.raises(ValueError, match="already belongs"):
+        apply_approved_feedback(_approved(proposal), user_repository=user_repo)
+
+
 def test_alias_addition_creates_user_alias_without_copying_preferred_base_tag(
     user_repo,
     user_session_factory,
@@ -217,6 +307,27 @@ def test_alias_addition_creates_user_alias_without_copying_preferred_base_tag(
     assert patches[0].preferred_tag_id == 30
 
 
+def test_alias_addition_missing_format_does_not_create_orphan_user_tag(user_repo, user_session_factory):
+    proposal = _proposal(
+        "alias_addition",
+        target=ProposalTarget(
+            kind="alias",
+            target_scope="user",
+            target_tag_id=None,
+            preferred_scope="base",
+            preferred_tag_id=30,
+        ),
+        proposed={"alias_tag": "blakc hair", "type_name": "general"},
+    )
+
+    with pytest.raises(ValueError, match="format_name"):
+        apply_approved_feedback(_approved(proposal), user_repository=user_repo)
+
+    with user_session_factory() as session:
+        assert session.query(UserTag).count() == 0
+        assert session.query(LocalFeedbackApplication).count() == 0
+
+
 def test_usage_correction_writes_usage_patch(user_repo, user_session_factory):
     proposal = _proposal(
         "usage_correction",
@@ -236,6 +347,37 @@ def test_usage_correction_writes_usage_patch(user_repo, user_session_factory):
     assert patch.target_scope == "base"
     assert patch.target_tag_id == 40
     assert patch.count == 123
+
+
+def test_usage_correction_uses_base_format_id_and_reader_can_read_base_scope_patch(
+    user_repo,
+    user_session_factory,
+):
+    from genai_tag_db_tools.db.overlay_reader import OverlayTagReader
+
+    proposal = _proposal(
+        "usage_correction",
+        target=ProposalTarget(
+            kind="usage",
+            target_scope="base",
+            target_tag_id=40,
+            format_name="danbooru",
+        ),
+        proposed={"count": 123},
+    )
+
+    apply_approved_feedback(
+        _approved(proposal),
+        user_repository=user_repo,
+        reader=_ReaderWithBaseFormats(),
+    )
+    reader = OverlayTagReader(session_factory=user_session_factory)
+
+    with user_session_factory() as session:
+        patch = session.query(UserTagUsagePatch).one()
+    assert patch.format_id == 1
+    assert reader.get_usage_count(40, 1) == 123
+    assert reader.list_usage_counts(tag_id=40, format_id=1)[0].count == 123
 
 
 def test_tag_name_correction_creates_new_user_tag(user_repo, user_session_factory):
