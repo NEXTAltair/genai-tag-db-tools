@@ -293,3 +293,35 @@ class UserTagUsagePatch(UserOverlayBase):
         CheckConstraint("target_scope IN ('base', 'user')", name="ck_usage_patch_scope"),
         Index("ix_usage_patch_target", "target_scope", "target_tag_id"),
     )
+
+
+class LocalFeedbackApplication(UserOverlayBase):
+    """user-local feedback proposal の apply 履歴。
+
+    user DB 専用の audit table。proposal の二重 apply 防止と、あとからの確認に使う。
+    """
+
+    __tablename__ = "LOCAL_FEEDBACK_APPLICATIONS"
+
+    application_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    proposal_hash: Mapped[str] = mapped_column()
+    proposal_kind: Mapped[str] = mapped_column()
+    target_kind: Mapped[str] = mapped_column()
+    target_scope: Mapped[str | None] = mapped_column(nullable=True)
+    target_tag_id: Mapped[int | None] = mapped_column(nullable=True)
+    format_name: Mapped[str | None] = mapped_column(nullable=True)
+    field: Mapped[str | None] = mapped_column(nullable=True)
+    approved_by: Mapped[str] = mapped_column()
+    approved_at: Mapped[datetime] = mapped_column(DateTime)
+    applied_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    status: Mapped[str] = mapped_column()
+    dry_run: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="0")
+    proposal_json: Mapped[str] = mapped_column()
+    before_json: Mapped[str | None] = mapped_column(nullable=True)
+    after_json: Mapped[str | None] = mapped_column(nullable=True)
+    error_message: Mapped[str | None] = mapped_column(nullable=True)
+
+    __table_args__ = (
+        Index("ix_local_feedback_hash", "proposal_hash"),
+        Index("ix_local_feedback_target", "target_scope", "target_tag_id"),
+    )

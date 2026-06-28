@@ -19,18 +19,25 @@ from .core_api import (
     update_tags_type_batch,
 )
 from .models import (
+    ApprovedDbFeedback,
     DbFeedbackProposal,
+    LocalFeedbackApplicationRecord,
+    LocalFeedbackApplyResult,
     ProposalTarget,
     RefinementReason,
     RefinementRecommendation,
     RefinementSuggestion,
     TagTypeUpdate,
 )
+from .services.feedback_apply import apply_approved_feedback, list_local_feedback_applications
 from .services.tag_search import TagSearcher
 from .utils.cleanup_str import TagCleaner
 
 __all__ = [
+    "ApprovedDbFeedback",
     "DbFeedbackProposal",
+    "LocalFeedbackApplicationRecord",
+    "LocalFeedbackApplyResult",
     "ProposalTarget",
     "RefinementReason",
     "RefinementRecommendation",
@@ -38,6 +45,7 @@ __all__ = [
     "TagCleaner",
     "TagSearcher",
     "TagTypeUpdate",
+    "apply_approved_feedback",
     "build_downloaded_at_utc",
     "convert_tags",
     "ensure_databases",
@@ -49,6 +57,7 @@ __all__ = [
     "initialize_databases",
     "initialize_tag_cleaner",
     "initialize_tag_searcher",
+    "list_local_feedback_applications",
     "needs_manual_refinement",
     "recommend_manual_refinement",
     "recommend_tag_record_refinement",
