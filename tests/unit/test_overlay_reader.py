@@ -740,6 +740,128 @@ class TestOverlayTagReaderMetadata:
         assert overlay_reader.get_type_id_for_format("meta", 3001) == 5
 
 
+class TestOverlayTagReaderTypeMethods:
+    """get_all_types / get_tag_types / get_unknown_type_tag_ids を検証する (#100)。"""
+
+    def _seed_types(self, session) -> None:
+        session.add(TagFormat(format_id=3001, format_name="lorairo"))
+        session.add(TagFormat(format_id=3002, format_name="other"))
+        session.add(TagTypeName(type_name_id=1, type_name="general"))
+        session.add(TagTypeName(type_name_id=4, type_name="character"))
+        session.add(TagTypeName(type_name_id=99, type_name="unknown"))
+        # lorairo: general(0) / character(4) / unknown(7)
+        session.add(TagTypeFormatMapping(format_id=3001, type_id=0, type_name_id=1))
+        session.add(TagTypeFormatMapping(format_id=3001, type_id=4, type_name_id=4))
+        session.add(TagTypeFormatMapping(format_id=3001, type_id=7, type_name_id=99))
+        # other: general(0) のみ
+        session.add(TagTypeFormatMapping(format_id=3002, type_id=0, type_name_id=1))
+
+    def test_get_all_types(self, overlay_reader, overlay_session_factory):
+        with overlay_session_factory() as session:
+            self._seed_types(session)
+            session.commit()
+
+        assert set(overlay_reader.get_all_types()) == {"general", "character", "unknown"}
+
+    def test_get_all_types_empty(self, overlay_reader):
+        assert overlay_reader.get_all_types() == []
+
+    def test_get_tag_types_filters_by_format(self, overlay_reader, overlay_session_factory):
+        with overlay_session_factory() as session:
+            self._seed_types(session)
+            session.commit()
+
+        assert set(overlay_reader.get_tag_types(3001)) == {"general", "character", "unknown"}
+        assert overlay_reader.get_tag_types(3002) == ["general"]
+
+    def test_get_tag_types_unknown_format(self, overlay_reader, overlay_session_factory):
+        with overlay_session_factory() as session:
+            self._seed_types(session)
+            session.commit()
+
+        assert overlay_reader.get_tag_types(9999) == []
+
+    def test_get_unknown_type_tag_ids(self, overlay_reader, overlay_session_factory):
+        unknown_id = USER_TAG_ID_OFFSET + 500
+        general_id = USER_TAG_ID_OFFSET + 501
+        with overlay_session_factory() as session:
+            self._seed_types(session)
+            session.add(UserTag(tag_id=unknown_id, source_tag="u_src", tag="unknown tag"))
+            session.add(UserTag(tag_id=general_id, source_tag="g_src", tag="general tag"))
+            session.add(
+                UserTagStatusPatch(
+                    target_scope="user",
+                    target_tag_id=unknown_id,
+                    format_id=3001,
+                    type_id=7,  # unknown
+                    alias=False,
+                    preferred_scope="user",
+                    preferred_tag_id=unknown_id,
+                    deprecated=False,
+                )
+            )
+            session.add(
+                UserTagStatusPatch(
+                    target_scope="user",
+                    target_tag_id=general_id,
+                    format_id=3001,
+                    type_id=0,  # general
+                    alias=False,
+                    preferred_scope="user",
+                    preferred_tag_id=general_id,
+                    deprecated=False,
+                )
+            )
+            session.commit()
+
+        assert overlay_reader.get_unknown_type_tag_ids(3001) == [unknown_id]
+
+    def test_get_unknown_type_tag_ids_no_unknown_mapping(self, overlay_reader, overlay_session_factory):
+        with overlay_session_factory() as session:
+            self._seed_types(session)
+            session.commit()
+
+        # format 3002 には unknown のマッピングが無い
+        assert overlay_reader.get_unknown_type_tag_ids(3002) == []
+
+    def test_get_unknown_type_tag_ids_empty(self, overlay_reader):
+        assert overlay_reader.get_unknown_type_tag_ids(3001) == []
+
+    def test_merged_aggregates_type_methods(self, overlay_reader, overlay_session_factory):
+        """MergedTagReader 経由でも overlay の type 系メソッドが集約されることを確認する。"""
+        unknown_id = USER_TAG_ID_OFFSET + 510
+        with overlay_session_factory() as session:
+            self._seed_types(session)
+            session.add(UserTag(tag_id=unknown_id, source_tag="m_src", tag="merged unknown"))
+            session.add(
+                UserTagStatusPatch(
+                    target_scope="user",
+                    target_tag_id=unknown_id,
+                    format_id=3001,
+                    type_id=7,
+                    alias=False,
+                    preferred_scope="user",
+                    preferred_tag_id=unknown_id,
+                    deprecated=False,
+                )
+            )
+            session.commit()
+
+        class _EmptyBase:
+            def _empty(self, *a, **k):
+                return []
+
+            get_all_types = get_tag_types = get_unknown_type_tag_ids = _empty
+
+            def _iter_repos_marker(self):  # pragma: no cover - not used
+                return []
+
+        merged = MergedTagReader(base_repo=_EmptyBase(), user_repo=overlay_reader)
+        assert set(merged.get_all_types()) == {"general", "character", "unknown"}
+        assert set(merged.get_tag_types(3001)) == {"general", "character", "unknown"}
+        assert merged.get_unknown_type_tag_ids(3001) == [unknown_id]
+
+
 class TestOverlayTagReaderEmpty:
     """空 DB で各メソッドが安全にデフォルト値を返すことを検証する。"""
 

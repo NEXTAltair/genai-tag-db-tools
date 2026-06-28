@@ -684,13 +684,76 @@ class OverlayTagReader:
             ]
 
     def get_tag_types(self, format_id: int) -> list[str]:
-        return []
+        """指定 format で使われている type_name の一覧を返す。
+
+        ``TAG_TYPE_FORMAT_MAPPING JOIN TAG_TYPE_NAME`` を ``format_id`` で絞り込み、
+        distinct な type_name を返す。
+        """
+        try:
+            with self.session_factory() as session:
+                rows = (
+                    session.query(TagTypeName.type_name)
+                    .join(
+                        TagTypeFormatMapping,
+                        TagTypeName.type_name_id == TagTypeFormatMapping.type_name_id,
+                    )
+                    .filter(TagTypeFormatMapping.format_id == format_id)
+                    .distinct()
+                    .all()
+                )
+        except OperationalError:
+            return []
+        return [row[0] for row in rows]
 
     def get_all_types(self) -> list[str]:
-        return []
+        """user DB の ``TAG_TYPE_NAME.type_name`` を全件返す。"""
+        try:
+            with self.session_factory() as session:
+                rows = session.query(TagTypeName.type_name).all()
+        except OperationalError:
+            return []
+        return [row[0] for row in rows]
 
     def get_unknown_type_tag_ids(self, format_id: int) -> list[int]:
-        return []
+        """指定 format で type_name="unknown" にマップされる tag_id 一覧を返す。
+
+        ``TAG_TYPE_NAME`` から "unknown" の type_name_id を解決し、
+        ``TAG_TYPE_FORMAT_MAPPING`` で当該 format の type_id を求めた上で、
+        ``USER_TAG_STATUS_PATCH`` の target_tag_id を重複なく返す。
+        """
+        try:
+            with self.session_factory() as session:
+                unknown_type = (
+                    session.query(TagTypeName.type_name_id)
+                    .filter(TagTypeName.type_name == "unknown")
+                    .one_or_none()
+                )
+                if unknown_type is None:
+                    return []
+
+                mapping = (
+                    session.query(TagTypeFormatMapping.type_id)
+                    .filter(
+                        TagTypeFormatMapping.format_id == format_id,
+                        TagTypeFormatMapping.type_name_id == unknown_type[0],
+                    )
+                    .one_or_none()
+                )
+                if mapping is None:
+                    return []
+
+                rows = (
+                    session.query(UserTagStatusPatch.target_tag_id)
+                    .filter(
+                        UserTagStatusPatch.format_id == format_id,
+                        UserTagStatusPatch.type_id == mapping[0],
+                    )
+                    .distinct()
+                    .all()
+                )
+        except OperationalError:
+            return []
+        return [row[0] for row in rows]
 
     def get_metadata_value(self, key: str) -> str | None:
         return None
