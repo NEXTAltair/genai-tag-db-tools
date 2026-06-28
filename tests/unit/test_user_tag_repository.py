@@ -203,6 +203,28 @@ class TestLocalFeedbackRepositoryHelpers:
         with pytest.raises(ValueError, match=r"type_id=0.*'general'"):
             user_repo.get_or_create_type_id(1000, "unknown")
 
+    def test_get_or_create_type_id_reuses_legacy_duplicate_type_mapping(
+        self,
+        user_repo,
+        user_session_factory,
+    ):
+        user_repo.get_or_create_format_id("danbooru", format_id=1000)
+        assert user_repo.get_or_create_type_id(1000, "general") == 1
+
+        with user_session_factory() as session:
+            general_type_name_id = session.query(TagTypeName.type_name_id).filter_by(type_name="general").scalar()
+            session.add(
+                TagTypeFormatMapping(
+                    format_id=1000,
+                    type_id=2,
+                    type_name_id=general_type_name_id,
+                    description="legacy duplicate mapping",
+                )
+            )
+            session.commit()
+
+        assert user_repo.get_or_create_type_id(1000, "general") == 1
+
     def test_has_applied_feedback_allows_legacy_duplicate_applied_rows(
         self,
         user_repo,
