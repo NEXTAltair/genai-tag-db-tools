@@ -470,6 +470,19 @@ class LocalFeedbackApplyResult(BaseModel):
     def _validate_ok_status(self) -> LocalFeedbackApplyResult:
         if self.ok != (self.status != "failed"):
             raise ValueError("ok must be true unless status is failed")
+        if self.status == "applied" and self.dry_run:
+            raise ValueError("applied results must have dry_run=false")
+        if self.status == "dry_run" and not self.dry_run:
+            raise ValueError("dry_run results must have dry_run=true")
+        if self.application is not None:
+            if self.application.proposal_hash != self.proposal_hash:
+                raise ValueError("application proposal_hash must match result proposal_hash")
+            if self.application.proposal_kind != self.proposal_kind:
+                raise ValueError("application proposal_kind must match result proposal_kind")
+            if self.application.status != self.status:
+                raise ValueError("application status must match result status")
+            if self.application.dry_run != self.dry_run:
+                raise ValueError("application dry_run must match result dry_run")
         return self
 
 

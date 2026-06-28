@@ -323,6 +323,10 @@ class LocalFeedbackApplication(UserOverlayBase):
     error_message: Mapped[str | None] = mapped_column(nullable=True)
 
     __table_args__ = (
+        CheckConstraint(
+            "status IN ('applied', 'dry_run', 'skipped', 'failed')",
+            name="ck_local_feedback_status",
+        ),
         Index(
             "uix_local_feedback_applied_hash",
             "proposal_hash",
