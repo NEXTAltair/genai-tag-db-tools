@@ -324,8 +324,16 @@ class LocalFeedbackApplication(UserOverlayBase):
 
     __table_args__ = (
         CheckConstraint(
+            "target_scope IS NULL OR target_scope IN ('base', 'user')",
+            name="ck_local_feedback_target_scope",
+        ),
+        CheckConstraint(
             "status IN ('applied', 'dry_run', 'skipped', 'failed')",
             name="ck_local_feedback_status",
+        ),
+        CheckConstraint(
+            "(status != 'dry_run' OR dry_run = 1) AND (status != 'applied' OR dry_run = 0)",
+            name="ck_local_feedback_dry_run_status",
         ),
         Index(
             "uix_local_feedback_applied_hash",

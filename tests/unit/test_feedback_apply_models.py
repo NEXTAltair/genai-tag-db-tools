@@ -38,6 +38,7 @@ def _application_values(
     *,
     proposal_hash: str = "abc123",
     proposal_kind: str = "translation_correction",
+    target_scope: str | None = "base",
     status: str = "applied",
     dry_run: bool = False,
 ) -> dict[str, object]:
@@ -45,7 +46,7 @@ def _application_values(
         "proposal_hash": proposal_hash,
         "proposal_kind": proposal_kind,
         "target_kind": "translation",
-        "target_scope": "base",
+        "target_scope": target_scope,
         "target_tag_id": 10,
         "format_name": None,
         "field": "translation.ja",
@@ -124,6 +125,21 @@ def test_local_feedback_application_record_and_result_roundtrip():
     assert restored == result
     assert restored.application is not None
     assert restored.application.target_scope == "base"
+
+
+@pytest.mark.parametrize(
+    ("status", "dry_run"),
+    [
+        ("applied", True),
+        ("dry_run", False),
+    ],
+)
+def test_local_feedback_application_record_rejects_contradictory_dry_run_status(status: str, dry_run: bool):
+    with pytest.raises(ValidationError):
+        LocalFeedbackApplicationRecord(
+            application_id=1,
+            **_application_values(status=status, dry_run=dry_run),
+        )
 
 
 @pytest.mark.parametrize(
@@ -241,4 +257,35 @@ def test_local_feedback_application_rejects_unknown_status():
             conn.execute(
                 LocalFeedbackApplication.__table__.insert(),
                 _application_values(status="applyed"),
+            )
+
+
+@pytest.mark.parametrize(
+    ("status", "dry_run"),
+    [
+        ("applied", True),
+        ("dry_run", False),
+    ],
+)
+def test_local_feedback_application_rejects_contradictory_dry_run_status(status: str, dry_run: bool):
+    engine = create_engine("sqlite:///:memory:")
+    UserOverlayBase.metadata.create_all(engine)
+
+    with engine.begin() as conn:
+        with pytest.raises(IntegrityError):
+            conn.execute(
+                LocalFeedbackApplication.__table__.insert(),
+                _application_values(status=status, dry_run=dry_run),
+            )
+
+
+def test_local_feedback_application_rejects_unknown_target_scope():
+    engine = create_engine("sqlite:///:memory:")
+    UserOverlayBase.metadata.create_all(engine)
+
+    with engine.begin() as conn:
+        with pytest.raises(IntegrityError):
+            conn.execute(
+                LocalFeedbackApplication.__table__.insert(),
+                _application_values(target_scope="usr"),
             )

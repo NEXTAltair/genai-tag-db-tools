@@ -450,6 +450,14 @@ class LocalFeedbackApplicationRecord(BaseModel):
     after_json: str | None = None
     error_message: str | None = None
 
+    @model_validator(mode="after")
+    def _validate_dry_run_status(self) -> LocalFeedbackApplicationRecord:
+        if self.status == "applied" and self.dry_run:
+            raise ValueError("applied application records must have dry_run=false")
+        if self.status == "dry_run" and not self.dry_run:
+            raise ValueError("dry_run application records must have dry_run=true")
+        return self
+
 
 class LocalFeedbackApplyResult(BaseModel):
     """user-local feedback apply の結果。"""
