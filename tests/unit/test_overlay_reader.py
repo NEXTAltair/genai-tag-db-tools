@@ -2,22 +2,27 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import sessionmaker
 
 from genai_tag_db_tools.db.overlay_reader import OverlayTagReader
+from genai_tag_db_tools.db.repository import MergedTagReader
 from genai_tag_db_tools.db.schema import (
     USER_TAG_ID_OFFSET,
     Base,
+    Tag,
     TagFormat,
     TagTypeFormatMapping,
     TagTypeName,
+    TagUsageCounts,
     UserOverlayBase,
     UserTag,
     UserTagStatusPatch,
 )
+from genai_tag_db_tools.models import TagSearchRow
 
 
 @pytest.fixture
@@ -214,6 +219,72 @@ class TestOverlayTagReaderStatus:
 class TestOverlayTagReaderSearch:
     """search_tags のキーワードヒット動作を検証する。"""
 
+    class _BaseSearchReader:
+        _rows: ClassVar[dict[int, TagSearchRow]] = {
+            20: {
+                "tag_id": 20,
+                "tag": "blue eyes",
+                "source_tag": "blue_eyes",
+                "usage_count": 10,
+                "alias": False,
+                "deprecated": False,
+                "type_id": 1,
+                "type_name": "general",
+                "translations": {},
+                "format_statuses": {
+                    "danbooru": {
+                        "alias": False,
+                        "deprecated": False,
+                        "usage_count": 10,
+                        "type_id": 1,
+                        "type_name": "general",
+                        "preferred_tag_id": 20,
+                    }
+                },
+            },
+            99: {
+                "tag_id": 99,
+                "tag": "azure eyes",
+                "source_tag": "azure_eyes",
+                "usage_count": 10,
+                "alias": False,
+                "deprecated": False,
+                "type_id": 1,
+                "type_name": "general",
+                "translations": {},
+                "format_statuses": {},
+            },
+        }
+
+        def search_tags(self, keyword: str, **kwargs) -> list[TagSearchRow]:
+            if keyword != "blue eyes":
+                return []
+            return [dict(self._rows[20])]  # type: ignore[list-item]
+
+        def search_tags_bulk(self, keywords: list[str], **kwargs) -> dict[str, TagSearchRow]:
+            return {keyword: dict(self._rows[20]) for keyword in keywords if keyword == "blue eyes"}  # type: ignore[misc]
+
+        def get_tag_by_id(self, tag_id: int) -> Tag | None:
+            row = self._rows.get(tag_id)
+            if row is None:
+                return None
+            return Tag(tag_id=row["tag_id"], tag=row["tag"], source_tag=row["source_tag"])
+
+        def list_tag_statuses(self, tag_id: int | None = None):
+            return []
+
+        def get_format_name(self, format_id: int) -> str | None:
+            return {1: "danbooru", 2: "other"}.get(format_id)
+
+        def get_format_map(self) -> dict[int, str]:
+            return {1: "danbooru", 2: "other"}
+
+        def get_type_name_by_format_type_id(self, format_id: int, type_id: int) -> str | None:
+            return {(1, 1): "general", (1, 4): "character", (2, 5): "style"}.get((format_id, type_id))
+
+        def get_translations(self, tag_id: int):
+            return []
+
     def test_search_tags_exact_match(self, overlay_reader, overlay_session_factory):
         tag_id = USER_TAG_ID_OFFSET + 300
         with overlay_session_factory() as session:
@@ -278,6 +349,120 @@ class TestOverlayTagReaderSearch:
         assert row["type_name"] == ""
         assert row["translations"] == {}
         assert row["format_statuses"] == {}
+
+    def test_merged_search_applies_base_scope_status_patch(self, overlay_reader, overlay_session_factory):
+        with overlay_session_factory() as session:
+            session.add(
+                UserTagStatusPatch(
+                    target_scope="base",
+                    target_tag_id=20,
+                    format_id=1,
+                    type_id=5,
+                    alias=True,
+                    preferred_scope="base",
+                    preferred_tag_id=99,
+                    deprecated=True,
+                )
+            )
+            session.commit()
+
+        merged = MergedTagReader(base_repo=self._BaseSearchReader(), user_repo=overlay_reader)
+
+        rows = merged.search_tags("blue eyes")
+
+        assert len(rows) == 1
+        assert rows[0]["alias"] is True
+        assert rows[0]["deprecated"] is True
+        assert rows[0]["type_id"] == 5
+        assert rows[0]["format_statuses"]["danbooru"]["deprecated"] is True
+
+    def test_merged_search_filters_after_base_scope_status_patch(self, overlay_reader, overlay_session_factory):
+        with overlay_session_factory() as session:
+            session.add(
+                UserTagStatusPatch(
+                    target_scope="base",
+                    target_tag_id=20,
+                    format_id=1,
+                    type_id=4,
+                    alias=False,
+                    preferred_scope="base",
+                    preferred_tag_id=20,
+                    deprecated=True,
+                )
+            )
+            session.commit()
+
+        merged = MergedTagReader(base_repo=self._BaseSearchReader(), user_repo=overlay_reader)
+
+        assert merged.search_tags("blue eyes", format_name="danbooru", deprecated=False) == []
+        rows = merged.search_tags("blue eyes", format_name="danbooru", deprecated=True, type_name="character")
+        assert len(rows) == 1
+        assert rows[0]["type_id"] == 4
+        assert rows[0]["type_name"] == "character"
+
+    def test_merged_search_applies_base_scope_usage_patch_to_filters(self, overlay_reader, overlay_session_factory):
+        with overlay_session_factory() as session:
+            session.add(
+                UserTagStatusPatch(
+                    target_scope="base",
+                    target_tag_id=20,
+                    format_id=1,
+                    type_id=1,
+                    alias=False,
+                    preferred_scope="base",
+                    preferred_tag_id=20,
+                    deprecated=False,
+                )
+            )
+            session.add(TagUsageCounts(tag_id=20, format_id=1, count=10))
+            session.commit()
+        from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
+
+        user_repo = UserTagRepository(overlay_session_factory)
+        user_repo.write_usage_patch("base", 20, 1, 123)
+        merged = MergedTagReader(base_repo=self._BaseSearchReader(), user_repo=overlay_reader)
+
+        rows = merged.search_tags("blue eyes", format_name="danbooru", min_usage=100)
+
+        assert len(rows) == 1
+        assert rows[0]["usage_count"] == 123
+        assert rows[0]["format_statuses"]["danbooru"]["usage_count"] == 123
+
+    def test_merged_search_finds_base_scope_translation_patch(self, overlay_reader, overlay_session_factory):
+        from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
+
+        user_repo = UserTagRepository(overlay_session_factory)
+        user_repo.write_translation_patch("base", 20, "ja", "青い目")
+        merged = MergedTagReader(base_repo=self._BaseSearchReader(), user_repo=overlay_reader)
+
+        rows = merged.search_tags("青い目", language="ja")
+
+        assert len(rows) == 1
+        assert rows[0]["tag_id"] == 20
+        assert rows[0]["translations"] == {"ja": ["青い目"]}
+
+    def test_merged_bulk_applies_base_scope_status_patch(self, overlay_reader, overlay_session_factory):
+        with overlay_session_factory() as session:
+            session.add(
+                UserTagStatusPatch(
+                    target_scope="base",
+                    target_tag_id=20,
+                    format_id=1,
+                    type_id=1,
+                    alias=True,
+                    preferred_scope="base",
+                    preferred_tag_id=99,
+                    deprecated=False,
+                )
+            )
+            session.commit()
+
+        merged = MergedTagReader(base_repo=self._BaseSearchReader(), user_repo=overlay_reader)
+
+        result = merged.search_tags_bulk(["blue eyes"], format_name="danbooru", resolve_preferred=True)
+
+        assert result["blue eyes"]["tag_id"] == 99
+        assert result["blue eyes"]["tag"] == "azure eyes"
 
 
 class TestOverlayTagReaderMetadata:

@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from datetime import datetime
 from logging import getLogger
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from genai_tag_db_tools.db.overlay_reader import OverlayTagReader
@@ -1381,6 +1381,201 @@ class MergedTagReader:
         rows = [merged[tag_id] for tag_id in sorted(merged)]
         return rows[offset:target]
 
+    def _requested_format_id(
+        self,
+        format_name: str | None = None,
+        format_names: list[str] | None = None,
+    ) -> int | None:
+        names = format_names or ([format_name] if format_name else [])
+        if not names:
+            return None
+        try:
+            return self.get_format_id(names[0])
+        except (AttributeError, ValueError):
+            return None
+
+    def _format_name_for_id(self, format_id: int) -> str:
+        try:
+            return self.get_format_name(format_id) or str(format_id)
+        except AttributeError:
+            return str(format_id)
+
+    def _type_name_for_format_type(self, format_id: int, type_id: int) -> str:
+        try:
+            return self.get_type_name_by_format_type_id(format_id, type_id) or ""
+        except AttributeError:
+            return ""
+
+    def _select_active_status(self, patches: list[Any], requested_format_id: int | None) -> Any | None:
+        if not patches:
+            return None
+        if requested_format_id is not None:
+            for patch in patches:
+                if patch.format_id == requested_format_id:
+                    return patch
+            return None
+        return sorted(patches, key=lambda patch: patch.format_id)[0]
+
+    def _format_status_dict(self, value: object) -> dict[str, object]:
+        if isinstance(value, dict):
+            return dict(value)
+        return {}
+
+    def _apply_user_patches_to_search_rows(
+        self,
+        rows: list[TagSearchRow],
+        *,
+        requested_format_id: int | None = None,
+    ) -> list[TagSearchRow]:
+        if not rows or not self._has_user():
+            return rows
+        assert self.user_repo is not None
+        tag_ids = {row["tag_id"] for row in rows}
+        patched_by_tag: dict[int, list[Any]] = {}
+        usage_by_tag: dict[int, list[TagUsageCounts]] = {}
+        translations_by_tag = self.user_repo.get_translations_batch(list(tag_ids))
+        for tag_id in tag_ids:
+            patched_by_tag[tag_id] = self.user_repo.list_tag_statuses(tag_id)
+            usage_by_tag[tag_id] = self.user_repo.list_usage_counts(tag_id=tag_id)
+
+        patched_rows: list[TagSearchRow] = []
+        for row in rows:
+            updated = dict(row)
+            format_statuses = dict(row.get("format_statuses") or {})
+
+            for usage in usage_by_tag.get(row["tag_id"], []):
+                fmt_name = self._format_name_for_id(usage.format_id)
+                status = self._format_status_dict(format_statuses.get(fmt_name))
+                status["usage_count"] = usage.count
+                format_statuses[fmt_name] = status
+                if requested_format_id == usage.format_id:
+                    updated["usage_count"] = usage.count
+
+            for translation in translations_by_tag.get(row["tag_id"], []):
+                if translation.language and translation.translation:
+                    translations_obj = updated.get("translations")
+                    translations = dict(cast(dict[str, list[str]], translations_obj)) if isinstance(translations_obj, dict) else {}
+                    values = list(translations.get(translation.language) or [])
+                    if translation.translation not in values:
+                        values.append(translation.translation)
+                    translations[translation.language] = values
+                    updated["translations"] = translations
+
+            patches = patched_by_tag.get(row["tag_id"], [])
+            if not patches:
+                updated["format_statuses"] = format_statuses
+                patched_rows.append(cast(TagSearchRow, updated))
+                continue
+
+            for patch in patches:
+                fmt_name = self._format_name_for_id(patch.format_id)
+                type_name = self._type_name_for_format_type(patch.format_id, patch.type_id)
+                status = self._format_status_dict(format_statuses.get(fmt_name))
+                status.update({
+                    "alias": patch.alias,
+                    "deprecated": patch.deprecated,
+                    "type_id": patch.type_id,
+                    "type_name": type_name,
+                    "preferred_tag_id": patch.preferred_tag_id,
+                })
+                patch_usage = next(
+                    (item for item in usage_by_tag.get(row["tag_id"], []) if item.format_id == patch.format_id),
+                    None,
+                )
+                if patch_usage is not None:
+                    status["usage_count"] = patch_usage.count
+                format_statuses[fmt_name] = status
+
+            active_patch = self._select_active_status(patches, requested_format_id)
+            if active_patch is not None:
+                updated["alias"] = active_patch.alias
+                updated["deprecated"] = active_patch.deprecated
+                updated["type_id"] = active_patch.type_id
+                updated["type_name"] = self._type_name_for_format_type(
+                    active_patch.format_id,
+                    active_patch.type_id,
+                )
+            updated["format_statuses"] = format_statuses
+            patched_rows.append(cast(TagSearchRow, updated))
+        return patched_rows
+
+    def _search_row_matches_filters(
+        self,
+        row: TagSearchRow,
+        keyword: str,
+        *,
+        partial: bool,
+        type_name: str | None,
+        type_names: list[str] | None,
+        language: str | None,
+        min_usage: int | None,
+        max_usage: int | None,
+        alias: bool | None,
+        deprecated: bool | None,
+    ) -> bool:
+        normalized, use_like = normalize_search_keyword(keyword, partial)
+        needle = normalized.strip("%").casefold() if use_like else normalized.casefold()
+        haystacks = [row["tag"], row.get("source_tag") or ""]
+        for values in row.get("translations", {}).values():
+            haystacks.extend(values)
+        if needle and use_like and not any(needle in value.casefold() for value in haystacks):
+            return False
+        if needle and not use_like and not any(needle == value.casefold() for value in haystacks):
+            return False
+
+        if alias is not None and row["alias"] is not alias:
+            return False
+        if deprecated is not None and row["deprecated"] is not deprecated:
+            return False
+        requested_types = type_names or ([type_name] if type_name else [])
+        if requested_types and row["type_name"] not in requested_types:
+            return False
+        if language is not None and language not in row.get("translations", {}):
+            return False
+        if min_usage is not None and row["usage_count"] < min_usage:
+            return False
+        if max_usage is not None and row["usage_count"] > max_usage:
+            return False
+        return True
+
+    def _base_rows_for_user_translation_matches(
+        self,
+        keyword: str,
+        *,
+        partial: bool,
+        language: str | None,
+    ) -> list[TagSearchRow]:
+        if not self._has_user():
+            return []
+        assert self.user_repo is not None
+        normalized, use_like = normalize_search_keyword(keyword, partial)
+        needle = normalized.strip("%").casefold() if use_like else normalized.casefold()
+        rows: list[TagSearchRow] = []
+        for translation in self.user_repo.list_translations():
+            if language is not None and translation.language != language:
+                continue
+            value = translation.translation or ""
+            if needle and use_like and needle not in value.casefold():
+                continue
+            if needle and not use_like and needle != value.casefold():
+                continue
+            tag = self.get_tag_by_id(translation.tag_id)
+            if tag is None:
+                continue
+            rows.append({
+                "tag_id": tag.tag_id,
+                "tag": tag.tag,
+                "source_tag": tag.source_tag,
+                "usage_count": 0,
+                "alias": False,
+                "deprecated": False,
+                "type_id": None,
+                "type_name": "",
+                "translations": {},
+                "format_statuses": {},
+            })
+        return rows
+
     def _accumulate_unique(
         self,
         method_name: str,
@@ -1537,6 +1732,10 @@ class MergedTagReader:
                     break
 
             if preferred_tag is not None:
+                translations: dict[str, list[str]] = {}
+                for translation in self.get_translations(preferred_tag_id):
+                    if translation.language and translation.translation:
+                        translations.setdefault(translation.language, []).append(translation.translation)
                 new_row: TagSearchRow = {
                     "tag_id": preferred_tag_id,
                     "tag": preferred_tag.tag,
@@ -1546,7 +1745,7 @@ class MergedTagReader:
                     "deprecated": row["deprecated"],
                     "type_id": row["type_id"],
                     "type_name": row["type_name"],
-                    "translations": row["translations"],
+                    "translations": translations,
                     "format_statuses": row["format_statuses"],
                 }
                 result.append(new_row)
@@ -1572,23 +1771,56 @@ class MergedTagReader:
         limit: int | None = None,
         offset: int = 0,
     ) -> list[TagSearchRow]:
+        requested_format_id = self._requested_format_id(format_name, format_names)
         rows = self._merge_search_tags_adaptive(
             keyword,
-            limit=limit,
-            offset=offset,
+            limit=None,
+            offset=0,
             partial=partial,
             format_name=format_name,
             format_names=format_names,
-            type_name=type_name,
-            type_names=type_names,
-            language=language,
-            min_usage=min_usage,
-            max_usage=max_usage,
-            alias=alias,
-            deprecated=deprecated,
-            resolve_preferred=resolve_preferred,
+            type_name=None,
+            type_names=None,
+            language=None,
+            min_usage=None,
+            max_usage=None,
+            alias=None,
+            deprecated=None,
+            resolve_preferred=False,
         )
-        if resolve_preferred and self._has_user():
+        rows.extend(
+            self._base_rows_for_user_translation_matches(
+                keyword,
+                partial=partial,
+                language=language,
+            )
+        )
+        deduped = {row["tag_id"]: row for row in rows}
+        rows = self._apply_user_patches_to_search_rows(
+            [deduped[tag_id] for tag_id in sorted(deduped)],
+            requested_format_id=requested_format_id,
+        )
+        rows = [
+            row
+            for row in rows
+            if self._search_row_matches_filters(
+                row,
+                keyword,
+                partial=partial,
+                type_name=type_name,
+                type_names=type_names,
+                language=language,
+                min_usage=min_usage,
+                max_usage=max_usage,
+                alias=alias,
+                deprecated=deprecated,
+            )
+        ]
+        if limit is not None:
+            rows = rows[offset : offset + limit]
+        elif offset:
+            rows = rows[offset:]
+        if resolve_preferred:
             rows = self._resolve_cross_scope_preferred(rows)
         return rows
 
@@ -1604,10 +1836,25 @@ class MergedTagReader:
             None,
             keywords,
             format_name=format_name,
-            resolve_preferred=resolve_preferred,
+            resolve_preferred=False,
         )
-        if not resolve_preferred or not self._has_user():
+        if merged:
+            requested_format_id = self._requested_format_id(format_name)
+            patched = self._apply_user_patches_to_search_rows(
+                list(merged.values()),
+                requested_format_id=requested_format_id,
+            )
+            patched_by_tag_id = {row["tag_id"]: row for row in patched}
+            merged = {
+                keyword: patched_by_tag_id.get(row["tag_id"], row)
+                for keyword, row in merged.items()
+            }
+        if not resolve_preferred:
             return merged
+        merged = {
+            keyword: self._resolve_cross_scope_preferred([row])[0]
+            for keyword, row in merged.items()
+        }
         # OverlayTagReader.search_tags_bulk がスタブのため、未解決キーワードを
         # 個別 search_tags で補完する (cross-scope preferred 解決を含む)
         missing = [kw for kw in keywords if kw not in merged]
