@@ -84,7 +84,7 @@ _CJK_PATTERN = re.compile(r"[\u3400-\u9fff]")
 _JAPANESE_KANA_PATTERN = re.compile(r"[\u3040-\u30ff]")
 _JA_DESCRIPTION_PATTERN = re.compile(r"(です|ます|である|された|するため|について|。|、|:)")
 _ZH_SPECIFIC_CHARS = set(
-    "们这为么后发头见观蓝绿红黄龙马门风鸟鱼脸长与"
+    "们这为么后发头见观蓝绿红龙马门风鸟鱼脸长与"
 )
 _LOW_QUALITY_TRANSLATIONS = {
     "n/a",
@@ -380,6 +380,21 @@ def _effective_recommendation_format_name(repo: MergedTagReader, format_name: st
     if format_name != "unknown":
         return format_name
     if _resolve_recommendation_format_id(repo, "danbooru") is not None:
+        return "danbooru"
+    return format_name
+
+
+def _effective_tag_record_format_name(
+    repo: MergedTagReader | None,
+    row: Mapping[str, Any],
+    format_name: str,
+) -> str:
+    if format_name != "unknown":
+        return format_name
+    format_statuses = row.get("format_statuses") or {}
+    if isinstance(format_statuses, Mapping) and "danbooru" in format_statuses:
+        return "danbooru"
+    if repo is not None and _resolve_recommendation_format_id(repo, "danbooru") is not None:
         return "danbooru"
     return format_name
 
@@ -1117,14 +1132,14 @@ def recommend_tag_record_refinement(
     tag = str(data.get("tag") or source_tag_value)
     target_tag_id = int(data["tag_id"])
     resolved_scope = _infer_target_scope(target_tag_id, target_scope)
-    resolved_format_name = format_name or data.get("format_name") or "unknown"
+    requested_format_name = format_name or data.get("format_name") or "unknown"
+    resolved_format_name = _effective_tag_record_format_name(repo, data, str(requested_format_name))
     resolved_format_id = _resolve_recommendation_format_id(repo, resolved_format_name) if repo else None
     status = _format_status(data, resolved_format_name, resolved_format_id)
     repo_status = _repo_tag_status(repo, target_tag_id, resolved_format_id)
     has_explicit_format_statuses = "format_statuses" in data
     if (
         resolved_format_name != "unknown"
-        and resolved_scope == "user"
         and repo_status is None
         and not status
         and has_explicit_format_statuses

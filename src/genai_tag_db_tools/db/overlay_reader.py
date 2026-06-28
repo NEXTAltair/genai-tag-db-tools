@@ -14,6 +14,8 @@ from genai_tag_db_tools.db.schema import (
     TagFormat,
     TagStatus,
     TagTranslation,
+    TagTypeFormatMapping,
+    TagTypeName,
     TagUsageCounts,
     UserTag,
     UserTagStatusPatch,
@@ -310,22 +312,76 @@ class OverlayTagReader:
         return sorted(self.get_format_map())
 
     def get_tag_formats(self) -> list[str]:
-        return []
+        return sorted(self.get_format_map().values())
 
     def get_tag_languages(self) -> list[str]:
         return []
 
     def get_type_mapping_map(self) -> dict[tuple[int, int], str]:
-        return {}
+        try:
+            with self.session_factory() as session:
+                rows = (
+                    session.query(
+                        TagTypeFormatMapping.format_id,
+                        TagTypeFormatMapping.type_id,
+                        TagTypeName.type_name,
+                    )
+                    .join(TagTypeName, TagTypeFormatMapping.type_name_id == TagTypeName.type_name_id)
+                    .all()
+                )
+        except OperationalError:
+            return {}
+        return {(int(format_id), int(type_id)): type_name for format_id, type_id, type_name in rows}
 
     def get_type_name_by_format_type_id(self, format_id: int, type_id: int) -> str | None:
-        return None
+        try:
+            with self.session_factory() as session:
+                row = (
+                    session.query(TagTypeName.type_name)
+                    .join(
+                        TagTypeFormatMapping,
+                        TagTypeFormatMapping.type_name_id == TagTypeName.type_name_id,
+                    )
+                    .filter(
+                        TagTypeFormatMapping.format_id == format_id,
+                        TagTypeFormatMapping.type_id == type_id,
+                    )
+                    .one_or_none()
+                )
+        except OperationalError:
+            return None
+        return row[0] if row else None
 
     def get_type_name_id(self, type_name: str) -> int | None:
-        return None
+        try:
+            with self.session_factory() as session:
+                row = (
+                    session.query(TagTypeName.type_name_id)
+                    .filter(TagTypeName.type_name == type_name)
+                    .one_or_none()
+                )
+        except OperationalError:
+            return None
+        return int(row[0]) if row else None
 
     def get_type_id_for_format(self, type_name: str, format_id: int) -> int | None:
-        return None
+        try:
+            with self.session_factory() as session:
+                row = (
+                    session.query(TagTypeFormatMapping.type_id)
+                    .join(
+                        TagTypeName,
+                        TagTypeFormatMapping.type_name_id == TagTypeName.type_name_id,
+                    )
+                    .filter(
+                        TagTypeFormatMapping.format_id == format_id,
+                        TagTypeName.type_name == type_name,
+                    )
+                    .one_or_none()
+                )
+        except OperationalError:
+            return None
+        return int(row[0]) if row else None
 
     def get_usage_count(self, tag_id: int, format_id: int) -> int | None:
         """USER_TAG_USAGE_PATCH から usage count を取得する。"""

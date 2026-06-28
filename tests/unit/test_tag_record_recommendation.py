@@ -40,6 +40,16 @@ class _RepoWithDeprecatedOverlay(_RepoWithMeta):
         )
 
 
+class _RepoWithUserOnlyFormat(_RepoWithMeta):
+    def get_format_id(self, format_name: str) -> int:
+        return {"danbooru": 1, "e621": 2, "lorairo": 3001}[format_name]
+
+    def get_type_name_by_format_type_id(self, format_id: int, type_id: int) -> str | None:
+        if (format_id, type_id) == (3001, 0):
+            return "general"
+        return super().get_type_name_by_format_type_id(format_id, type_id)
+
+
 def _reason_codes(row: dict, **kwargs) -> list[str]:
     return [reason.code for reason in recommend_tag_record_refinement(row, **kwargs).reasons]
 
@@ -133,7 +143,6 @@ def test_type_correction_candidate_is_only_emitted_when_format_has_meta_type():
         "deprecated": False,
         "type_id": 1,
         "type_name": "general",
-        "format_statuses": {},
     }
 
     without_repo = recommend_tag_record_refinement(row, format_name="danbooru")
@@ -196,6 +205,29 @@ def test_missing_requested_format_status_does_not_use_other_format_row_level_sta
     assert recommendation.proposals == []
 
 
+def test_missing_requested_format_status_applies_to_base_rows():
+    row = {
+        "tag_id": 49,
+        "tag": "base other only",
+        "deprecated": True,
+        "type_id": 5,
+        "type_name": "meta",
+        "format_statuses": {
+            "other_format": {
+                "deprecated": True,
+                "type_id": 5,
+                "type_name": "meta",
+            }
+        },
+    }
+
+    recommendation = recommend_tag_record_refinement(row, format_name="danbooru")
+
+    assert [reason.code for reason in recommendation.reasons] == ["missing_format_status"]
+    assert recommendation.suggestions[0].kind == "review_only"
+    assert recommendation.proposals == []
+
+
 def test_empty_format_statuses_for_user_tag_is_missing_requested_format_status():
     row = {
         "tag_id": 1_000_000_047,
@@ -215,6 +247,53 @@ def test_empty_format_statuses_for_user_tag_is_missing_requested_format_status()
     assert [reason.code for reason in recommendation.reasons] == ["missing_format_status"]
     assert recommendation.suggestions[0].kind == "review_only"
     assert recommendation.proposals == []
+
+
+def test_unknown_tag_record_uses_danbooru_format_status_when_present():
+    row = {
+        "tag_id": 1_000_000_048,
+        "tag": "old tag",
+        "deprecated": False,
+        "type_id": None,
+        "type_name": "",
+        "format_statuses": {
+            "danbooru": {
+                "deprecated": True,
+                "type_id": 5,
+                "type_name": "meta",
+            }
+        },
+    }
+
+    recommendation = recommend_tag_record_refinement(row)
+
+    assert [reason.code for reason in recommendation.reasons] == ["deprecated_tag"]
+    assert recommendation.proposals == []
+
+
+def test_user_only_format_type_mapping_prevents_unknown_type_warning():
+    row = {
+        "tag_id": 1_000_000_049,
+        "tag": "lorairo custom",
+        "deprecated": False,
+        "type_id": None,
+        "type_name": "",
+        "format_statuses": {
+            "lorairo": {
+                "deprecated": False,
+                "type_id": 0,
+            }
+        },
+    }
+
+    recommendation = recommend_tag_record_refinement(
+        row,
+        format_name="lorairo",
+        repo=_RepoWithUserOnlyFormat(),
+    )
+
+    assert recommendation.needs_refinement is False
+    assert recommendation.reasons == []
 
 
 def test_numeric_format_status_key_is_used_when_repo_resolves_format_id():

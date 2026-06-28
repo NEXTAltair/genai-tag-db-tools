@@ -104,6 +104,7 @@ def test_common_japanese_kanji_translation_is_not_marked_as_chinese():
 
 def test_common_japanese_kanji_words_are_not_marked_as_chinese():
     assert "wrong_language_translation" not in _reason_codes("blue color", "青色")
+    assert "wrong_language_translation" not in _reason_codes("yellow", "黄色")
     assert "wrong_language_translation" not in _reason_codes("kimono", "和服")
 
 

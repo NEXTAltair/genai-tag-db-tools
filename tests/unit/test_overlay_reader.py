@@ -11,6 +11,9 @@ from genai_tag_db_tools.db.overlay_reader import OverlayTagReader
 from genai_tag_db_tools.db.schema import (
     USER_TAG_ID_OFFSET,
     Base,
+    TagFormat,
+    TagTypeFormatMapping,
+    TagTypeName,
     UserOverlayBase,
     UserTag,
     UserTagStatusPatch,
@@ -275,6 +278,34 @@ class TestOverlayTagReaderSearch:
         assert row["type_name"] == ""
         assert row["translations"] == {}
         assert row["format_statuses"] == {}
+
+
+class TestOverlayTagReaderMetadata:
+    def test_get_tag_formats_returns_user_formats(self, overlay_reader, overlay_session_factory):
+        with overlay_session_factory() as session:
+            session.add(TagFormat(format_id=3001, format_name="lorairo"))
+            session.commit()
+
+        assert overlay_reader.get_tag_format_ids() == [3001]
+        assert overlay_reader.get_tag_formats() == ["lorairo"]
+        assert overlay_reader.get_format_map() == {3001: "lorairo"}
+
+    def test_type_mapping_methods_read_user_db_mappings(self, overlay_reader, overlay_session_factory):
+        with overlay_session_factory() as session:
+            session.add(TagFormat(format_id=3001, format_name="lorairo"))
+            session.add(TagTypeName(type_name_id=9001, type_name="general"))
+            session.add(TagTypeName(type_name_id=9002, type_name="meta"))
+            session.add(TagTypeFormatMapping(format_id=3001, type_id=0, type_name_id=9001))
+            session.add(TagTypeFormatMapping(format_id=3001, type_id=5, type_name_id=9002))
+            session.commit()
+
+        assert overlay_reader.get_type_mapping_map() == {
+            (3001, 0): "general",
+            (3001, 5): "meta",
+        }
+        assert overlay_reader.get_type_name_by_format_type_id(3001, 0) == "general"
+        assert overlay_reader.get_type_name_id("meta") == 9002
+        assert overlay_reader.get_type_id_for_format("meta", 3001) == 5
 
 
 class TestOverlayTagReaderEmpty:
