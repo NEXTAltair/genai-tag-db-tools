@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from genai_tag_db_tools.db.runtime import _create_engine
@@ -194,6 +195,66 @@ class TestLocalFeedbackRepositoryHelpers:
 
         assert user_repo.get_or_create_type_id(1000, "unknown") == 0
         assert user_repo.get_type_name_for_type_id(1000, 0) == "unknown"
+
+    def test_get_or_create_type_id_rejects_unknown_when_zero_is_owned(self, user_repo):
+        user_repo.get_or_create_format_id("danbooru", format_id=1000)
+        assert user_repo.get_or_create_type_id(1000, "general", type_id=0) == 0
+
+        with pytest.raises(ValueError, match=r"type_id=0.*'general'"):
+            user_repo.get_or_create_type_id(1000, "unknown")
+
+    def test_get_or_create_type_id_reuses_legacy_duplicate_type_mapping(
+        self,
+        user_repo,
+        user_session_factory,
+    ):
+        user_repo.get_or_create_format_id("danbooru", format_id=1000)
+        assert user_repo.get_or_create_type_id(1000, "general") == 1
+
+        with user_session_factory() as session:
+            general_type_name_id = session.query(TagTypeName.type_name_id).filter_by(type_name="general").scalar()
+            session.add(
+                TagTypeFormatMapping(
+                    format_id=1000,
+                    type_id=2,
+                    type_name_id=general_type_name_id,
+                    description="legacy duplicate mapping",
+                )
+            )
+            session.commit()
+
+        assert user_repo.get_or_create_type_id(1000, "general") == 1
+        assert user_repo.get_type_id(1000, "general") == 1
+
+    def test_has_applied_feedback_allows_legacy_duplicate_applied_rows(
+        self,
+        user_repo,
+        user_session_factory,
+    ):
+        approved_at = datetime(2026, 6, 28, 12, 0, tzinfo=UTC)
+        with user_session_factory() as session:
+            session.execute(text("DROP INDEX IF EXISTS uix_local_feedback_applied_hash"))
+            session.commit()
+
+        for _ in range(2):
+            user_repo.record_feedback_application(
+                proposal_hash="duplicate",
+                proposal_kind="translation_correction",
+                target_kind="translation",
+                target_scope="base",
+                target_tag_id=10,
+                format_name=None,
+                field="translation.ja",
+                approved_by="tester",
+                approved_at=approved_at,
+                status="applied",
+                dry_run=False,
+                proposal_json="{}",
+                before_json=None,
+                after_json='{"changes":[]}',
+            )
+
+        assert user_repo.has_applied_feedback("duplicate") is True
 
     def test_get_status_patch_returns_detached_copy(self, user_repo):
         user_repo.write_patch(

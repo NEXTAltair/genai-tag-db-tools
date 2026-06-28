@@ -240,7 +240,8 @@ class UserTagRepository:
                     TagTypeFormatMapping.format_id == format_id,
                     TagTypeFormatMapping.type_name_id == type_name_row.type_name_id,
                 )
-                .one_or_none()
+                .order_by(TagTypeFormatMapping.type_id)
+                .first()
             )
             if existing is not None:
                 return int(existing.type_id)
@@ -255,25 +256,27 @@ class UserTagRepository:
                         .scalar()
                     )
                     type_id = 1 if max_type_id is None else max(int(max_type_id) + 1, 1)
-            else:
-                id_owner = (
-                    session.query(TagTypeFormatMapping)
-                    .filter(
-                        TagTypeFormatMapping.format_id == format_id,
-                        TagTypeFormatMapping.type_id == type_id,
-                    )
-                    .one_or_none()
+
+            id_owner = (
+                session.query(TagTypeFormatMapping)
+                .filter(
+                    TagTypeFormatMapping.format_id == format_id,
+                    TagTypeFormatMapping.type_id == type_id,
                 )
-                if id_owner is not None and id_owner.type_name_id != type_name_row.type_name_id:
-                    owner_name = (
-                        session.query(TagTypeName.type_name)
-                        .filter(TagTypeName.type_name_id == id_owner.type_name_id)
-                        .scalar()
-                    )
-                    raise ValueError(
-                        f"type_id={type_id} for format_id={format_id} already belongs to "
-                        f"type_name={owner_name!r}"
-                    )
+                .one_or_none()
+            )
+            if id_owner is not None:
+                if id_owner.type_name_id == type_name_row.type_name_id:
+                    return int(id_owner.type_id)
+                owner_name = (
+                    session.query(TagTypeName.type_name)
+                    .filter(TagTypeName.type_name_id == id_owner.type_name_id)
+                    .scalar()
+                )
+                raise ValueError(
+                    f"type_id={type_id} for format_id={format_id} already belongs to "
+                    f"type_name={owner_name!r}"
+                )
 
             session.add(
                 TagTypeFormatMapping(
@@ -296,7 +299,8 @@ class UserTagRepository:
                     TagTypeFormatMapping.format_id == format_id,
                     TagTypeName.type_name == type_name,
                 )
-                .one_or_none()
+                .order_by(TagTypeFormatMapping.type_id)
+                .first()
             )
             return int(row[0]) if row else None
 
@@ -348,12 +352,12 @@ class UserTagRepository:
     def has_applied_feedback(self, proposal_hash: str) -> bool:
         with self._session_factory() as session:
             return (
-                session.query(LocalFeedbackApplication)
+                session.query(LocalFeedbackApplication.application_id)
                 .filter(
                     LocalFeedbackApplication.proposal_hash == proposal_hash,
                     LocalFeedbackApplication.status == "applied",
                 )
-                .one_or_none()
+                .first()
                 is not None
             )
 
