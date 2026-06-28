@@ -401,7 +401,7 @@ def test_alias_addition_creates_user_alias_without_copying_preferred_base_tag(
         proposed={"alias_tag": "blakc hair", "type_name": "general"},
     )
 
-    apply_approved_feedback(_approved(proposal), user_repository=user_repo)
+    apply_approved_feedback(_approved(proposal), user_repository=user_repo, reader=_ReaderWithBaseFormats())
 
     with user_session_factory() as session:
         alias_tag = session.query(UserTag).filter_by(tag="blakc hair").one()
@@ -412,6 +412,47 @@ def test_alias_addition_creates_user_alias_without_copying_preferred_base_tag(
     assert patches[0].alias is True
     assert patches[0].preferred_scope == "base"
     assert patches[0].preferred_tag_id == 30
+    assert patches[0].type_id == 1
+    with user_session_factory() as session:
+        assert session.query(TagTypeFormatMapping).count() == 0
+
+
+def test_user_scope_base_format_apply_requires_reader_or_existing_local_format(user_repo):
+    proposal = _proposal(
+        "usage_correction",
+        target=ProposalTarget(
+            kind="usage",
+            target_scope="user",
+            target_tag_id=1_000_000_040,
+            format_name="danbooru",
+        ),
+        proposed={"count": 123},
+    )
+
+    with pytest.raises(ValueError, match="requires reader or existing local format"):
+        apply_approved_feedback(_approved(proposal), user_repository=user_repo)
+
+
+def test_user_scope_type_correction_uses_reader_type_for_base_format(user_repo, user_session_factory):
+    proposal = _proposal(
+        "type_correction",
+        target=ProposalTarget(
+            kind="tag_type",
+            target_scope="user",
+            target_tag_id=1_000_000_021,
+            format_name="danbooru",
+        ),
+        current={"type_id": 5, "type_name": "meta"},
+        proposed={"type_name": "character"},
+    )
+
+    apply_approved_feedback(_approved(proposal), user_repository=user_repo, reader=_ReaderWithBaseFormats())
+
+    with user_session_factory() as session:
+        patch = session.query(UserTagStatusPatch).one()
+        assert session.query(TagTypeFormatMapping).count() == 0
+    assert patch.format_id == 1
+    assert patch.type_id == 4
 
 
 def test_alias_addition_missing_format_does_not_create_orphan_user_tag(user_repo, user_session_factory):
@@ -458,6 +499,22 @@ def test_usage_correction_writes_usage_patch(user_repo, user_session_factory):
     assert patch.target_scope == "base"
     assert patch.target_tag_id == 40
     assert patch.count == 123
+
+
+def test_usage_correction_rejects_negative_count(user_repo):
+    proposal = _proposal(
+        "usage_correction",
+        target=ProposalTarget(
+            kind="usage",
+            target_scope="base",
+            target_tag_id=40,
+            format_name="danbooru",
+        ),
+        proposed={"count": -1},
+    )
+
+    with pytest.raises(ValueError, match="greater than or equal to 0"):
+        apply_approved_feedback(_approved(proposal), user_repository=user_repo, reader=_ReaderWithBaseFormats())
 
 
 def test_usage_correction_uses_base_format_id_and_reader_can_read_base_scope_patch(
@@ -522,6 +579,74 @@ def test_duplicate_apply_is_skipped(user_repo, user_session_factory):
     with user_session_factory() as session:
         assert session.query(UserTagTranslationPatch).count() == 1
         assert session.query(LocalFeedbackApplication).count() == 2
+
+
+def test_type_correction_requires_proposed_type(user_repo):
+    proposal = _proposal(
+        "type_correction",
+        target=ProposalTarget(
+            kind="tag_type",
+            target_scope="base",
+            target_tag_id=21,
+            format_name="danbooru",
+        ),
+        proposed={},
+    )
+
+    with pytest.raises(ValueError, match="type_name or type_id"):
+        apply_approved_feedback(_approved(proposal), user_repository=user_repo, reader=_ReaderWithBaseFormats())
+
+
+def test_dry_run_runs_reader_dependent_resolution(user_repo, user_session_factory):
+    proposal = _proposal(
+        "status_correction",
+        target=ProposalTarget(
+            kind="tag_status",
+            target_scope="base",
+            target_tag_id=20,
+            format_name="danbooru",
+        ),
+        proposed={"deprecated": True},
+    )
+
+    with pytest.raises(ValueError, match="requires reader-resolved format_id"):
+        apply_approved_feedback(_approved(proposal), user_repository=user_repo, dry_run=True)
+
+    with user_session_factory() as session:
+        assert session.query(TagFormat).count() == 0
+        assert session.query(LocalFeedbackApplication).count() == 0
+
+
+def test_translation_correction_rejects_replacement_without_tombstone(user_repo):
+    proposal = _proposal(
+        "translation_correction",
+        target=ProposalTarget(kind="translation", target_scope="base", target_tag_id=10, language="ja"),
+        current={"translation": "古い訳"},
+        proposed={"language": "ja", "translation": "新しい訳"},
+    )
+
+    with pytest.raises(ValueError, match="cannot replace existing translation"):
+        apply_approved_feedback(_approved(proposal), user_repository=user_repo)
+
+
+def test_reader_format_id_zero_is_unresolved(user_repo):
+    class _ReaderReturningZero:
+        def get_format_id(self, format_name: str) -> int:
+            return 0
+
+    proposal = _proposal(
+        "usage_correction",
+        target=ProposalTarget(
+            kind="usage",
+            target_scope="base",
+            target_tag_id=40,
+            format_name="missing",
+        ),
+        proposed={"count": 1},
+    )
+
+    with pytest.raises(ValueError, match="requires reader-resolved format_id"):
+        apply_approved_feedback(_approved(proposal), user_repository=user_repo, reader=_ReaderReturningZero())
 
 
 def test_list_local_feedback_applications_returns_audit_records(user_repo):

@@ -286,6 +286,34 @@ class UserTagRepository:
             session.commit()
             return int(type_id)
 
+    def get_type_id(self, format_id: int, type_name: str) -> int | None:
+        """user DB 内の既存 type mapping から type_id を取得する。"""
+        with self._session_factory() as session:
+            row = (
+                session.query(TagTypeFormatMapping.type_id)
+                .join(TagTypeName, TagTypeFormatMapping.type_name_id == TagTypeName.type_name_id)
+                .filter(
+                    TagTypeFormatMapping.format_id == format_id,
+                    TagTypeName.type_name == type_name,
+                )
+                .one_or_none()
+            )
+            return int(row[0]) if row else None
+
+    def get_type_name_for_type_id(self, format_id: int, type_id: int) -> str | None:
+        """user DB 内の既存 type mapping から type_id の所有 type_name を取得する。"""
+        with self._session_factory() as session:
+            row = (
+                session.query(TagTypeName.type_name)
+                .join(TagTypeFormatMapping, TagTypeFormatMapping.type_name_id == TagTypeName.type_name_id)
+                .filter(
+                    TagTypeFormatMapping.format_id == format_id,
+                    TagTypeFormatMapping.type_id == type_id,
+                )
+                .one_or_none()
+            )
+            return str(row[0]) if row else None
+
     def get_status_patch(
         self,
         target_scope: str,
