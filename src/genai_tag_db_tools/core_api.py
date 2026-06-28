@@ -1121,12 +1121,14 @@ def recommend_tag_record_refinement(
     resolved_format_id = _resolve_recommendation_format_id(repo, resolved_format_name) if repo else None
     status = _format_status(data, resolved_format_name, resolved_format_id)
     repo_status = _repo_tag_status(repo, target_tag_id, resolved_format_id)
-    has_explicit_format_statuses = bool(data.get("format_statuses") or {})
+    has_explicit_format_statuses = "format_statuses" in data
     if (
         resolved_format_name != "unknown"
+        and resolved_scope == "user"
         and repo_status is None
         and not status
         and has_explicit_format_statuses
+        and (resolved_format_id is not None or bool(data.get("format_statuses") or {}))
     ):
         missing_status_reasons = [_refinement_reason("missing_format_status")]
         missing_status_suggestions = [RefinementSuggestion(kind="review_only")]

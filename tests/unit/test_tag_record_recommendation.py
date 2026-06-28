@@ -196,6 +196,27 @@ def test_missing_requested_format_status_does_not_use_other_format_row_level_sta
     assert recommendation.proposals == []
 
 
+def test_empty_format_statuses_for_user_tag_is_missing_requested_format_status():
+    row = {
+        "tag_id": 1_000_000_047,
+        "tag": "statusless user tag",
+        "deprecated": False,
+        "type_id": 1,
+        "type_name": "general",
+        "format_statuses": {},
+    }
+
+    recommendation = recommend_tag_record_refinement(
+        row,
+        format_name="danbooru",
+        repo=_RepoWithMeta(),
+    )
+
+    assert [reason.code for reason in recommendation.reasons] == ["missing_format_status"]
+    assert recommendation.suggestions[0].kind == "review_only"
+    assert recommendation.proposals == []
+
+
 def test_numeric_format_status_key_is_used_when_repo_resolves_format_id():
     row = {
         "tag_id": 1_000_000_044,
