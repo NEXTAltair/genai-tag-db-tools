@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -12,6 +13,10 @@ from genai_tag_db_tools.db.runtime import _create_engine
 from genai_tag_db_tools.db.schema import (
     USER_TAG_ID_OFFSET,
     Base,
+    LocalFeedbackApplication,
+    TagFormat,
+    TagTypeFormatMapping,
+    TagTypeName,
     UserOverlayBase,
     UserTagStatusPatch,
 )
@@ -154,6 +159,89 @@ class TestWritePatch:
             preferred_scope="base",
             preferred_tag_id=100,
         )
+
+
+class TestLocalFeedbackRepositoryHelpers:
+    def test_get_or_create_format_id_uses_user_offset_sequence(self, user_repo, user_session_factory):
+        format_id = user_repo.get_or_create_format_id("danbooru")
+
+        assert format_id == 1000
+        assert user_repo.get_format_id("danbooru") == 1000
+        with user_session_factory() as session:
+            row = session.query(TagFormat).filter_by(format_name="danbooru").one()
+        assert row.format_id == 1000
+
+    def test_get_or_create_format_id_reuses_reader_resolved_id(self, user_repo):
+        format_id = user_repo.get_or_create_format_id("danbooru", format_id=1)
+
+        assert format_id == 1
+        assert user_repo.get_or_create_format_id("danbooru", format_id=1) == 1
+
+    def test_get_or_create_type_id_creates_type_name_and_mapping(self, user_repo, user_session_factory):
+        user_repo.get_or_create_format_id("danbooru", format_id=1000)
+
+        type_id = user_repo.get_or_create_type_id(1000, "general")
+
+        assert type_id == 1
+        assert user_repo.get_type_id(1000, "general") == 1
+        assert user_repo.get_type_name_for_type_id(1000, 1) == "general"
+        with user_session_factory() as session:
+            assert session.query(TagTypeName).filter_by(type_name="general").count() == 1
+            assert session.query(TagTypeFormatMapping).filter_by(format_id=1000, type_id=1).count() == 1
+
+    def test_get_or_create_type_id_preserves_unknown_as_zero(self, user_repo):
+        user_repo.get_or_create_format_id("danbooru", format_id=1000)
+
+        assert user_repo.get_or_create_type_id(1000, "unknown") == 0
+        assert user_repo.get_type_name_for_type_id(1000, 0) == "unknown"
+
+    def test_get_status_patch_returns_detached_copy(self, user_repo):
+        user_repo.write_patch(
+            target_scope="base",
+            target_tag_id=10,
+            format_id=1,
+            type_id=5,
+            alias=True,
+            preferred_scope="base",
+            preferred_tag_id=99,
+            deprecated=True,
+        )
+
+        row = user_repo.get_status_patch("base", 10, 1)
+
+        assert row is not None
+        assert row.target_scope == "base"
+        assert row.type_id == 5
+        assert row.alias is True
+        assert row.preferred_tag_id == 99
+        assert row.deprecated is True
+
+    def test_record_and_list_feedback_applications(self, user_repo):
+        approved_at = datetime(2026, 6, 28, 12, 0, tzinfo=UTC)
+
+        row = user_repo.record_feedback_application(
+            proposal_hash="abc123",
+            proposal_kind="translation_correction",
+            target_kind="translation",
+            target_scope="base",
+            target_tag_id=10,
+            format_name=None,
+            field="translation.ja",
+            approved_by="tester",
+            approved_at=approved_at,
+            status="applied",
+            dry_run=False,
+            proposal_json="{}",
+            before_json=None,
+            after_json='{"changes":[]}',
+        )
+
+        assert row.application_id == 1
+        assert user_repo.has_applied_feedback("abc123") is True
+        records = user_repo.list_feedback_applications()
+        assert len(records) == 1
+        assert isinstance(records[0], LocalFeedbackApplication)
+        assert records[0].proposal_hash == "abc123"
 
 
 # --- DummyRepo / DummyReader (既存テストパターンに準拠) ---

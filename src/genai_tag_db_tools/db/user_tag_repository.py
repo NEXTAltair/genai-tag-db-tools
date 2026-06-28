@@ -8,6 +8,10 @@ from sqlalchemy.orm import Session
 
 from genai_tag_db_tools.db.schema import (
     USER_TAG_ID_OFFSET,
+    LocalFeedbackApplication,
+    TagFormat,
+    TagTypeFormatMapping,
+    TagTypeName,
     UserTag,
     UserTagStatusPatch,
     UserTagTranslationPatch,
@@ -177,3 +181,228 @@ class UserTagRepository:
                     )
                 )
             session.commit()
+
+    def get_format_id(self, format_name: str) -> int | None:
+        """user DB 内の TAG_FORMATS から format_id を取得する。"""
+        with self._session_factory() as session:
+            row = session.query(TagFormat.format_id).filter(TagFormat.format_name == format_name).one_or_none()
+            return int(row[0]) if row else None
+
+    def get_or_create_format_id(self, format_name: str, format_id: int | None = None) -> int:
+        """user DB 内の TAG_FORMATS から format_id を取得し、無ければ作る。"""
+        with self._session_factory() as session:
+            existing = session.query(TagFormat).filter(TagFormat.format_name == format_name).one_or_none()
+            if existing is not None:
+                if format_id is not None and int(existing.format_id) != format_id:
+                    raise ValueError(
+                        f"format_name={format_name!r} already exists with format_id={existing.format_id}, "
+                        f"not {format_id}"
+                    )
+                return int(existing.format_id)
+            if format_id is not None:
+                id_owner = session.query(TagFormat).filter(TagFormat.format_id == format_id).one_or_none()
+                if id_owner is not None and id_owner.format_name != format_name:
+                    raise ValueError(
+                        f"format_id={format_id} already belongs to format_name={id_owner.format_name!r}"
+                    )
+                next_id = format_id
+            else:
+                max_id = session.query(func.max(TagFormat.format_id)).scalar()
+                next_id = 1000 if max_id is None else max(int(max_id) + 1, 1000)
+            session.add(
+                TagFormat(
+                    format_id=next_id,
+                    format_name=format_name,
+                    description=f"Auto-created local feedback format: {format_name}",
+                )
+            )
+            session.commit()
+            return next_id
+
+    def get_or_create_type_id(self, format_id: int, type_name: str, type_id: int | None = None) -> int:
+        """user DB 内の type mapping を取得し、無ければ作る。"""
+        with self._session_factory() as session:
+            type_name_row = session.query(TagTypeName).filter(TagTypeName.type_name == type_name).one_or_none()
+            if type_name_row is None:
+                max_type_name_id = session.query(func.max(TagTypeName.type_name_id)).scalar()
+                type_name_id = 0 if max_type_name_id is None else int(max_type_name_id) + 1
+                type_name_row = TagTypeName(
+                    type_name_id=type_name_id,
+                    type_name=type_name,
+                    description=f"Auto-created local feedback type: {type_name}",
+                )
+                session.add(type_name_row)
+                session.flush()
+
+            existing = (
+                session.query(TagTypeFormatMapping)
+                .filter(
+                    TagTypeFormatMapping.format_id == format_id,
+                    TagTypeFormatMapping.type_name_id == type_name_row.type_name_id,
+                )
+                .one_or_none()
+            )
+            if existing is not None:
+                return int(existing.type_id)
+
+            if type_id is None:
+                if type_name == "unknown":
+                    type_id = 0
+                else:
+                    max_type_id = (
+                        session.query(func.max(TagTypeFormatMapping.type_id))
+                        .filter(TagTypeFormatMapping.format_id == format_id)
+                        .scalar()
+                    )
+                    type_id = 1 if max_type_id is None else max(int(max_type_id) + 1, 1)
+            else:
+                id_owner = (
+                    session.query(TagTypeFormatMapping)
+                    .filter(
+                        TagTypeFormatMapping.format_id == format_id,
+                        TagTypeFormatMapping.type_id == type_id,
+                    )
+                    .one_or_none()
+                )
+                if id_owner is not None and id_owner.type_name_id != type_name_row.type_name_id:
+                    owner_name = (
+                        session.query(TagTypeName.type_name)
+                        .filter(TagTypeName.type_name_id == id_owner.type_name_id)
+                        .scalar()
+                    )
+                    raise ValueError(
+                        f"type_id={type_id} for format_id={format_id} already belongs to "
+                        f"type_name={owner_name!r}"
+                    )
+
+            session.add(
+                TagTypeFormatMapping(
+                    format_id=format_id,
+                    type_id=type_id,
+                    type_name_id=type_name_row.type_name_id,
+                    description=f"Auto-created local feedback mapping: {format_id}/{type_name}",
+                )
+            )
+            session.commit()
+            return int(type_id)
+
+    def get_type_id(self, format_id: int, type_name: str) -> int | None:
+        """user DB 内の既存 type mapping から type_id を取得する。"""
+        with self._session_factory() as session:
+            row = (
+                session.query(TagTypeFormatMapping.type_id)
+                .join(TagTypeName, TagTypeFormatMapping.type_name_id == TagTypeName.type_name_id)
+                .filter(
+                    TagTypeFormatMapping.format_id == format_id,
+                    TagTypeName.type_name == type_name,
+                )
+                .one_or_none()
+            )
+            return int(row[0]) if row else None
+
+    def get_type_name_for_type_id(self, format_id: int, type_id: int) -> str | None:
+        """user DB 内の既存 type mapping から type_id の所有 type_name を取得する。"""
+        with self._session_factory() as session:
+            row = (
+                session.query(TagTypeName.type_name)
+                .join(TagTypeFormatMapping, TagTypeFormatMapping.type_name_id == TagTypeName.type_name_id)
+                .filter(
+                    TagTypeFormatMapping.format_id == format_id,
+                    TagTypeFormatMapping.type_id == type_id,
+                )
+                .one_or_none()
+            )
+            return str(row[0]) if row else None
+
+    def get_status_patch(
+        self,
+        target_scope: str,
+        target_tag_id: int,
+        format_id: int,
+    ) -> UserTagStatusPatch | None:
+        """既存の status patch を detached 風に返す。"""
+        with self._session_factory() as session:
+            row = (
+                session.query(UserTagStatusPatch)
+                .filter(
+                    UserTagStatusPatch.target_scope == target_scope,
+                    UserTagStatusPatch.target_tag_id == target_tag_id,
+                    UserTagStatusPatch.format_id == format_id,
+                )
+                .one_or_none()
+            )
+            if row is None:
+                return None
+            return UserTagStatusPatch(
+                target_scope=row.target_scope,
+                target_tag_id=row.target_tag_id,
+                format_id=row.format_id,
+                type_id=row.type_id,
+                alias=row.alias,
+                preferred_scope=row.preferred_scope,
+                preferred_tag_id=row.preferred_tag_id,
+                deprecated=row.deprecated,
+                deprecated_at=row.deprecated_at,
+            )
+
+    def has_applied_feedback(self, proposal_hash: str) -> bool:
+        with self._session_factory() as session:
+            return (
+                session.query(LocalFeedbackApplication)
+                .filter(
+                    LocalFeedbackApplication.proposal_hash == proposal_hash,
+                    LocalFeedbackApplication.status == "applied",
+                )
+                .one_or_none()
+                is not None
+            )
+
+    def record_feedback_application(
+        self,
+        *,
+        proposal_hash: str,
+        proposal_kind: str,
+        target_kind: str,
+        target_scope: str | None,
+        target_tag_id: int | None,
+        format_name: str | None,
+        field: str | None,
+        approved_by: str,
+        approved_at,
+        status: str,
+        dry_run: bool,
+        proposal_json: str,
+        before_json: str | None,
+        after_json: str | None,
+        error_message: str | None = None,
+    ) -> LocalFeedbackApplication:
+        with self._session_factory() as session:
+            row = LocalFeedbackApplication(
+                proposal_hash=proposal_hash,
+                proposal_kind=proposal_kind,
+                target_kind=target_kind,
+                target_scope=target_scope,
+                target_tag_id=target_tag_id,
+                format_name=format_name,
+                field=field,
+                approved_by=approved_by,
+                approved_at=approved_at,
+                status=status,
+                dry_run=dry_run,
+                proposal_json=proposal_json,
+                before_json=before_json,
+                after_json=after_json,
+                error_message=error_message,
+            )
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return row
+
+    def list_feedback_applications(self) -> list[LocalFeedbackApplication]:
+        with self._session_factory() as session:
+            return (
+                session.query(LocalFeedbackApplication)
+                .order_by(LocalFeedbackApplication.application_id)
+                .all()
+            )
