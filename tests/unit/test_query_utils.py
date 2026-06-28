@@ -7,7 +7,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from genai_tag_db_tools.db.query_utils import TagSearchPreloader, TagSearchQueryBuilder
+from genai_tag_db_tools.db.query_utils import (
+    TagSearchPreloader,
+    TagSearchQueryBuilder,
+    TagSearchResultBuilder,
+)
 from genai_tag_db_tools.db.schema import (
     Base,
     Tag,
@@ -156,7 +160,57 @@ def test_filtered_tag_ids_treats_all_as_unfiltered(
         )
 
     assert sorted(ids) == [1, 2]
-    assert format_id == 0
+    # "all"/no concrete format is signalled by None so the sentinel "unknown"
+    # format (format_id == 0) is not mistaken for "no active format".
+    assert format_id is None
+
+
+def test_filtered_tag_ids_unknown_format_returns_id_zero_not_none(
+    session_factory: Callable[[], Session],
+) -> None:
+    """Requesting the sentinel "unknown" format must yield format_id == 0.
+
+    Regression for issue #63: format_id 0 (the real "unknown" format) used to be
+    indistinguishable from the "no active format" sentinel, which blanked the
+    top-level type fields in search output.
+    """
+    with session_factory() as session:
+        session.add(TagFormat(format_id=0, format_name="unknown"))
+        session.add(TagTypeName(type_name_id=0, type_name="unknown"))
+        session.add(TagTypeFormatMapping(format_id=0, type_id=0, type_name_id=0))
+        session.add(Tag(tag_id=1, source_tag="bad_id", tag="bad id"))
+        session.add(
+            TagStatus(
+                tag_id=1,
+                format_id=0,
+                type_id=0,
+                alias=False,
+                preferred_tag_id=1,
+                deprecated=False,
+            )
+        )
+        session.commit()
+
+        builder = TagSearchQueryBuilder(session)
+        ids, format_id = builder.filtered_tag_ids(
+            "%bad%",
+            use_like=True,
+            format_names=["unknown"],
+        )
+
+        assert sorted(ids) == [1]
+        assert format_id == 0
+
+        preloaded = TagSearchPreloader(session).load(ids)
+        result_builder = TagSearchResultBuilder(format_id=format_id, resolve_preferred=False)
+        row = result_builder.build_row(1, preloaded)
+
+    assert row is not None
+    # Top-level fields must reflect the unknown-format status, matching
+    # format_statuses["unknown"], rather than being blanked out.
+    assert row["type_name"] == "unknown"
+    assert row["type_id"] == 0
+    assert row["format_statuses"]["unknown"]["type_name"] == "unknown"
 
 
 def test_filtered_tag_ids_negative_status_filters_keep_statusless_tags(
