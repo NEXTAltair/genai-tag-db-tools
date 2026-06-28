@@ -8,6 +8,10 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Literal
 
+from genai_tag_db_tools.core.language_detection import (
+    DetectedLanguage,
+    detect_translation_language,
+)
 from genai_tag_db_tools.db import runtime
 from genai_tag_db_tools.db.repository import MergedTagReader
 from genai_tag_db_tools.db.schema import USER_TAG_ID_OFFSET
@@ -83,9 +87,6 @@ _ASCII_ONLY_PATTERN = re.compile(r"^[\x00-\x7f]+$")
 _CJK_PATTERN = re.compile(r"[\u3400-\u9fff]")
 _JAPANESE_KANA_PATTERN = re.compile(r"[\u3040-\u30ff]")
 _JA_DESCRIPTION_PATTERN = re.compile(r"(です|ます|である|された|するため|について|。|、|:)")
-_ZH_SPECIFIC_CHARS = set(
-    "们这为么后发头见观蓝绿红龙马门风鸟鱼脸长与"
-)
 _LOW_QUALITY_TRANSLATIONS = {
     "n/a",
     "na",
@@ -954,9 +955,17 @@ def _looks_like_english_only(value: str) -> bool:
 
 
 def _looks_like_chinese_for_ja(value: str) -> bool:
+    """Return True when a ``ja`` translation looks like Chinese instead.
+
+    Delegates to the language-detection module (lingua-backed when available,
+    deterministic script heuristic otherwise). Kana-containing text is treated as
+    Japanese, and ambiguous Han-only kanji words are *not* asserted as Chinese, so
+    natural Japanese kanji (e.g. 黄色, 和服) are not false-positives.
+    """
     if not _CJK_PATTERN.search(value) or _JAPANESE_KANA_PATTERN.search(value):
         return False
-    return any(char in _ZH_SPECIFIC_CHARS for char in value)
+    result = detect_translation_language(value)
+    return result.language is DetectedLanguage.CHINESE and not result.is_ambiguous
 
 
 def _is_overlong_translation(value: str) -> bool:

@@ -29,6 +29,7 @@ dependencies = [
     "alembic>=1.13.1", # データベースマイグレーションツール
     "sqlalchemy>=2.0.0", # データベースORM
     "huggingface_hub>=0.25.0", # HFデータセット/モデルのダウンロード
+    "lingua-language-detector>=2.1.1",
 ]
 
 # 開発時のみ必要な追加パッケージ
