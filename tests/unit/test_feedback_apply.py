@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import StaticPool, create_engine
@@ -28,9 +29,33 @@ from genai_tag_db_tools.services.feedback_apply import (
 
 class _ReaderWithBaseFormats:
     def get_format_id(self, format_name: str) -> int:
-        if format_name == "danbooru":
-            return 1
+        if format_name in {"danbooru", "unknown"}:
+            return {"danbooru": 1, "unknown": 999}[format_name]
         raise ValueError(format_name)
+
+    def get_type_id_for_format(self, type_name: str, format_id: int) -> int | None:
+        return {
+            (1, "general"): 1,
+            (1, "character"): 4,
+            (1, "meta"): 5,
+            (999, "unknown"): 0,
+        }.get((format_id, type_name))
+
+    def get_tag_status(self, tag_id: int, format_id: int):
+        return {
+            (20, 1): SimpleNamespace(
+                type_id=5,
+                alias=True,
+                preferred_tag_id=99,
+                deprecated=False,
+            ),
+            (21, 1): SimpleNamespace(
+                type_id=5,
+                alias=True,
+                preferred_tag_id=99,
+                deprecated=True,
+            ),
+        }.get((tag_id, format_id))
 
 
 @pytest.fixture()
@@ -176,7 +201,11 @@ def test_status_correction_writes_deprecated_overlay_patch(user_repo, user_sessi
         proposed={"deprecated": True},
     )
 
-    result = apply_approved_feedback(_approved(proposal), user_repository=user_repo)
+    result = apply_approved_feedback(
+        _approved(proposal),
+        user_repository=user_repo,
+        reader=_ReaderWithBaseFormats(),
+    )
 
     assert result.status == "applied"
     with user_session_factory() as session:
@@ -228,21 +257,21 @@ def test_status_correction_preserves_current_base_status_fields(user_repo, user_
 def test_type_correction_preserves_existing_status_fields(user_repo, user_session_factory):
     format_id = user_repo.get_or_create_format_id("danbooru")
     user_repo.write_patch(
-        target_scope="base",
-        target_tag_id=21,
+        target_scope="user",
+        target_tag_id=1_000_000_021,
         format_id=format_id,
         type_id=0,
         alias=False,
-        preferred_scope="base",
-        preferred_tag_id=21,
+        preferred_scope="user",
+        preferred_tag_id=1_000_000_021,
         deprecated=True,
     )
     proposal = _proposal(
         "type_correction",
         target=ProposalTarget(
             kind="tag_type",
-            target_scope="base",
-            target_tag_id=21,
+            target_scope="user",
+            target_tag_id=1_000_000_021,
             format_name="danbooru",
         ),
         proposed={"type_id": 4, "type_name": "character"},
@@ -266,8 +295,8 @@ def test_type_correction_rejects_type_id_collision(user_repo):
         "type_correction",
         target=ProposalTarget(
             kind="tag_type",
-            target_scope="base",
-            target_tag_id=21,
+            target_scope="user",
+            target_tag_id=1_000_000_021,
             format_name="danbooru",
         ),
         proposed={"type_id": 1, "type_name": "character"},
@@ -275,6 +304,84 @@ def test_type_correction_rejects_type_id_collision(user_repo):
 
     with pytest.raises(ValueError, match="already belongs"):
         apply_approved_feedback(_approved(proposal), user_repository=user_repo)
+
+
+def test_base_scope_format_dependent_apply_requires_reader(user_repo):
+    proposal = _proposal(
+        "status_correction",
+        target=ProposalTarget(
+            kind="tag_status",
+            target_scope="base",
+            target_tag_id=20,
+            format_name="danbooru",
+        ),
+        proposed={"deprecated": True},
+    )
+
+    with pytest.raises(ValueError, match="requires reader"):
+        apply_approved_feedback(_approved(proposal), user_repository=user_repo)
+
+
+def test_status_correction_uses_reader_status_when_current_is_sparse(user_repo, user_session_factory):
+    proposal = _proposal(
+        "status_correction",
+        target=ProposalTarget(
+            kind="tag_status",
+            target_scope="base",
+            target_tag_id=20,
+            format_name="danbooru",
+        ),
+        current={"deprecated": False},
+        proposed={"deprecated": True},
+    )
+
+    apply_approved_feedback(
+        _approved(proposal),
+        user_repository=user_repo,
+        reader=_ReaderWithBaseFormats(),
+    )
+
+    with user_session_factory() as session:
+        patch = session.query(UserTagStatusPatch).one()
+    assert patch.format_id == 1
+    assert patch.type_id == 5
+    assert patch.alias is True
+    assert patch.preferred_scope == "base"
+    assert patch.preferred_tag_id == 99
+    assert patch.deprecated is True
+
+
+def test_type_correction_uses_reader_type_and_preserves_reader_status(
+    user_repo,
+    user_session_factory,
+):
+    proposal = _proposal(
+        "type_correction",
+        target=ProposalTarget(
+            kind="tag_type",
+            target_scope="base",
+            target_tag_id=21,
+            format_name="danbooru",
+        ),
+        current={"type_id": 5, "type_name": "meta"},
+        proposed={"type_name": "character"},
+    )
+
+    apply_approved_feedback(
+        _approved(proposal),
+        user_repository=user_repo,
+        reader=_ReaderWithBaseFormats(),
+    )
+
+    with user_session_factory() as session:
+        patch = session.query(UserTagStatusPatch).one()
+        assert session.query(TagTypeFormatMapping).count() == 0
+    assert patch.format_id == 1
+    assert patch.type_id == 4
+    assert patch.alias is True
+    assert patch.preferred_scope == "base"
+    assert patch.preferred_tag_id == 99
+    assert patch.deprecated is True
 
 
 def test_alias_addition_creates_user_alias_without_copying_preferred_base_tag(
@@ -340,7 +447,11 @@ def test_usage_correction_writes_usage_patch(user_repo, user_session_factory):
         proposed={"count": 123},
     )
 
-    apply_approved_feedback(_approved(proposal), user_repository=user_repo)
+    apply_approved_feedback(
+        _approved(proposal),
+        user_repository=user_repo,
+        reader=_ReaderWithBaseFormats(),
+    )
 
     with user_session_factory() as session:
         patch = session.query(UserTagUsagePatch).one()
