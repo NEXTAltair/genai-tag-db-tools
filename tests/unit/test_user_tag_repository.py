@@ -195,6 +195,35 @@ class TestLocalFeedbackRepositoryHelpers:
         assert user_repo.get_or_create_type_id(1000, "unknown") == 0
         assert user_repo.get_type_name_for_type_id(1000, 0) == "unknown"
 
+    def test_get_or_create_type_id_rejects_unknown_when_zero_is_owned(self, user_repo):
+        user_repo.get_or_create_format_id("danbooru", format_id=1000)
+        assert user_repo.get_or_create_type_id(1000, "general", type_id=0) == 0
+
+        with pytest.raises(ValueError, match=r"type_id=0.*'general'"):
+            user_repo.get_or_create_type_id(1000, "unknown")
+
+    def test_has_applied_feedback_allows_duplicate_applied_rows(self, user_repo):
+        approved_at = datetime(2026, 6, 28, 12, 0, tzinfo=UTC)
+        for _ in range(2):
+            user_repo.record_feedback_application(
+                proposal_hash="duplicate",
+                proposal_kind="translation_correction",
+                target_kind="translation",
+                target_scope="base",
+                target_tag_id=10,
+                format_name=None,
+                field="translation.ja",
+                approved_by="tester",
+                approved_at=approved_at,
+                status="applied",
+                dry_run=False,
+                proposal_json="{}",
+                before_json=None,
+                after_json='{"changes":[]}',
+            )
+
+        assert user_repo.has_applied_feedback("duplicate") is True
+
     def test_get_status_patch_returns_detached_copy(self, user_repo):
         user_repo.write_patch(
             target_scope="base",
