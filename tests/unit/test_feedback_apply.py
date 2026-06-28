@@ -617,7 +617,7 @@ def test_duplicate_apply_is_skipped(user_repo, user_session_factory):
     assert second.status == "skipped"
     with user_session_factory() as session:
         assert session.query(UserTagTranslationPatch).count() == 1
-        assert session.query(LocalFeedbackApplication).count() == 2
+        assert session.query(LocalFeedbackApplication).count() == 1
 
 
 def test_type_correction_requires_proposed_type(user_repo):

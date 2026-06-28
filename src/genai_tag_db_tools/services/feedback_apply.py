@@ -48,16 +48,6 @@ class LocalFeedbackApplyService:
         self._validate_proposal(proposal)
 
         if self._user_repository.has_applied_feedback(proposal_hash):
-            application = self._record_application(
-                feedback,
-                proposal_hash=proposal_hash,
-                proposal_json=proposal_json,
-                status="skipped",
-                dry_run=dry_run,
-                before=None,
-                after=None,
-                error_message=None,
-            )
             return LocalFeedbackApplyResult(
                 ok=True,
                 status="skipped",
@@ -65,7 +55,6 @@ class LocalFeedbackApplyService:
                 proposal_hash=proposal_hash,
                 proposal_kind=proposal.kind,
                 message="proposal is already applied",
-                application=application,
             )
 
         before = self._snapshot_before(proposal)
