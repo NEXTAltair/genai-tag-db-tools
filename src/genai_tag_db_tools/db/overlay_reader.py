@@ -248,7 +248,17 @@ class OverlayTagReader:
             ]
 
     def list_translations(self) -> list[TagTranslation]:
-        return []
+        with self.session_factory() as session:
+            rows = session.query(UserTagTranslationPatch).all()
+            return [
+                TagTranslation(
+                    translation_id=r.patch_id,
+                    tag_id=r.target_tag_id,
+                    language=r.language,
+                    translation=r.translation,
+                )
+                for r in rows
+            ]
 
     def get_translations_batch(self, tag_ids: list[int]) -> dict[int, list[TagTranslation]]:
         """複数 tag_id の翻訳をバッチ取得する。"""
