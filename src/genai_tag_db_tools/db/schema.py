@@ -1,7 +1,7 @@
 # genai_tag_db_tools.db.schema
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Boolean,
@@ -12,8 +12,31 @@ from sqlalchemy import (
     Index,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.types import TypeDecorator
+
+
+class UTCDateTime(TypeDecorator[datetime]):
+    """Store aware datetimes as naive UTC and read them back as UTC-aware."""
+
+    impl = DateTime
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, dialect: object) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value
+        return value.astimezone(UTC).replace(tzinfo=None)
+
+    def process_result_value(self, value: datetime | None, dialect: object) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
 
 class Base(DeclarativeBase):
@@ -292,4 +315,69 @@ class UserTagUsagePatch(UserOverlayBase):
     __table_args__ = (
         CheckConstraint("target_scope IN ('base', 'user')", name="ck_usage_patch_scope"),
         Index("ix_usage_patch_target", "target_scope", "target_tag_id"),
+    )
+
+
+class LocalFeedbackApplication(UserOverlayBase):
+    """user-local feedback proposal の apply 履歴。
+
+    user DB 専用の audit table。proposal の二重 apply 防止と、あとからの確認に使う。
+    """
+
+    __tablename__ = "LOCAL_FEEDBACK_APPLICATIONS"
+
+    application_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    proposal_hash: Mapped[str] = mapped_column()
+    proposal_kind: Mapped[str] = mapped_column()
+    target_kind: Mapped[str] = mapped_column()
+    target_scope: Mapped[str | None] = mapped_column(nullable=True)
+    target_tag_id: Mapped[int | None] = mapped_column(nullable=True)
+    format_name: Mapped[str | None] = mapped_column(nullable=True)
+    field: Mapped[str | None] = mapped_column(nullable=True)
+    approved_by: Mapped[str] = mapped_column()
+    approved_at: Mapped[datetime] = mapped_column(UTCDateTime())
+    applied_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    status: Mapped[str] = mapped_column()
+    dry_run: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="0")
+    proposal_json: Mapped[str] = mapped_column()
+    before_json: Mapped[str | None] = mapped_column(nullable=True)
+    after_json: Mapped[str | None] = mapped_column(nullable=True)
+    error_message: Mapped[str | None] = mapped_column(nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "proposal_kind IN ("
+            "'tag_name_correction', 'alias_addition', 'preferred_tag_correction', "
+            "'translation_correction', 'usage_correction', 'type_correction', "
+            "'status_correction', 'format_relation_review'"
+            ")",
+            name="ck_local_feedback_proposal_kind",
+        ),
+        CheckConstraint(
+            "target_kind IN ("
+            "'tag_name', 'alias', 'preferred_tag', 'tag_type', 'tag_status', "
+            "'translation', 'usage', 'format_relation'"
+            ")",
+            name="ck_local_feedback_target_kind",
+        ),
+        CheckConstraint(
+            "target_scope IS NULL OR target_scope IN ('base', 'user')",
+            name="ck_local_feedback_target_scope",
+        ),
+        CheckConstraint(
+            "status IN ('applied', 'dry_run', 'skipped', 'failed')",
+            name="ck_local_feedback_status",
+        ),
+        CheckConstraint(
+            "(status != 'dry_run' OR dry_run = 1) AND (status != 'applied' OR dry_run = 0)",
+            name="ck_local_feedback_dry_run_status",
+        ),
+        Index(
+            "uix_local_feedback_applied_hash",
+            "proposal_hash",
+            unique=True,
+            sqlite_where=text("dry_run = 0 AND status IN ('applied', 'skipped')"),
+        ),
+        Index("ix_local_feedback_hash", "proposal_hash"),
+        Index("ix_local_feedback_target", "target_scope", "target_tag_id"),
     )

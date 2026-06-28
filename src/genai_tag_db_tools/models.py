@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal, TypedDict
 
 from pydantic import BaseModel, Field, model_validator
@@ -410,6 +411,114 @@ class RefinementRecommendation(BaseModel):
         default_factory=list,
         description="Future DB feedback proposals derived from the recommendation",
     )
+
+
+class ApprovedDbFeedback(BaseModel):
+    """人間承認済みの DB feedback proposal。"""
+
+    proposal: DbFeedbackProposal = Field(..., description="Approved proposal")
+    approved: bool = Field(..., description="Whether this proposal was approved by a human")
+    approved_by: str = Field(..., description="Human approver identifier")
+    approved_at: datetime = Field(..., description="Approval timestamp")
+    approval_note: str | None = Field(default=None, description="Optional approval note")
+
+    @model_validator(mode="after")
+    def _validate_approved(self) -> ApprovedDbFeedback:
+        if not self.approved:
+            raise ValueError("approved feedback must have approved=true")
+        return self
+
+
+class LocalFeedbackApplicationRecord(BaseModel):
+    """user-local feedback apply の audit record。"""
+
+    application_id: int
+    proposal_hash: str
+    proposal_kind: Literal[
+        "tag_name_correction",
+        "alias_addition",
+        "preferred_tag_correction",
+        "translation_correction",
+        "usage_correction",
+        "type_correction",
+        "status_correction",
+        "format_relation_review",
+    ]
+    target_kind: Literal[
+        "tag_name",
+        "alias",
+        "preferred_tag",
+        "tag_type",
+        "tag_status",
+        "translation",
+        "usage",
+        "format_relation",
+    ]
+    target_scope: Literal["base", "user"] | None = None
+    target_tag_id: int | None = None
+    format_name: str | None = None
+    field: str | None = None
+    approved_by: str
+    approved_at: datetime
+    applied_at: datetime | None = None
+    status: Literal["applied", "dry_run", "skipped", "failed"]
+    dry_run: bool
+    proposal_json: str
+    before_json: str | None = None
+    after_json: str | None = None
+    error_message: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_dry_run_status(self) -> LocalFeedbackApplicationRecord:
+        if self.status == "applied" and self.dry_run:
+            raise ValueError("applied application records must have dry_run=false")
+        if self.status == "dry_run" and not self.dry_run:
+            raise ValueError("dry_run application records must have dry_run=true")
+        return self
+
+
+class LocalFeedbackApplyResult(BaseModel):
+    """user-local feedback apply の結果。"""
+
+    ok: bool = Field(..., description="Whether the operation completed without validation/apply error")
+    status: Literal["applied", "dry_run", "skipped", "failed"] = Field(..., description="Apply status")
+    dry_run: bool = Field(..., description="Whether this was a dry run")
+    proposal_hash: str = Field(..., description="Stable hash of the proposal payload")
+    proposal_kind: Literal[
+        "tag_name_correction",
+        "alias_addition",
+        "preferred_tag_correction",
+        "translation_correction",
+        "usage_correction",
+        "type_correction",
+        "status_correction",
+        "format_relation_review",
+    ] = Field(..., description="Proposal kind")
+    message: str = Field(..., description="Human-readable result message")
+    changes: list[dict[str, ProposalValue]] = Field(default_factory=list, description="Planned or applied changes")
+    application: LocalFeedbackApplicationRecord | None = Field(
+        default=None,
+        description="Audit record for applied/dry-run/skipped proposals",
+    )
+
+    @model_validator(mode="after")
+    def _validate_ok_status(self) -> LocalFeedbackApplyResult:
+        if self.ok != (self.status != "failed"):
+            raise ValueError("ok must be true unless status is failed")
+        if self.status == "applied" and self.dry_run:
+            raise ValueError("applied results must have dry_run=false")
+        if self.status == "dry_run" and not self.dry_run:
+            raise ValueError("dry_run results must have dry_run=true")
+        if self.application is not None:
+            if self.application.proposal_hash != self.proposal_hash:
+                raise ValueError("application proposal_hash must match result proposal_hash")
+            if self.application.proposal_kind != self.proposal_kind:
+                raise ValueError("application proposal_kind must match result proposal_kind")
+            if self.application.status != self.status:
+                raise ValueError("application status must match result status")
+            if self.application.dry_run != self.dry_run:
+                raise ValueError("application dry_run must match result dry_run")
+        return self
 
 
 class ConvertTagsRequest(BaseModel):
