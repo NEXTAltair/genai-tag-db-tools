@@ -1,4 +1,5 @@
 """OverlayTagReader の単体テスト。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -21,6 +22,8 @@ from genai_tag_db_tools.db.schema import (
     UserOverlayBase,
     UserTag,
     UserTagStatusPatch,
+    UserTagTranslationPatch,
+    UserTagUsagePatch,
 )
 from genai_tag_db_tools.models import TagSearchRow
 
@@ -376,7 +379,9 @@ class TestOverlayTagReaderSearch:
         assert rows[0]["type_id"] == 5
         assert rows[0]["format_statuses"]["danbooru"]["deprecated"] is True
 
-    def test_merged_search_filters_after_base_scope_status_patch(self, overlay_reader, overlay_session_factory):
+    def test_merged_search_filters_after_base_scope_status_patch(
+        self, overlay_reader, overlay_session_factory
+    ):
         with overlay_session_factory() as session:
             session.add(
                 UserTagStatusPatch(
@@ -395,12 +400,16 @@ class TestOverlayTagReaderSearch:
         merged = MergedTagReader(base_repo=self._BaseSearchReader(), user_repo=overlay_reader)
 
         assert merged.search_tags("blue eyes", format_name="danbooru", deprecated=False) == []
-        rows = merged.search_tags("blue eyes", format_name="danbooru", deprecated=True, type_name="character")
+        rows = merged.search_tags(
+            "blue eyes", format_name="danbooru", deprecated=True, type_name="character"
+        )
         assert len(rows) == 1
         assert rows[0]["type_id"] == 4
         assert rows[0]["type_name"] == "character"
 
-    def test_merged_search_applies_base_scope_usage_patch_to_filters(self, overlay_reader, overlay_session_factory):
+    def test_merged_search_applies_base_scope_usage_patch_to_filters(
+        self, overlay_reader, overlay_session_factory
+    ):
         with overlay_session_factory() as session:
             session.add(
                 UserTagStatusPatch(
@@ -428,7 +437,9 @@ class TestOverlayTagReaderSearch:
         assert rows[0]["usage_count"] == 123
         assert rows[0]["format_statuses"]["danbooru"]["usage_count"] == 123
 
-    def test_merged_search_finds_base_scope_translation_patch(self, overlay_reader, overlay_session_factory):
+    def test_merged_search_finds_base_scope_translation_patch(
+        self, overlay_reader, overlay_session_factory
+    ):
         from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
 
         user_repo = UserTagRepository(overlay_session_factory)
@@ -463,6 +474,242 @@ class TestOverlayTagReaderSearch:
 
         assert result["blue eyes"]["tag_id"] == 99
         assert result["blue eyes"]["tag"] == "azure eyes"
+
+
+class TestOverlayTagReaderSearchFilters:
+    """search_tags の filter / 翻訳 / source_tag / usage 実装を検証する (#82/#83/#84)。"""
+
+    def _make_status(
+        self,
+        tag_id: int,
+        format_id: int,
+        *,
+        type_id: int = 0,
+        alias: bool = False,
+        deprecated: bool = False,
+    ) -> UserTagStatusPatch:
+        # CHECK 制約: alias=True のときは preferred を target と別にする必要がある。
+        preferred_tag_id = tag_id if not alias else tag_id + 1
+        return UserTagStatusPatch(
+            target_scope="user",
+            target_tag_id=tag_id,
+            format_id=format_id,
+            type_id=type_id,
+            alias=alias,
+            preferred_scope="user",
+            preferred_tag_id=preferred_tag_id,
+            deprecated=deprecated,
+        )
+
+    # --- #83: source_tag / 翻訳 / case-insensitive 検索 ---
+
+    def test_search_matches_source_tag(self, overlay_reader, overlay_session_factory):
+        tag_id = USER_TAG_ID_OFFSET + 400
+        with overlay_session_factory() as session:
+            session.add(UserTag(tag_id=tag_id, source_tag="raw_source", tag="normalized tag"))
+            session.commit()
+
+        rows = overlay_reader.search_tags("raw_source")
+        assert len(rows) == 1
+        assert rows[0]["tag_id"] == tag_id
+
+    def test_search_exact_is_case_insensitive(self, overlay_reader, overlay_session_factory):
+        tag_id = USER_TAG_ID_OFFSET + 401
+        with overlay_session_factory() as session:
+            session.add(UserTag(tag_id=tag_id, source_tag="MixedCaseSrc", tag="MixedCase"))
+            session.commit()
+
+        assert overlay_reader.search_tags("mixedcase")[0]["tag_id"] == tag_id
+        assert overlay_reader.search_tags("MIXEDCASESRC")[0]["tag_id"] == tag_id
+
+    def test_search_matches_translation_text(self, overlay_reader, overlay_session_factory):
+        tag_id = USER_TAG_ID_OFFSET + 402
+        with overlay_session_factory() as session:
+            session.add(UserTag(tag_id=tag_id, source_tag="cat_src", tag="cat"))
+            session.add(
+                UserTagTranslationPatch(
+                    target_scope="user", target_tag_id=tag_id, language="ja", translation="猫"
+                )
+            )
+            session.commit()
+
+        rows = overlay_reader.search_tags("猫")
+        assert len(rows) == 1
+        assert rows[0]["tag_id"] == tag_id
+        assert rows[0]["translations"] == {"ja": ["猫"]}
+
+    def test_search_populates_translations(self, overlay_reader, overlay_session_factory):
+        tag_id = USER_TAG_ID_OFFSET + 403
+        with overlay_session_factory() as session:
+            session.add(UserTag(tag_id=tag_id, source_tag="dog_src", tag="dog"))
+            session.add(
+                UserTagTranslationPatch(
+                    target_scope="user", target_tag_id=tag_id, language="ja", translation="犬"
+                )
+            )
+            session.commit()
+
+        rows = overlay_reader.search_tags("dog")
+        assert rows[0]["translations"] == {"ja": ["犬"]}
+
+    # --- #82: alias / deprecated / type_names filters ---
+
+    def test_alias_false_excludes_alias_tags(self, overlay_reader, overlay_session_factory):
+        normal_id = USER_TAG_ID_OFFSET + 410
+        alias_id = USER_TAG_ID_OFFSET + 411
+        with overlay_session_factory() as session:
+            session.add(UserTag(tag_id=normal_id, source_tag="f1", tag="filter normal"))
+            session.add(UserTag(tag_id=alias_id, source_tag="f2", tag="filter alias"))
+            session.add(self._make_status(normal_id, 1000, alias=False))
+            session.add(self._make_status(alias_id, 1000, alias=True))
+            session.commit()
+
+        rows = overlay_reader.search_tags("filter", partial=True, alias=False)
+        ids = {r["tag_id"] for r in rows}
+        assert ids == {normal_id}
+
+    def test_alias_true_keeps_only_alias_tags(self, overlay_reader, overlay_session_factory):
+        normal_id = USER_TAG_ID_OFFSET + 412
+        alias_id = USER_TAG_ID_OFFSET + 413
+        with overlay_session_factory() as session:
+            session.add(UserTag(tag_id=normal_id, source_tag="g1", tag="aliasflag normal"))
+            session.add(UserTag(tag_id=alias_id, source_tag="g2", tag="aliasflag alias"))
+            session.add(self._make_status(normal_id, 1000, alias=False))
+            session.add(self._make_status(alias_id, 1000, alias=True))
+            session.commit()
+
+        rows = overlay_reader.search_tags("aliasflag", partial=True, alias=True)
+        assert {r["tag_id"] for r in rows} == {alias_id}
+
+    def test_deprecated_false_excludes_deprecated_tags(self, overlay_reader, overlay_session_factory):
+        live_id = USER_TAG_ID_OFFSET + 414
+        dead_id = USER_TAG_ID_OFFSET + 415
+        with overlay_session_factory() as session:
+            session.add(UserTag(tag_id=live_id, source_tag="h1", tag="depr live"))
+            session.add(UserTag(tag_id=dead_id, source_tag="h2", tag="depr dead"))
+            session.add(self._make_status(live_id, 1000, deprecated=False))
+            session.add(self._make_status(dead_id, 1000, deprecated=True))
+            session.commit()
+
+        rows = overlay_reader.search_tags("depr", partial=True, deprecated=False)
+        assert {r["tag_id"] for r in rows} == {live_id}
+
+    def test_type_names_filter(self, overlay_reader, overlay_session_factory):
+        char_id = USER_TAG_ID_OFFSET + 416
+        general_id = USER_TAG_ID_OFFSET + 417
+        with overlay_session_factory() as session:
+            session.add(TagFormat(format_id=1000, format_name="danbooru"))
+            session.add(TagTypeName(type_name_id=1, type_name="general"))
+            session.add(TagTypeName(type_name_id=4, type_name="character"))
+            session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+            session.add(TagTypeFormatMapping(format_id=1000, type_id=4, type_name_id=4))
+            session.add(UserTag(tag_id=char_id, source_tag="t1", tag="typefilter char"))
+            session.add(UserTag(tag_id=general_id, source_tag="t2", tag="typefilter general"))
+            session.add(self._make_status(char_id, 1000, type_id=4))
+            session.add(self._make_status(general_id, 1000, type_id=0))
+            session.commit()
+
+        rows = overlay_reader.search_tags("typefilter", partial=True, type_names=["character"])
+        assert {r["tag_id"] for r in rows} == {char_id}
+        assert rows[0]["type_name"] == "character"
+
+    def test_type_names_unknown_returns_empty(self, overlay_reader, overlay_session_factory):
+        tag_id = USER_TAG_ID_OFFSET + 418
+        with overlay_session_factory() as session:
+            session.add(UserTag(tag_id=tag_id, source_tag="u1", tag="unknowntype tag"))
+            session.add(self._make_status(tag_id, 1000))
+            session.commit()
+
+        assert overlay_reader.search_tags("unknowntype", partial=True, type_names=["nope"]) == []
+
+    # --- #84: usage filters & usage_count ---
+
+    def test_usage_count_populated_for_single_format(self, overlay_reader, overlay_session_factory):
+        tag_id = USER_TAG_ID_OFFSET + 420
+        with overlay_session_factory() as session:
+            session.add(TagFormat(format_id=1000, format_name="danbooru"))
+            session.add(UserTag(tag_id=tag_id, source_tag="uc_src", tag="usage tag"))
+            session.add(self._make_status(tag_id, 1000))
+            session.add(
+                UserTagUsagePatch(target_scope="user", target_tag_id=tag_id, format_id=1000, count=123)
+            )
+            session.commit()
+
+        rows = overlay_reader.search_tags("usage tag", format_name="danbooru")
+        assert len(rows) == 1
+        assert rows[0]["usage_count"] == 123
+        assert rows[0]["format_statuses"]["1000"]["usage_count"] == 123
+
+    def test_min_usage_filters_out_low_counts(self, overlay_reader, overlay_session_factory):
+        high_id = USER_TAG_ID_OFFSET + 421
+        low_id = USER_TAG_ID_OFFSET + 422
+        with overlay_session_factory() as session:
+            session.add(TagFormat(format_id=1000, format_name="danbooru"))
+            session.add(UserTag(tag_id=high_id, source_tag="m1", tag="minusage high"))
+            session.add(UserTag(tag_id=low_id, source_tag="m2", tag="minusage low"))
+            session.add(self._make_status(high_id, 1000))
+            session.add(self._make_status(low_id, 1000))
+            session.add(
+                UserTagUsagePatch(target_scope="user", target_tag_id=high_id, format_id=1000, count=500)
+            )
+            session.add(
+                UserTagUsagePatch(target_scope="user", target_tag_id=low_id, format_id=1000, count=5)
+            )
+            session.commit()
+
+        rows = overlay_reader.search_tags("minusage", partial=True, format_name="danbooru", min_usage=100)
+        assert {r["tag_id"] for r in rows} == {high_id}
+
+    def test_max_usage_filters_out_high_counts(self, overlay_reader, overlay_session_factory):
+        high_id = USER_TAG_ID_OFFSET + 423
+        low_id = USER_TAG_ID_OFFSET + 424
+        with overlay_session_factory() as session:
+            session.add(TagFormat(format_id=1000, format_name="danbooru"))
+            session.add(UserTag(tag_id=high_id, source_tag="x1", tag="maxusage high"))
+            session.add(UserTag(tag_id=low_id, source_tag="x2", tag="maxusage low"))
+            session.add(self._make_status(high_id, 1000))
+            session.add(self._make_status(low_id, 1000))
+            session.add(
+                UserTagUsagePatch(target_scope="user", target_tag_id=high_id, format_id=1000, count=500)
+            )
+            session.add(
+                UserTagUsagePatch(target_scope="user", target_tag_id=low_id, format_id=1000, count=5)
+            )
+            session.commit()
+
+        rows = overlay_reader.search_tags("maxusage", partial=True, format_name="danbooru", max_usage=100)
+        assert {r["tag_id"] for r in rows} == {low_id}
+
+    def test_language_filter(self, overlay_reader, overlay_session_factory):
+        ja_id = USER_TAG_ID_OFFSET + 425
+        en_id = USER_TAG_ID_OFFSET + 426
+        with overlay_session_factory() as session:
+            session.add(UserTag(tag_id=ja_id, source_tag="l1", tag="langfilter ja"))
+            session.add(UserTag(tag_id=en_id, source_tag="l2", tag="langfilter en"))
+            session.add(
+                UserTagTranslationPatch(
+                    target_scope="user", target_tag_id=ja_id, language="ja", translation="あ"
+                )
+            )
+            session.add(
+                UserTagTranslationPatch(
+                    target_scope="user", target_tag_id=en_id, language="en", translation="a"
+                )
+            )
+            session.commit()
+
+        rows = overlay_reader.search_tags("langfilter", partial=True, language="ja")
+        assert {r["tag_id"] for r in rows} == {ja_id}
+
+    def test_limit_and_offset_applied_after_filters(self, overlay_reader, overlay_session_factory):
+        ids = [USER_TAG_ID_OFFSET + 430 + i for i in range(3)]
+        with overlay_session_factory() as session:
+            for i, tag_id in enumerate(ids):
+                session.add(UserTag(tag_id=tag_id, source_tag=f"p{i}", tag=f"paging tag {i}"))
+            session.commit()
+
+        page = overlay_reader.search_tags("paging", partial=True, limit=2, offset=1)
+        assert [r["tag_id"] for r in page] == ids[1:3]
 
 
 class TestOverlayTagReaderMetadata:
