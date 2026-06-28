@@ -55,6 +55,12 @@ class _ReaderWithBaseFormats:
                 preferred_tag_id=99,
                 deprecated=True,
             ),
+            (30, 1): SimpleNamespace(
+                type_id=1,
+                alias=False,
+                preferred_tag_id=30,
+                deprecated=False,
+            ),
         }.get((tag_id, format_id))
 
 
@@ -290,6 +296,29 @@ def test_type_correction_rejects_type_id_collision(user_repo):
         apply_approved_feedback(_approved(proposal), user_repository=user_repo)
 
 
+def test_type_correction_accepts_type_id_without_unknown_type_name(user_repo, user_session_factory):
+    format_id = user_repo.get_or_create_format_id("danbooru")
+    proposal = _proposal(
+        "type_correction",
+        target=ProposalTarget(
+            kind="tag_type",
+            target_scope="user",
+            target_tag_id=1_000_000_021,
+            format_name="danbooru",
+        ),
+        proposed={"type_id": 4},
+    )
+
+    apply_approved_feedback(_approved(proposal), user_repository=user_repo)
+
+    with user_session_factory() as session:
+        patch = session.query(UserTagStatusPatch).one()
+        mappings = session.query(TagTypeFormatMapping).all()
+    assert patch.format_id == format_id
+    assert patch.type_id == 4
+    assert mappings == []
+
+
 def test_base_scope_format_dependent_apply_requires_reader(user_repo):
     proposal = _proposal(
         "status_correction",
@@ -399,6 +428,36 @@ def test_alias_addition_creates_user_alias_without_copying_preferred_base_tag(
     assert patches[0].type_id == 1
     with user_session_factory() as session:
         assert session.query(TagTypeFormatMapping).count() == 0
+
+
+def test_alias_addition_derives_type_id_from_preferred_status(user_repo, user_session_factory):
+    proposal = _proposal(
+        "alias_addition",
+        target=ProposalTarget(
+            kind="alias",
+            target_scope="user",
+            target_tag_id=None,
+            format_name="danbooru",
+            preferred_scope="base",
+            preferred_tag_id=30,
+        ),
+        proposed={
+            "alias": True,
+            "alias_tag": "blu eyes",
+            "preferred_tag": "blue eyes",
+            "preferred_scope": "base",
+            "preferred_tag_id": 30,
+        },
+    )
+
+    apply_approved_feedback(_approved(proposal), user_repository=user_repo, reader=_ReaderWithBaseFormats())
+
+    with user_session_factory() as session:
+        patch = session.query(UserTagStatusPatch).one()
+    assert patch.type_id == 1
+    assert patch.alias is True
+    assert patch.preferred_scope == "base"
+    assert patch.preferred_tag_id == 30
 
 
 def test_user_scope_base_format_apply_requires_reader_or_existing_local_format(user_repo):
@@ -595,6 +654,61 @@ def test_dry_run_runs_reader_dependent_resolution(user_repo, user_session_factor
     with user_session_factory() as session:
         assert session.query(TagFormat).count() == 0
         assert session.query(LocalFeedbackApplication).count() == 0
+
+
+def test_dry_run_simulates_user_scope_local_format_creation(user_repo, user_session_factory):
+    class _ReaderWithoutFormats:
+        def get_format_id(self, format_name: str) -> int:
+            raise ValueError(format_name)
+
+    proposal = _proposal(
+        "usage_correction",
+        target=ProposalTarget(
+            kind="usage",
+            target_scope="user",
+            target_tag_id=1_000_000_040,
+            format_name="new_local",
+        ),
+        proposed={"count": 123},
+    )
+
+    result = apply_approved_feedback(
+        _approved(proposal),
+        user_repository=user_repo,
+        reader=_ReaderWithoutFormats(),
+        dry_run=True,
+    )
+
+    assert result.status == "dry_run"
+    with user_session_factory() as session:
+        assert session.query(TagFormat).count() == 0
+        assert session.query(UserTagUsagePatch).count() == 0
+
+
+def test_base_unknown_format_status_apply_creates_local_overlay_format(user_repo, user_session_factory):
+    class _ReaderWithoutUnknown:
+        def get_format_id(self, format_name: str) -> int:
+            raise ValueError(format_name)
+
+    proposal = _proposal(
+        "status_correction",
+        target=ProposalTarget(
+            kind="tag_status",
+            target_scope="base",
+            target_tag_id=20,
+            format_name="unknown",
+        ),
+        proposed={"deprecated": True},
+    )
+
+    apply_approved_feedback(_approved(proposal), user_repository=user_repo, reader=_ReaderWithoutUnknown())
+
+    with user_session_factory() as session:
+        patch = session.query(UserTagStatusPatch).one()
+        local_format = session.query(TagFormat).filter_by(format_name="unknown").one()
+    assert patch.target_scope == "base"
+    assert patch.format_id == local_format.format_id
+    assert patch.deprecated is True
 
 
 def test_translation_correction_rejects_replacement_without_tombstone(user_repo):

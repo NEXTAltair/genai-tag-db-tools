@@ -179,6 +179,13 @@ class TestUserTagUsagePatch:
         result = overlay_reader.get_usage_count(tag_id, 1000)
         assert result == 77
 
+    def test_get_usage_count_returns_base_scope_patch(self, user_repo, overlay_reader):
+        user_repo.write_usage_patch("base", 100, 1000, 77)
+
+        result = overlay_reader.get_usage_count(100, 1000)
+
+        assert result == 77
+
     def test_get_usage_count_returns_none_when_absent(self, overlay_reader):
         """存在しないエントリは None を返す。"""
         assert overlay_reader.get_usage_count(USER_TAG_ID_OFFSET + 999, 1000) is None
@@ -194,6 +201,15 @@ class TestUserTagUsagePatch:
         counts_by_format = {r.format_id: r.count for r in results}
         assert counts_by_format[1000] == 3
         assert counts_by_format[2000] == 8
+
+    def test_list_usage_counts_returns_base_scope_patch(self, user_repo, overlay_reader):
+        user_repo.write_usage_patch("base", 100, 1000, 3)
+
+        results = overlay_reader.list_usage_counts(tag_id=100)
+
+        assert len(results) == 1
+        assert results[0].tag_id == 100
+        assert results[0].count == 3
 
     def test_list_usage_counts_filtered_by_format(self, user_repo, overlay_reader):
         """format_id 指定でフィルタリングされる。"""
@@ -223,6 +239,16 @@ class TestOverlayReaderTranslations:
         assert results[0].language == "ja"
         assert results[0].translation == "犬"
 
+    def test_get_translations_returns_base_scope_patch(self, user_repo, overlay_reader):
+        user_repo.write_translation_patch("base", 100, "ja", "青い目")
+
+        results = overlay_reader.get_translations(100)
+
+        assert len(results) == 1
+        assert results[0].tag_id == 100
+        assert results[0].language == "ja"
+        assert results[0].translation == "青い目"
+
     def test_get_translations_empty_for_unknown_tag(self, overlay_reader):
         """未登録 tag_id の場合は空リストを返す。"""
         assert overlay_reader.get_translations(USER_TAG_ID_OFFSET + 999) == []
@@ -239,6 +265,13 @@ class TestOverlayReaderTranslations:
         assert tag_id_b in result
         assert result[tag_id_a][0].translation == "猫"
         assert result[tag_id_b][0].translation == "犬"
+
+    def test_get_translations_batch_returns_base_scope_patch(self, user_repo, overlay_reader):
+        user_repo.write_translation_patch("base", 100, "ja", "猫")
+
+        result = overlay_reader.get_translations_batch([100])
+
+        assert result[100][0].translation == "猫"
 
     def test_get_translations_batch_empty_ids(self, overlay_reader):
         """空リストを渡した場合は空辞書を返す。"""

@@ -1381,6 +1381,43 @@ class MergedTagReader:
         rows = [merged[tag_id] for tag_id in sorted(merged)]
         return rows[offset:target]
 
+    def _apply_user_status_patches_to_search_rows(self, rows: list[TagSearchRow]) -> list[TagSearchRow]:
+        if not rows or not self._has_user():
+            return rows
+        assert self.user_repo is not None
+        tag_ids = {row["tag_id"] for row in rows}
+        patched_by_tag: dict[int, list[Any]] = {}
+        for tag_id in tag_ids:
+            patched_by_tag[tag_id] = self.user_repo.list_tag_statuses(tag_id)
+
+        patched_rows: list[TagSearchRow] = []
+        for row in rows:
+            patches = patched_by_tag.get(row["tag_id"], [])
+            if not patches:
+                patched_rows.append(row)
+                continue
+
+            first_patch = patches[0]
+            format_statuses = dict(row.get("format_statuses") or {})
+            for patch in patches:
+                format_statuses[str(patch.format_id)] = {
+                    "alias": patch.alias,
+                    "deprecated": patch.deprecated,
+                    "type_id": patch.type_id,
+                    "preferred_tag_id": patch.preferred_tag_id,
+                }
+            updated = dict(row)
+            updated.update(
+                {
+                    "alias": first_patch.alias,
+                    "deprecated": first_patch.deprecated,
+                    "type_id": first_patch.type_id,
+                    "format_statuses": format_statuses,
+                }
+            )
+            patched_rows.append(updated)  # type: ignore[arg-type]
+        return patched_rows
+
     def _accumulate_unique(
         self,
         method_name: str,
@@ -1588,6 +1625,7 @@ class MergedTagReader:
             deprecated=deprecated,
             resolve_preferred=resolve_preferred,
         )
+        rows = self._apply_user_status_patches_to_search_rows(rows)
         if resolve_preferred and self._has_user():
             rows = self._resolve_cross_scope_preferred(rows)
         return rows

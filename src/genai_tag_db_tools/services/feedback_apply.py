@@ -259,12 +259,17 @@ class LocalFeedbackApplyService:
         if target.preferred_scope is None or target.preferred_tag_id is None:
             raise ValueError("alias_addition requires preferred_scope and preferred_tag_id")
         format_id = self._format_id(target, create=create)
-        type_name = _required_type_name_or_id(proposed)
+        type_name = _optional_type_name(proposed)
+        proposed_type_id = _optional_int_value(proposed, "type_id")
+        if type_name is None and proposed_type_id is None:
+            proposed_type_id = self._preferred_type_id(target, format_id)
+            if proposed_type_id is None:
+                raise ValueError("alias_addition requires type_name, type_id, or resolvable preferred tag status")
         type_id = self._resolve_type_id(
             target,
             format_id,
             type_name,
-            _optional_int_value(proposed, "type_id"),
+            proposed_type_id,
             create=create,
         )
         return target, format_id, type_id, proposed
@@ -322,12 +327,12 @@ class LocalFeedbackApplyService:
         if existing_user_format_id is not None:
             return existing_user_format_id
 
-        if target.target_scope == "base":
+        if target.target_scope == "base" and target.format_name != "unknown":
             raise ValueError("base-scope format-dependent local apply requires reader-resolved format_id")
-        if self._reader is None:
+        if self._reader is None and target.format_name != "unknown":
             raise ValueError("format-dependent local apply requires reader or existing local format")
         if not create:
-            raise ValueError(f"format_name={target.format_name!r} is not resolvable without creating a local format")
+            return 0
         return self._user_repository.get_or_create_format_id(target.format_name)
 
     def _reader_format_id(self, format_name: str) -> int | None:
@@ -352,15 +357,31 @@ class LocalFeedbackApplyService:
             return None
         return self._reader.get_tag_status(target.target_tag_id, format_id)
 
+    def _preferred_type_id(self, target: ProposalTarget, format_id: int) -> int | None:
+        if target.preferred_scope is None or target.preferred_tag_id is None:
+            return None
+        existing = self._user_repository.get_status_patch(target.preferred_scope, target.preferred_tag_id, format_id)
+        if existing is not None:
+            return int(existing.type_id)
+        if self._reader is None or not hasattr(self._reader, "get_tag_status"):
+            return None
+        status = self._reader.get_tag_status(target.preferred_tag_id, format_id)
+        return int(status.type_id) if status is not None else None
+
     def _resolve_type_id(
         self,
         target: ProposalTarget,
         format_id: int,
-        type_name: str,
+        type_name: str | None,
         proposed_type_id: int | None,
         *,
         create: bool,
     ) -> int:
+        if type_name is None:
+            if proposed_type_id is None:
+                raise ValueError("type_name or type_id is required")
+            return proposed_type_id
+
         reader_type_id = self._reader_type_id(type_name, format_id)
         if proposed_type_id is not None and reader_type_id is not None and proposed_type_id != reader_type_id:
             raise ValueError(
@@ -369,7 +390,7 @@ class LocalFeedbackApplyService:
             )
         if reader_type_id is not None:
             return reader_type_id
-        if target.target_scope == "base" and proposed_type_id is None:
+        if target.target_scope == "base" and target.format_name != "unknown" and proposed_type_id is None:
             raise ValueError(f"base-scope type correction requires resolvable type_id for {type_name!r}")
         if not create:
             existing_type_id = self._user_repository.get_type_id(format_id, type_name)
@@ -383,7 +404,9 @@ class LocalFeedbackApplyService:
                         f"type_name={owner_name!r}"
                     )
                 return proposed_type_id
-            raise ValueError(f"type correction requires resolvable type_id for {type_name!r}")
+            if target.target_scope == "base" and target.format_name != "unknown":
+                raise ValueError(f"type correction requires resolvable type_id for {type_name!r}")
+            return 0
         if proposed_type_id is not None:
             owner_name = self._user_repository.get_type_name_for_type_id(format_id, proposed_type_id)
             if owner_name is not None and owner_name != type_name:
@@ -456,7 +479,6 @@ class LocalFeedbackApplyService:
                 _require_format_name(target)
                 if target.target_tag_id is None:
                     _string_value(proposed, "alias_tag", fallback=_optional_string_value(proposed, "tag"))
-                _required_type_name_or_id(proposed)
             case "preferred_tag_correction":
                 target = _require_target_tag(proposal.target)
                 if target.preferred_scope is None or target.preferred_tag_id is None:
@@ -658,11 +680,15 @@ def _optional_bool_value(data: Mapping[str, ProposalValue], key: str) -> bool | 
     return value if isinstance(value, bool) else None
 
 
-def _required_type_name_or_id(data: Mapping[str, ProposalValue]) -> str:
+def _optional_type_name(data: Mapping[str, ProposalValue]) -> str | None:
+    return _optional_string_value(data, "type_name")
+
+
+def _required_type_name_or_id(data: Mapping[str, ProposalValue]) -> str | None:
     type_name = _optional_string_value(data, "type_name")
     type_id = _optional_int_value(data, "type_id")
     if type_name is not None:
         return type_name
     if type_id is not None:
-        return "unknown"
+        return None
     raise ValueError("type_name or type_id is required")

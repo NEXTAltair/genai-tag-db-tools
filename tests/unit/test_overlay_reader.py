@@ -8,6 +8,7 @@ from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import sessionmaker
 
 from genai_tag_db_tools.db.overlay_reader import OverlayTagReader
+from genai_tag_db_tools.db.repository import MergedTagReader
 from genai_tag_db_tools.db.schema import (
     USER_TAG_ID_OFFSET,
     Base,
@@ -18,6 +19,7 @@ from genai_tag_db_tools.db.schema import (
     UserTag,
     UserTagStatusPatch,
 )
+from genai_tag_db_tools.models import TagSearchRow
 
 
 @pytest.fixture
@@ -214,6 +216,25 @@ class TestOverlayTagReaderStatus:
 class TestOverlayTagReaderSearch:
     """search_tags のキーワードヒット動作を検証する。"""
 
+    class _BaseSearchReader:
+        def search_tags(self, keyword: str, **kwargs) -> list[TagSearchRow]:
+            if keyword != "blue eyes":
+                return []
+            return [
+                {
+                    "tag_id": 20,
+                    "tag": "blue eyes",
+                    "source_tag": "blue_eyes",
+                    "usage_count": 10,
+                    "alias": False,
+                    "deprecated": False,
+                    "type_id": 0,
+                    "type_name": "general",
+                    "translations": {},
+                    "format_statuses": {"1": {"alias": False, "deprecated": False, "type_id": 0}},
+                }
+            ]
+
     def test_search_tags_exact_match(self, overlay_reader, overlay_session_factory):
         tag_id = USER_TAG_ID_OFFSET + 300
         with overlay_session_factory() as session:
@@ -278,6 +299,32 @@ class TestOverlayTagReaderSearch:
         assert row["type_name"] == ""
         assert row["translations"] == {}
         assert row["format_statuses"] == {}
+
+    def test_merged_search_applies_base_scope_status_patch(self, overlay_reader, overlay_session_factory):
+        with overlay_session_factory() as session:
+            session.add(
+                UserTagStatusPatch(
+                    target_scope="base",
+                    target_tag_id=20,
+                    format_id=1,
+                    type_id=5,
+                    alias=True,
+                    preferred_scope="base",
+                    preferred_tag_id=99,
+                    deprecated=True,
+                )
+            )
+            session.commit()
+
+        merged = MergedTagReader(base_repo=self._BaseSearchReader(), user_repo=overlay_reader)
+
+        rows = merged.search_tags("blue eyes")
+
+        assert len(rows) == 1
+        assert rows[0]["alias"] is True
+        assert rows[0]["deprecated"] is True
+        assert rows[0]["type_id"] == 5
+        assert rows[0]["format_statuses"]["1"]["deprecated"] is True
 
 
 class TestOverlayTagReaderMetadata:
