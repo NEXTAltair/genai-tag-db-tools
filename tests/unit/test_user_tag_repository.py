@@ -222,7 +222,9 @@ class TestLocalFeedbackRepositoryHelpers:
         assert user_repo.get_or_create_type_id(1000, "general") == 1
 
         with user_session_factory() as session:
-            general_type_name_id = session.query(TagTypeName.type_name_id).filter_by(type_name="general").scalar()
+            general_type_name_id = (
+                session.query(TagTypeName.type_name_id).filter_by(type_name="general").scalar()
+            )
             session.add(
                 TagTypeFormatMapping(
                     format_id=1000,

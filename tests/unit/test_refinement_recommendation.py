@@ -25,9 +25,7 @@ def test_normalization_change_adds_correction_candidate():
     assert recommendation.score == 0.8
     assert recommendation.normalized_tag == "blue eyes"
     assert _reason_codes("blue__eyes") == ["normalization_changes_tag"]
-    assert [(s.kind, s.tag) for s in recommendation.suggestions] == [
-        ("correction_candidate", "blue eyes")
-    ]
+    assert [(s.kind, s.tag) for s in recommendation.suggestions] == [("correction_candidate", "blue eyes")]
 
 
 def test_parentheses_normalization_suggests_existing_cleaned_result():
@@ -90,9 +88,7 @@ def test_mixed_case_ordinary_tag_uses_canonical_lowercase_candidate():
     assert recommendation.needs_refinement is True
     assert recommendation.normalized_tag == "blue eyes"
     assert _reason_codes("Blue Eyes") == ["normalization_changes_tag"]
-    assert [(s.kind, s.tag) for s in recommendation.suggestions] == [
-        ("correction_candidate", "blue eyes")
-    ]
+    assert [(s.kind, s.tag) for s in recommendation.suggestions] == [("correction_candidate", "blue eyes")]
 
 
 def test_angle_bracket_token_case_is_preserved():

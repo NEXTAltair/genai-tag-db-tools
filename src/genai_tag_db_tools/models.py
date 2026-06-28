@@ -388,7 +388,9 @@ class DbFeedbackProposal(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0, description="Proposal confidence")
     source: str = Field(..., description="Recommendation or detector source")
     reason_codes: list[str] = Field(default_factory=list, description="Stable reason codes")
-    evidence: list[dict[str, ProposalValue]] = Field(default_factory=list, description="Supporting evidence")
+    evidence: list[dict[str, ProposalValue]] = Field(
+        default_factory=list, description="Supporting evidence"
+    )
     requires_human_approval: bool = Field(
         default=True,
         description="Whether a human must approve before any future DB mutation",
@@ -402,7 +404,9 @@ class RefinementRecommendation(BaseModel):
     normalized_tag: str = Field(..., description="Normalized tag candidate for TAGS.tag / USER_TAGS.tag")
     needs_refinement: bool = Field(..., description="Whether any correction or review is needed")
     score: float = Field(..., ge=0.0, le=1.0, description="Advisory confidence/severity score")
-    reasons: list[RefinementReason] = Field(default_factory=list, description="Reasons for the recommendation")
+    reasons: list[RefinementReason] = Field(
+        default_factory=list, description="Reasons for the recommendation"
+    )
     suggestions: list[RefinementSuggestion] = Field(
         default_factory=list,
         description="Structured correction candidates or review-only actions",
@@ -495,7 +499,9 @@ class LocalFeedbackApplyResult(BaseModel):
         "format_relation_review",
     ] = Field(..., description="Proposal kind")
     message: str = Field(..., description="Human-readable result message")
-    changes: list[dict[str, ProposalValue]] = Field(default_factory=list, description="Planned or applied changes")
+    changes: list[dict[str, ProposalValue]] = Field(
+        default_factory=list, description="Planned or applied changes"
+    )
     application: LocalFeedbackApplicationRecord | None = Field(
         default=None,
         description="Audit record for applied/dry-run/skipped proposals",

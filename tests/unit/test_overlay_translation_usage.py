@@ -1,4 +1,5 @@
 """USER_TAG_TRANSLATION_PATCH / USER_TAG_USAGE_PATCH の単体テスト。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -107,7 +108,9 @@ class TestUserTagTranslationPatch:
         languages = {r.language for r in rows}
         assert languages == {"ja", "zh"}
 
-    def test_different_translation_same_language_creates_separate_row(self, user_repo, user_session_factory):
+    def test_different_translation_same_language_creates_separate_row(
+        self, user_repo, user_session_factory
+    ):
         """同一言語でも翻訳文字列が異なれば別行になる（同義語として扱う）。"""
         tag_id = USER_TAG_ID_OFFSET + 4
         user_repo.write_translation_patch("user", tag_id, "ja", "タグA")

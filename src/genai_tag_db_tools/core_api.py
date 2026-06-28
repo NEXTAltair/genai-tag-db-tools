@@ -144,9 +144,7 @@ def _looks_like_site_info_token(tag: str) -> bool:
     stripped = tag.strip()
     lowered = stripped.lower()
     return (
-        stripped.startswith("__")
-        or stripped.endswith("__")
-        or lowered.endswith(_SITE_INFO_TOKEN_SUFFIXES)
+        stripped.startswith("__") or stripped.endswith("__") or lowered.endswith(_SITE_INFO_TOKEN_SUFFIXES)
     )
 
 
@@ -597,9 +595,7 @@ def _find_typo_candidates(
             continue
         candidates.append((tag_obj.tag_id, candidate_tag, distance))
 
-    return sorted(candidates, key=lambda candidate: _candidate_sort_key(normalized_tag, candidate))[
-        :limit
-    ]
+    return sorted(candidates, key=lambda candidate: _candidate_sort_key(normalized_tag, candidate))[:limit]
 
 
 def _recommend_from_db(
@@ -659,9 +655,7 @@ def _recommend_from_db(
                     )
                 reason_code = "alias_tag" if alias else "non_preferred_tag"
                 reasons = [_refinement_reason(reason_code)]
-                suggestions = [
-                    RefinementSuggestion(kind="correction_candidate", tag=preferred_tag.tag)
-                ]
+                suggestions = [RefinementSuggestion(kind="correction_candidate", tag=preferred_tag.tag)]
                 return RefinementRecommendation(
                     source_tag=source_tag,
                     normalized_tag=normalized_tag,
@@ -942,7 +936,11 @@ def _detect_translation_quality_reasons(source_tag: str, translation: str, langu
         reasons.append("overlong_translation")
     if _looks_description_like_translation(translation):
         reasons.append("description_like_translation")
-    if compact_translation and compact_translation == compact_source and _ASCII_ALPHA_PATTERN.search(source_tag):
+    if (
+        compact_translation
+        and compact_translation == compact_source
+        and _ASCII_ALPHA_PATTERN.search(source_tag)
+    ):
         reasons.append("translation_mismatch")
     if lowered in _LOW_QUALITY_TRANSLATIONS or _is_punctuation_only(translation):
         reasons.append("low_quality_translation")
@@ -1038,7 +1036,9 @@ def _row_mapping(row: TagSearchRow | TagRecordPublic | Mapping[str, Any]) -> Map
     return row
 
 
-def _infer_target_scope(tag_id: int, target_scope: Literal["base", "user"] | None) -> Literal["base", "user"]:
+def _infer_target_scope(
+    tag_id: int, target_scope: Literal["base", "user"] | None
+) -> Literal["base", "user"]:
     if target_scope is not None:
         return target_scope
     return "user" if tag_id >= USER_TAG_ID_OFFSET else "base"
@@ -1205,8 +1205,7 @@ def recommend_tag_record_refinement(
     if source_tag_value and source_tag_value != tag:
         token_values.append(source_tag_value)
     site_info = any(
-        _looks_like_site_info_token(value) or _looks_like_management_token(value)
-        for value in token_values
+        _looks_like_site_info_token(value) or _looks_like_management_token(value) for value in token_values
     )
     external_id = any(_looks_like_external_id_tag(value) for value in token_values)
     training_unsuitable = site_info or external_id
@@ -1237,8 +1236,10 @@ def recommend_tag_record_refinement(
                 )
             )
 
-    if training_unsuitable and type_name not in {"", "meta"} and _has_format_type(
-        repo, resolved_format_name, "meta"
+    if (
+        training_unsuitable
+        and type_name not in {"", "meta"}
+        and _has_format_type(repo, resolved_format_name, "meta")
     ):
         proposed_type_id = _type_id_for_format(repo, resolved_format_name, "meta")
         add_reason("type_correction_candidate")

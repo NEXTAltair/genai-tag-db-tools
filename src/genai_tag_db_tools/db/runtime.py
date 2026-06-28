@@ -118,7 +118,7 @@ def init_user_db(user_db_dir: Path | None = None, *, format_name: str | None = N
     # overlay テーブルを先に作成してから legacy 移行を実行する。
     # 移行関数が USER_TAGS / USER_TAG_STATUS_PATCH 等への INSERT を行うため、
     # テーブルが存在しない状態で呼び出すと OperationalError になる。
-    Base.metadata.create_all(_user_engine)             # 後方互換（空テーブル）、将来削除予定
+    Base.metadata.create_all(_user_engine)  # 後方互換（空テーブル）、将来削除予定
     UserOverlayBase.metadata.create_all(_user_engine)  # overlay テーブル追加
 
     # 旧スキーマ検出 → 自動移行

@@ -557,7 +557,9 @@ def test_usage_correction_rejects_negative_count(user_repo):
     )
 
     with pytest.raises(ValueError, match="greater than or equal to 0"):
-        apply_approved_feedback(_approved(proposal), user_repository=user_repo, reader=_ReaderWithBaseFormats())
+        apply_approved_feedback(
+            _approved(proposal), user_repository=user_repo, reader=_ReaderWithBaseFormats()
+        )
 
 
 def test_usage_correction_uses_base_format_id(
@@ -633,7 +635,9 @@ def test_type_correction_requires_proposed_type(user_repo):
     )
 
     with pytest.raises(ValueError, match="type_name or type_id"):
-        apply_approved_feedback(_approved(proposal), user_repository=user_repo, reader=_ReaderWithBaseFormats())
+        apply_approved_feedback(
+            _approved(proposal), user_repository=user_repo, reader=_ReaderWithBaseFormats()
+        )
 
 
 def test_dry_run_runs_reader_dependent_resolution(user_repo, user_session_factory):
@@ -740,7 +744,9 @@ def test_reader_format_id_zero_is_unresolved(user_repo):
     )
 
     with pytest.raises(ValueError, match="requires reader-resolved format_id"):
-        apply_approved_feedback(_approved(proposal), user_repository=user_repo, reader=_ReaderReturningZero())
+        apply_approved_feedback(
+            _approved(proposal), user_repository=user_repo, reader=_ReaderReturningZero()
+        )
 
 
 def test_list_local_feedback_applications_returns_audit_records(user_repo):

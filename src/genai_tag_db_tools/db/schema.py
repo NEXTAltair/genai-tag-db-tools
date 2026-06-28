@@ -292,7 +292,9 @@ class UserTagTranslationPatch(UserOverlayBase):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("target_scope", "target_tag_id", "language", "translation", name="uix_trans_patch"),
+        UniqueConstraint(
+            "target_scope", "target_tag_id", "language", "translation", name="uix_trans_patch"
+        ),
         CheckConstraint("target_scope IN ('base', 'user')", name="ck_trans_patch_scope"),
         Index("ix_trans_patch_target", "target_scope", "target_tag_id"),
     )

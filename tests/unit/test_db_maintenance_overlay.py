@@ -236,9 +236,12 @@ class TestDetectOverlayInconsistentAlias:
         セッションファクトリをモックして application 層の検出ロジックを検証する。
         """
         fake_patch = SimpleNamespace(
-            target_scope="base", target_tag_id=100, format_id=1,
+            target_scope="base",
+            target_tag_id=100,
+            format_id=1,
             alias=False,
-            preferred_scope="base", preferred_tag_id=200,
+            preferred_scope="base",
+            preferred_tag_id=200,
         )
         tool = _make_tool(base_db, user_db)
         tool._user_session_factory = _make_mock_session_factory(query_result=[fake_patch])
@@ -254,9 +257,12 @@ class TestDetectOverlayInconsistentAlias:
         セッションファクトリをモックして application 層の検出ロジックを検証する。
         """
         fake_patch = SimpleNamespace(
-            target_scope="base", target_tag_id=100, format_id=1,
+            target_scope="base",
+            target_tag_id=100,
+            format_id=1,
             alias=True,
-            preferred_scope="base", preferred_tag_id=100,
+            preferred_scope="base",
+            preferred_tag_id=100,
         )
         tool = _make_tool(base_db, user_db)
         tool._user_session_factory = _make_mock_session_factory(query_result=[fake_patch])

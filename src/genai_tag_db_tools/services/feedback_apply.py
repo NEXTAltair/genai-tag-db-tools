@@ -152,7 +152,9 @@ class LocalFeedbackApplyService:
         translation = _string_value(proposed, "translation")
         current_translation = _optional_mapping_string(proposal.current, "translation")
         if current_translation is not None and current_translation != translation:
-            raise ValueError("translation_correction cannot replace existing translation with current overlay schema")
+            raise ValueError(
+                "translation_correction cannot replace existing translation with current overlay schema"
+            )
         return target, language, translation
 
     def _apply_status(self, proposal: DbFeedbackProposal) -> None:
@@ -175,7 +177,9 @@ class LocalFeedbackApplyService:
         target = _require_target_tag(proposal.target)
         proposed = _require_proposed(proposal)
         format_id = self._format_id(target, create=create)
-        existing = self._user_repository.get_status_patch(target.target_scope, target.target_tag_id, format_id)
+        existing = self._user_repository.get_status_patch(
+            target.target_scope, target.target_tag_id, format_id
+        )
         status = self._status_values(target, format_id, existing, proposal.current)
         return target, format_id, status, proposed
 
@@ -192,14 +196,18 @@ class LocalFeedbackApplyService:
             deprecated=status["deprecated"],
         )
 
-    def _prepare_type(self, proposal: DbFeedbackProposal, *, create: bool) -> tuple[ProposalTarget, int, int, dict[str, Any]]:
+    def _prepare_type(
+        self, proposal: DbFeedbackProposal, *, create: bool
+    ) -> tuple[ProposalTarget, int, int, dict[str, Any]]:
         target = _require_target_tag(proposal.target)
         proposed = _require_proposed(proposal)
         format_id = self._format_id(target, create=create)
         type_name = _required_type_name_or_id(proposed)
         proposed_type_id = _optional_int_value(proposed, "type_id")
         type_id = self._resolve_type_id(target, format_id, type_name, proposed_type_id, create=create)
-        existing = self._user_repository.get_status_patch(target.target_scope, target.target_tag_id, format_id)
+        existing = self._user_repository.get_status_patch(
+            target.target_scope, target.target_tag_id, format_id
+        )
         status = self._status_values(target, format_id, existing, proposal.current)
         return target, format_id, type_id, status
 
@@ -212,7 +220,9 @@ class LocalFeedbackApplyService:
             count=count,
         )
 
-    def _prepare_usage(self, proposal: DbFeedbackProposal, *, create: bool) -> tuple[ProposalTarget, int, int]:
+    def _prepare_usage(
+        self, proposal: DbFeedbackProposal, *, create: bool
+    ) -> tuple[ProposalTarget, int, int]:
         target = _require_target_tag(proposal.target)
         proposed = _require_proposed(proposal)
         count = _non_negative_int_value(proposed, "count")
@@ -222,7 +232,9 @@ class LocalFeedbackApplyService:
         target, format_id, type_id, proposed = self._prepare_alias_addition(proposal, create=True)
         alias_tag_id = target.target_tag_id
         if alias_tag_id is None:
-            alias_tag = _string_value(proposed, "alias_tag", fallback=_optional_string_value(proposed, "tag"))
+            alias_tag = _string_value(
+                proposed, "alias_tag", fallback=_optional_string_value(proposed, "tag")
+            )
             source_tag = _optional_string_value(proposed, "source_tag") or alias_tag
             alias_tag_id = self._user_repository.create_user_tag(source_tag, alias_tag)
             target_scope = "user"
@@ -253,7 +265,9 @@ class LocalFeedbackApplyService:
         if type_name is None and proposed_type_id is None:
             proposed_type_id = self._preferred_type_id(target, format_id)
             if proposed_type_id is None:
-                raise ValueError("alias_addition requires type_name, type_id, or resolvable preferred tag status")
+                raise ValueError(
+                    "alias_addition requires type_name, type_id, or resolvable preferred tag status"
+                )
         type_id = self._resolve_type_id(
             target,
             format_id,
@@ -283,7 +297,9 @@ class LocalFeedbackApplyService:
         if target.preferred_scope is None or target.preferred_tag_id is None:
             raise ValueError("preferred_tag_correction requires preferred_scope and preferred_tag_id")
         format_id = self._format_id(target, create=create)
-        existing = self._user_repository.get_status_patch(target.target_scope, target.target_tag_id, format_id)
+        existing = self._user_repository.get_status_patch(
+            target.target_scope, target.target_tag_id, format_id
+        )
         status = self._status_values(target, format_id, existing, proposal.current)
         return target, format_id, status
 
@@ -349,7 +365,9 @@ class LocalFeedbackApplyService:
     def _preferred_type_id(self, target: ProposalTarget, format_id: int) -> int | None:
         if target.preferred_scope is None or target.preferred_tag_id is None:
             return None
-        existing = self._user_repository.get_status_patch(target.preferred_scope, target.preferred_tag_id, format_id)
+        existing = self._user_repository.get_status_patch(
+            target.preferred_scope, target.preferred_tag_id, format_id
+        )
         if existing is not None:
             return int(existing.type_id)
         if self._reader is None or not hasattr(self._reader, "get_tag_status"):
@@ -372,7 +390,11 @@ class LocalFeedbackApplyService:
             return proposed_type_id
 
         reader_type_id = self._reader_type_id(type_name, format_id)
-        if proposed_type_id is not None and reader_type_id is not None and proposed_type_id != reader_type_id:
+        if (
+            proposed_type_id is not None
+            and reader_type_id is not None
+            and proposed_type_id != reader_type_id
+        ):
             raise ValueError(
                 f"proposed type_id={proposed_type_id} does not match reader type_id={reader_type_id} "
                 f"for {target.format_name}/{type_name}"
@@ -436,8 +458,10 @@ class LocalFeedbackApplyService:
         return {
             "type_id": _optional_int_value(current_values, "type_id") or 0,
             "alias": _optional_bool_value(current_values, "alias") or False,
-            "preferred_scope": _optional_string_value(current_values, "preferred_scope") or target.target_scope,
-            "preferred_tag_id": _optional_int_value(current_values, "preferred_tag_id") or target.target_tag_id,
+            "preferred_scope": _optional_string_value(current_values, "preferred_scope")
+            or target.target_scope,
+            "preferred_tag_id": _optional_int_value(current_values, "preferred_tag_id")
+            or target.target_tag_id,
             "deprecated": _optional_bool_value(current_values, "deprecated") or False,
         }
 
@@ -471,7 +495,9 @@ class LocalFeedbackApplyService:
             case "preferred_tag_correction":
                 target = _require_target_tag(proposal.target)
                 if target.preferred_scope is None or target.preferred_tag_id is None:
-                    raise ValueError("preferred_tag_correction requires preferred_scope and preferred_tag_id")
+                    raise ValueError(
+                        "preferred_tag_correction requires preferred_scope and preferred_tag_id"
+                    )
                 _require_format_name(target)
             case "tag_name_correction":
                 if proposal.target.target_tag_id is not None:
@@ -596,11 +622,15 @@ def _require_proposed(proposal: DbFeedbackProposal) -> Mapping[str, ProposalValu
 def _target_field(proposal: DbFeedbackProposal) -> str | None:
     if proposal.target.language is not None:
         return f"translation.{proposal.target.language}"
-    return _optional_mapping_string(proposal.current, "field") or _optional_mapping_string(proposal.proposed, "field")
+    return _optional_mapping_string(proposal.current, "field") or _optional_mapping_string(
+        proposal.proposed, "field"
+    )
 
 
 def _json_dumps(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=_json_default)
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=_json_default
+    )
 
 
 def _json_default(value: Any) -> str:

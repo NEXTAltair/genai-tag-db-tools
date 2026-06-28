@@ -252,10 +252,7 @@ class TestMigrateLegacyToOverlay:
         Session = sessionmaker(bind=legacy_engine, autoflush=False, autocommit=False)
         with Session() as session:
             rows = session.execute(
-                text(
-                    "SELECT target_scope, target_tag_id, format_id, count "
-                    "FROM USER_TAG_USAGE_PATCH"
-                )
+                text("SELECT target_scope, target_tag_id, format_id, count FROM USER_TAG_USAGE_PATCH")
             ).fetchall()
 
         assert len(rows) == 1
@@ -363,11 +360,7 @@ class TestMigrateLegacyToOverlay:
                     "created_at DATETIME, updated_at DATETIME)"
                 )
             )
-            conn.execute(
-                text(
-                    "INSERT INTO TAGS (tag_id, source_tag, tag) VALUES (1, 'cat', 'cat')"
-                )
-            )
+            conn.execute(text("INSERT INTO TAGS (tag_id, source_tag, tag) VALUES (1, 'cat', 'cat')"))
             conn.commit()
 
         result = migrate_legacy_to_overlay(engine, backup=False)

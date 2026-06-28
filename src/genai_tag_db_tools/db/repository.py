@@ -143,11 +143,7 @@ class TagReader:
             format固有のtype_id。マッピングが存在しない場合はNone。
         """
         with self.session_factory() as session:
-            type_obj = (
-                session.query(TagTypeName)
-                .filter(TagTypeName.type_name == type_name)
-                .one_or_none()
-            )
+            type_obj = session.query(TagTypeName).filter(TagTypeName.type_name == type_name).one_or_none()
             if not type_obj:
                 return None
             mapping = (
@@ -219,9 +215,7 @@ class TagReader:
             rows: list[TagTranslation] = []
             for i in range(0, len(tag_ids), _SQLITE_IN_LIMIT):
                 chunk = tag_ids[i : i + _SQLITE_IN_LIMIT]
-                rows.extend(
-                    session.query(TagTranslation).filter(TagTranslation.tag_id.in_(chunk)).all()
-                )
+                rows.extend(session.query(TagTranslation).filter(TagTranslation.tag_id.in_(chunk)).all())
         result: dict[int, list[TagTranslation]] = {}
         for tr in rows:
             result.setdefault(tr.tag_id, []).append(tr)
@@ -626,8 +620,7 @@ class TagRepository:
                 )
             else:
                 self._create_new_status(
-                    session, tag_id, format_id, effective_type_id, alias,
-                    preferred_tag_id, optional_fields
+                    session, tag_id, format_id, effective_type_id, alias, preferred_tag_id, optional_fields
                 )
 
     @staticmethod
@@ -1454,7 +1447,11 @@ class MergedTagReader:
             for translation in translations_by_tag.get(row["tag_id"], []):
                 if translation.language and translation.translation:
                     translations_obj = updated.get("translations")
-                    translations = dict(cast(dict[str, list[str]], translations_obj)) if isinstance(translations_obj, dict) else {}
+                    translations = (
+                        dict(cast(dict[str, list[str]], translations_obj))
+                        if isinstance(translations_obj, dict)
+                        else {}
+                    )
                     values = list(translations.get(translation.language) or [])
                     if translation.translation not in values:
                         values.append(translation.translation)
@@ -1471,15 +1468,21 @@ class MergedTagReader:
                 fmt_name = self._format_name_for_id(patch.format_id)
                 type_name = self._type_name_for_format_type(patch.format_id, patch.type_id)
                 status = self._format_status_dict(format_statuses.get(fmt_name))
-                status.update({
-                    "alias": patch.alias,
-                    "deprecated": patch.deprecated,
-                    "type_id": patch.type_id,
-                    "type_name": type_name,
-                    "preferred_tag_id": patch.preferred_tag_id,
-                })
+                status.update(
+                    {
+                        "alias": patch.alias,
+                        "deprecated": patch.deprecated,
+                        "type_id": patch.type_id,
+                        "type_name": type_name,
+                        "preferred_tag_id": patch.preferred_tag_id,
+                    }
+                )
                 patch_usage = next(
-                    (item for item in usage_by_tag.get(row["tag_id"], []) if item.format_id == patch.format_id),
+                    (
+                        item
+                        for item in usage_by_tag.get(row["tag_id"], [])
+                        if item.format_id == patch.format_id
+                    ),
                     None,
                 )
                 if patch_usage is not None:
@@ -1562,18 +1565,20 @@ class MergedTagReader:
             tag = self.get_tag_by_id(translation.tag_id)
             if tag is None:
                 continue
-            rows.append({
-                "tag_id": tag.tag_id,
-                "tag": tag.tag,
-                "source_tag": tag.source_tag,
-                "usage_count": 0,
-                "alias": False,
-                "deprecated": False,
-                "type_id": None,
-                "type_name": "",
-                "translations": {},
-                "format_statuses": {},
-            })
+            rows.append(
+                {
+                    "tag_id": tag.tag_id,
+                    "tag": tag.tag,
+                    "source_tag": tag.source_tag,
+                    "usage_count": 0,
+                    "alias": False,
+                    "deprecated": False,
+                    "type_id": None,
+                    "type_name": "",
+                    "translations": {},
+                    "format_statuses": {},
+                }
+            )
         return rows
 
     def _accumulate_unique(
@@ -1867,16 +1872,10 @@ class MergedTagReader:
                 requested_format_id=requested_format_id,
             )
             patched_by_tag_id = {row["tag_id"]: row for row in patched}
-            merged = {
-                keyword: patched_by_tag_id.get(row["tag_id"], row)
-                for keyword, row in merged.items()
-            }
+            merged = {keyword: patched_by_tag_id.get(row["tag_id"], row) for keyword, row in merged.items()}
         if not resolve_preferred:
             return merged
-        merged = {
-            keyword: self._resolve_cross_scope_preferred([row])[0]
-            for keyword, row in merged.items()
-        }
+        merged = {keyword: self._resolve_cross_scope_preferred([row])[0] for keyword, row in merged.items()}
         # OverlayTagReader.search_tags_bulk がスタブのため、未解決キーワードを
         # 個別 search_tags で補完する (cross-scope preferred 解決を含む)
         missing = [kw for kw in keywords if kw not in merged]

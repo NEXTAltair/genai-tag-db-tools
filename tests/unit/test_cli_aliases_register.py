@@ -234,7 +234,14 @@ class TestCmdAliasesRegister:
         monkeypatch.setattr(cli, "_build_register_service", lambda: mock_svc)
         jsonl = self._make_jsonl_file(
             tmp_path,
-            [{"alias": "weding dress", "preferred": "wedding dress", "format_name": "Lorairo", "type_name": "unknown"}],
+            [
+                {
+                    "alias": "weding dress",
+                    "preferred": "wedding dress",
+                    "format_name": "Lorairo",
+                    "type_name": "unknown",
+                }
+            ],
         )
         main(["aliases", "register", "--file", str(jsonl), "--base-db", str(tmp_path / "x.db")])
         out = capsys.readouterr().out
@@ -255,7 +262,14 @@ class TestCmdAliasesRegister:
         monkeypatch.setattr(cli, "_build_register_service", lambda: mock_svc)
         jsonl = self._make_jsonl_file(
             tmp_path,
-            [{"alias": "weding dress", "preferred": "wedding dress", "format_name": "Lorairo", "type_name": "unknown"}],
+            [
+                {
+                    "alias": "weding dress",
+                    "preferred": "wedding dress",
+                    "format_name": "Lorairo",
+                    "type_name": "unknown",
+                }
+            ],
         )
         main(["aliases", "register", "--file", str(jsonl), "--apply", "--base-db", str(tmp_path / "x.db")])
         out = capsys.readouterr().out
@@ -275,7 +289,14 @@ class TestCmdAliasesRegister:
         monkeypatch.setattr(cli, "_build_register_service", lambda: mock_svc)
         csv_file = self._make_csv_file(
             tmp_path,
-            [{"alias": "weding dress", "preferred": "wedding dress", "format_name": "Lorairo", "type_name": "unknown"}],
+            [
+                {
+                    "alias": "weding dress",
+                    "preferred": "wedding dress",
+                    "format_name": "Lorairo",
+                    "type_name": "unknown",
+                }
+            ],
         )
         main(["aliases", "register", "--file", str(csv_file), "--base-db", str(tmp_path / "x.db")])
         out = capsys.readouterr().out
@@ -322,7 +343,14 @@ class TestCmdAliasesRegister:
         monkeypatch.setattr(cli, "_build_register_service", lambda: mock_svc)
         jsonl = self._make_jsonl_file(
             tmp_path,
-            [{"alias": "weding dress", "preferred": "wedding dress", "format_name": "Lorairo", "type_name": "unknown"}],
+            [
+                {
+                    "alias": "weding dress",
+                    "preferred": "wedding dress",
+                    "format_name": "Lorairo",
+                    "type_name": "unknown",
+                }
+            ],
         )
         base_db = tmp_path / "base.sqlite"
         user_dir = tmp_path / "user"

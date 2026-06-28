@@ -554,9 +554,7 @@ def test_merged_reader_get_translations_batch_deduplicates_across_repos(
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
 
-    engine_b = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
+    engine_b = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine_b)
     session_factory_b: Callable[[], Session] = sessionmaker(
         bind=engine_b, autoflush=False, autocommit=False
@@ -591,9 +589,7 @@ def test_merged_reader_search_tags_applies_limit_after_merge(
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
 
-    engine_b = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
+    engine_b = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine_b)
     session_factory_b: Callable[[], Session] = sessionmaker(
         bind=engine_b, autoflush=False, autocommit=False
@@ -621,9 +617,7 @@ def test_merged_reader_search_tags_applies_offset_after_merge(
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
 
-    engine_b = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
+    engine_b = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine_b)
     session_factory_b: Callable[[], Session] = sessionmaker(
         bind=engine_b, autoflush=False, autocommit=False

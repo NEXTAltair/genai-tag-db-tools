@@ -233,42 +233,50 @@ class DatabaseMaintenanceTool:
             # target の存在チェック
             if patch.target_scope == "base":
                 if patch.target_tag_id not in base_tag_ids:
-                    orphan_target.append({
-                        "target_scope": patch.target_scope,
-                        "target_tag_id": patch.target_tag_id,
-                        "format_id": patch.format_id,
-                        "reason": "base TAGS に存在しない target_tag_id",
-                    })
+                    orphan_target.append(
+                        {
+                            "target_scope": patch.target_scope,
+                            "target_tag_id": patch.target_tag_id,
+                            "format_id": patch.format_id,
+                            "reason": "base TAGS に存在しない target_tag_id",
+                        }
+                    )
             elif patch.target_scope == "user":
                 if patch.target_tag_id not in user_tag_ids:
-                    orphan_target.append({
-                        "target_scope": patch.target_scope,
-                        "target_tag_id": patch.target_tag_id,
-                        "format_id": patch.format_id,
-                        "reason": "USER_TAGS に存在しない target_tag_id",
-                    })
+                    orphan_target.append(
+                        {
+                            "target_scope": patch.target_scope,
+                            "target_tag_id": patch.target_tag_id,
+                            "format_id": patch.format_id,
+                            "reason": "USER_TAGS に存在しない target_tag_id",
+                        }
+                    )
 
             # preferred の存在チェック
             if patch.preferred_scope == "base":
                 if patch.preferred_tag_id not in base_tag_ids:
-                    orphan_preferred.append({
-                        "target_scope": patch.target_scope,
-                        "target_tag_id": patch.target_tag_id,
-                        "format_id": patch.format_id,
-                        "preferred_scope": patch.preferred_scope,
-                        "preferred_tag_id": patch.preferred_tag_id,
-                        "reason": "base TAGS に存在しない preferred_tag_id",
-                    })
+                    orphan_preferred.append(
+                        {
+                            "target_scope": patch.target_scope,
+                            "target_tag_id": patch.target_tag_id,
+                            "format_id": patch.format_id,
+                            "preferred_scope": patch.preferred_scope,
+                            "preferred_tag_id": patch.preferred_tag_id,
+                            "reason": "base TAGS に存在しない preferred_tag_id",
+                        }
+                    )
             elif patch.preferred_scope == "user":
                 if patch.preferred_tag_id not in user_tag_ids:
-                    orphan_preferred.append({
-                        "target_scope": patch.target_scope,
-                        "target_tag_id": patch.target_tag_id,
-                        "format_id": patch.format_id,
-                        "preferred_scope": patch.preferred_scope,
-                        "preferred_tag_id": patch.preferred_tag_id,
-                        "reason": "USER_TAGS に存在しない preferred_tag_id",
-                    })
+                    orphan_preferred.append(
+                        {
+                            "target_scope": patch.target_scope,
+                            "target_tag_id": patch.target_tag_id,
+                            "format_id": patch.format_id,
+                            "preferred_scope": patch.preferred_scope,
+                            "preferred_tag_id": patch.preferred_tag_id,
+                            "reason": "USER_TAGS に存在しない preferred_tag_id",
+                        }
+                    )
 
         return {"orphan_target": orphan_target, "orphan_preferred": orphan_preferred}
 
@@ -295,19 +303,23 @@ class DatabaseMaintenanceTool:
                 and patch.preferred_tag_id == patch.target_tag_id
             )
             if not patch.alias and not is_self:
-                inconsistencies.append({
-                    "target_scope": patch.target_scope,
-                    "target_tag_id": patch.target_tag_id,
-                    "format_id": patch.format_id,
-                    "reason": "alias=False なのに preferred が自分自身でない",
-                })
+                inconsistencies.append(
+                    {
+                        "target_scope": patch.target_scope,
+                        "target_tag_id": patch.target_tag_id,
+                        "format_id": patch.format_id,
+                        "reason": "alias=False なのに preferred が自分自身でない",
+                    }
+                )
             if patch.alias and is_self:
-                inconsistencies.append({
-                    "target_scope": patch.target_scope,
-                    "target_tag_id": patch.target_tag_id,
-                    "format_id": patch.format_id,
-                    "reason": "alias=True なのに preferred が自分自身を指す",
-                })
+                inconsistencies.append(
+                    {
+                        "target_scope": patch.target_scope,
+                        "target_tag_id": patch.target_tag_id,
+                        "format_id": patch.format_id,
+                        "reason": "alias=True なのに preferred が自分自身を指す",
+                    }
+                )
 
         return inconsistencies
 
@@ -326,17 +338,15 @@ class DatabaseMaintenanceTool:
 
         violations = []
         with self._user_session_factory() as session:
-            out_of_range = (
-                session.query(UserTag)
-                .filter(UserTag.tag_id < USER_TAG_ID_OFFSET)
-                .all()
-            )
+            out_of_range = session.query(UserTag).filter(UserTag.tag_id < USER_TAG_ID_OFFSET).all()
         for tag in out_of_range:
-            violations.append({
-                "tag_id": tag.tag_id,
-                "tag": tag.tag,
-                "reason": f"tag_id < USER_TAG_ID_OFFSET ({USER_TAG_ID_OFFSET})",
-            })
+            violations.append(
+                {
+                    "tag_id": tag.tag_id,
+                    "tag": tag.tag,
+                    "reason": f"tag_id < USER_TAG_ID_OFFSET ({USER_TAG_ID_OFFSET})",
+                }
+            )
         return violations
 
     def optimize_indexes(self) -> None:

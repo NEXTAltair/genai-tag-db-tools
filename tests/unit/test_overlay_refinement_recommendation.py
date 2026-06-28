@@ -78,9 +78,7 @@ def user_session_factory(user_engine):
 def _add_format(session, format_id: int, name: str) -> None:
     session.add(TagFormat(format_id=format_id, format_name=name))
     session.add(TagTypeName(type_name_id=format_id, type_name=f"general_{format_id}"))
-    session.add(
-        TagTypeFormatMapping(format_id=format_id, type_id=0, type_name_id=format_id)
-    )
+    session.add(TagTypeFormatMapping(format_id=format_id, type_id=0, type_name_id=format_id))
 
 
 def _add_base_status(
@@ -222,17 +220,21 @@ class _RepoWithDanbooruOverlayStatus:
 
     def search_tags(self, keyword: str, **kwargs):
         assert kwargs["format_name"] == "danbooru"
-        return [
-            {
-                "tag_id": _OLD_TAG_ID,
-                "source_tag": "old_tag",
-                "tag": "old tag",
-                "deprecated": False,
-                "alias": False,
-                "preferred_tag_id": _OLD_TAG_ID,
-                "format_statuses": {},
-            }
-        ] if keyword == "old tag" else []
+        return (
+            [
+                {
+                    "tag_id": _OLD_TAG_ID,
+                    "source_tag": "old_tag",
+                    "tag": "old tag",
+                    "deprecated": False,
+                    "alias": False,
+                    "preferred_tag_id": _OLD_TAG_ID,
+                    "format_statuses": {},
+                }
+            ]
+            if keyword == "old tag"
+            else []
+        )
 
     def get_tag_status(self, tag_id: int, format_id: int):
         return SimpleNamespace(
@@ -286,18 +288,14 @@ def test_base_alias_recommends_preferred_tag(merged_reader):
     )
 
     assert _codes(recommendation) == ["alias_tag"]
-    assert [(s.kind, s.tag) for s in recommendation.suggestions] == [
-        ("correction_candidate", "blue eyes")
-    ]
+    assert [(s.kind, s.tag) for s in recommendation.suggestions] == [("correction_candidate", "blue eyes")]
 
 
 def test_unknown_format_exact_alias_still_recommends_preferred_tag(merged_reader):
     recommendation = recommend_manual_refinement("blu eyes", merged_reader)
 
     assert _codes(recommendation) == ["alias_tag"]
-    assert [(s.kind, s.tag) for s in recommendation.suggestions] == [
-        ("correction_candidate", "blue eyes")
-    ]
+    assert [(s.kind, s.tag) for s in recommendation.suggestions] == [("correction_candidate", "blue eyes")]
 
 
 def test_unknown_format_uses_danbooru_as_default_status_format():

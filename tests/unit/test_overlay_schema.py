@@ -93,8 +93,13 @@ class TestOverlaySchemaCreation:
         inspector = inspect(overlay_engine)
         cols = {c["name"] for c in inspector.get_columns("USER_TAG_STATUS_PATCH")}
         assert {
-            "target_scope", "target_tag_id", "format_id",
-            "type_id", "alias", "preferred_scope", "preferred_tag_id",
+            "target_scope",
+            "target_tag_id",
+            "format_id",
+            "type_id",
+            "alias",
+            "preferred_scope",
+            "preferred_tag_id",
             "deprecated",
         } <= cols
 

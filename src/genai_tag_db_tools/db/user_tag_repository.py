@@ -155,9 +155,7 @@ class UserTagRepository:
             )
             session.commit()
 
-    def write_usage_patch(
-        self, target_scope: str, target_tag_id: int, format_id: int, count: int
-    ) -> None:
+    def write_usage_patch(self, target_scope: str, target_tag_id: int, format_id: int, count: int) -> None:
         """USER_TAG_USAGE_PATCH に usage count を INSERT or UPDATE する。
 
         Args:
@@ -192,7 +190,11 @@ class UserTagRepository:
     def get_format_id(self, format_name: str) -> int | None:
         """user DB 内の TAG_FORMATS から format_id を取得する。"""
         with self._session_factory() as session:
-            row = session.query(TagFormat.format_id).filter(TagFormat.format_name == format_name).one_or_none()
+            row = (
+                session.query(TagFormat.format_id)
+                .filter(TagFormat.format_name == format_name)
+                .one_or_none()
+            )
             return int(row[0]) if row else None
 
     def get_or_create_format_id(self, format_name: str, format_id: int | None = None) -> int:
@@ -229,7 +231,9 @@ class UserTagRepository:
     def get_or_create_type_id(self, format_id: int, type_name: str, type_id: int | None = None) -> int:
         """user DB 内の type mapping を取得し、無ければ作る。"""
         with self._session_factory() as session:
-            type_name_row = session.query(TagTypeName).filter(TagTypeName.type_name == type_name).one_or_none()
+            type_name_row = (
+                session.query(TagTypeName).filter(TagTypeName.type_name == type_name).one_or_none()
+            )
             if type_name_row is None:
                 max_type_name_id = session.query(func.max(TagTypeName.type_name_id)).scalar()
                 type_name_id = 0 if max_type_name_id is None else int(max_type_name_id) + 1

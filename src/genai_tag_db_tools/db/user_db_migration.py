@@ -301,10 +301,7 @@ def migrate_legacy_to_overlay(
         # --- TAG_TRANSLATIONS → USER_TAG_TRANSLATION_PATCH ---
         try:
             old_translations = session.execute(
-                text(
-                    "SELECT tag_id, language, translation, created_at, updated_at "
-                    "FROM TAG_TRANSLATIONS"
-                )
+                text("SELECT tag_id, language, translation, created_at, updated_at FROM TAG_TRANSLATIONS")
             ).fetchall()
         except OperationalError:
             result.warnings.append("TAG_TRANSLATIONS テーブルが存在しません。スキップします。")
@@ -354,10 +351,7 @@ def migrate_legacy_to_overlay(
         # --- TAG_USAGE_COUNTS → USER_TAG_USAGE_PATCH ---
         try:
             old_usages = session.execute(
-                text(
-                    "SELECT tag_id, format_id, count, created_at, updated_at "
-                    "FROM TAG_USAGE_COUNTS"
-                )
+                text("SELECT tag_id, format_id, count, created_at, updated_at FROM TAG_USAGE_COUNTS")
             ).fetchall()
         except OperationalError:
             result.warnings.append("TAG_USAGE_COUNTS テーブルが存在しません。スキップします。")
@@ -395,9 +389,7 @@ def migrate_legacy_to_overlay(
 
         # TAG_FORMATS のユーザー定義エントリを警告（overlay テーブルには移行しない）
         try:
-            fmt_count = session.execute(
-                text("SELECT COUNT(*) FROM TAG_FORMATS")
-            ).scalar_one()
+            fmt_count = session.execute(text("SELECT COUNT(*) FROM TAG_FORMATS")).scalar_one()
             if fmt_count > 0:
                 result.warnings.append(
                     f"TAG_FORMATS に {fmt_count} 件の format 定義があります。"
