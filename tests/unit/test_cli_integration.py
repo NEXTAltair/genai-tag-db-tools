@@ -838,3 +838,51 @@ class TestCmdRecommendRecord:
         passed_row = mock_recommend.call_args.args[0]
         assert "format_statuses" not in passed_row
         assert mock_recommend.call_args.kwargs["repo"] is None
+
+    @patch("genai_tag_db_tools.core_api.recommend_tag_record_refinement")
+    def test_mixed_format_status_keys_are_preserved_without_repo(
+        self,
+        mock_recommend: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        mock_recommend.return_value = RefinementRecommendation(
+            source_tag="custom tag",
+            normalized_tag="custom tag",
+            needs_refinement=True,
+            score=0.5,
+        )
+        format_statuses = {
+            "e621": {
+                "alias": False,
+                "deprecated": False,
+                "type_id": 0,
+                "type_name": "general",
+                "preferred_tag_id": 1_000_000_001,
+            },
+            "1000": {
+                "alias": False,
+                "deprecated": False,
+                "type_id": 0,
+                "type_name": "unknown",
+                "preferred_tag_id": 1_000_000_001,
+            },
+        }
+        stdin = io.StringIO(
+            json.dumps(
+                {
+                    "kind": "item",
+                    "tag": "custom tag",
+                    "tag_id": 1_000_000_001,
+                    "format_name": "Lorairo",
+                    "format_statuses": format_statuses,
+                }
+            )
+        )
+        monkeypatch.setattr("sys.stdin", stdin)
+        args = argparse.Namespace(format_name="danbooru", target_scope=None, base_db=None, user_db_dir=None)
+
+        cmd_recommend_record(args)
+
+        passed_row = mock_recommend.call_args.args[0]
+        assert passed_row["format_statuses"] == format_statuses
+        assert mock_recommend.call_args.kwargs["repo"] is None

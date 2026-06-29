@@ -505,7 +505,7 @@ def _prepare_recommend_record_row(
         return row
     if str(requested_format) in format_statuses:
         return row
-    if not any(str(key).isdigit() for key in format_statuses):
+    if not all(str(key).isdigit() for key in format_statuses):
         return row
 
     fallback_row = dict(row)
