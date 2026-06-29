@@ -14,6 +14,7 @@ Note: cmd_ensure_dbsはHF cache自動管理により実質的に不要になっ�
 from __future__ import annotations
 
 import argparse
+import io
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -22,6 +23,7 @@ import pytest
 
 from genai_tag_db_tools.cli import (
     cmd_convert,
+    cmd_recommend_record,
     cmd_recommend_tag,
     cmd_recommend_translation,
     cmd_register,
@@ -481,6 +483,7 @@ class TestCmdRecommendTag:
             tag=["flower,1girl"],
             file=None,
             format_name="danbooru",
+            rule_only=False,
             base_db=[str(base_db)],
             user_db_dir=None,
         )
@@ -520,6 +523,7 @@ class TestCmdRecommendTag:
             tag=["flower"],
             file=None,
             format_name="unknown",
+            rule_only=False,
             base_db=[str(base_db)],
             user_db_dir=None,
         )
@@ -551,6 +555,7 @@ class TestCmdRecommendTag:
             tag=None,
             file=str(tags_file),
             format_name="unknown",
+            rule_only=False,
             base_db=[str(base_db)],
             user_db_dir=None,
         )
@@ -571,6 +576,7 @@ class TestCmdRecommendTag:
             tag=None,
             file=None,
             format_name="unknown",
+            rule_only=False,
             base_db=None,
             user_db_dir=None,
         )
@@ -580,6 +586,40 @@ class TestCmdRecommendTag:
         lines = _parse_jsonl(capsys.readouterr().out)
         assert lines[-1]["kind"] == "error"
         assert lines[-1]["code"] == "INVALID_INPUT"
+
+    @patch("genai_tag_db_tools.cli.get_default_reader")
+    @patch("genai_tag_db_tools.core_api.recommend_manual_refinement")
+    def test_rule_only_bypasses_db_reader(
+        self,
+        mock_recommend: MagicMock,
+        mock_reader: MagicMock,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--rule-only は DB 初期化/readers を使わず repo=None 経路へ委譲する。"""
+        mock_recommend.return_value = RefinementRecommendation(
+            source_tag="flower",
+            normalized_tag="flower",
+            needs_refinement=True,
+            score=0.6,
+            reasons=[RefinementReason(code="broad_single_word", message="broad")],
+            suggestions=[RefinementSuggestion(kind="review_only")],
+        )
+        args = argparse.Namespace(
+            tag=["flower"],
+            file=None,
+            format_name="unknown",
+            rule_only=True,
+            base_db=None,
+            user_db_dir=None,
+        )
+
+        cmd_recommend_tag(args)
+
+        mock_reader.assert_not_called()
+        mock_recommend.assert_called_once()
+        assert mock_recommend.call_args.args[1] is None
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert lines[0]["reasons"][0]["code"] == "broad_single_word"
 
 
 class TestCmdRecommendTranslation:
@@ -600,13 +640,249 @@ class TestCmdRecommendTranslation:
             reasons=[RefinementReason(code="missing_translation", message="empty")],
             suggestions=[RefinementSuggestion(kind="review_only")],
         )
-        args = argparse.Namespace(source_tag="flower", translation="", language="ja")
+        args = argparse.Namespace(
+            source_tag="flower",
+            translation="",
+            language="ja",
+            target_scope=None,
+            target_tag_id=None,
+        )
         cmd_recommend_translation(args)
 
-        mock_recommend.assert_called_once_with("flower", "", language="ja")
+        mock_recommend.assert_called_once_with(
+            "flower",
+            "",
+            language="ja",
+            target_scope=None,
+            target_tag_id=None,
+        )
         lines = _parse_jsonl(capsys.readouterr().out)
         assert len(lines) == 1
         assert lines[0]["kind"] == "result"
         assert lines[0]["source_tag"] == "flower"
         assert lines[0]["needs_refinement"] is True
         assert lines[0]["reasons"][0]["code"] == "missing_translation"
+
+    @patch("genai_tag_db_tools.core_api.recommend_translation_quality")
+    def test_target_args_are_forwarded_for_proposals(
+        self,
+        mock_recommend: MagicMock,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """target scope/id を core_api へ渡し、proposal 付き recommendation を出力する。"""
+        mock_recommend.return_value = RefinementRecommendation(
+            source_tag="flower",
+            normalized_tag="flower",
+            needs_refinement=True,
+            score=0.9,
+            reasons=[RefinementReason(code="wrong_language_translation", message="wrong")],
+            suggestions=[RefinementSuggestion(kind="review_only")],
+        )
+        args = argparse.Namespace(
+            source_tag="flower",
+            translation="flower",
+            language="ja",
+            target_scope="user",
+            target_tag_id=1_000_000_001,
+        )
+
+        cmd_recommend_translation(args)
+
+        mock_recommend.assert_called_once_with(
+            "flower",
+            "flower",
+            language="ja",
+            target_scope="user",
+            target_tag_id=1_000_000_001,
+        )
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert lines[0]["kind"] == "result"
+
+
+class TestCmdRecommendRecord:
+    """Test cmd_recommend_record command (search JSONL stdin adapter)."""
+
+    @patch("genai_tag_db_tools.core_api.recommend_tag_record_refinement")
+    def test_reads_search_items_from_stdin(
+        self,
+        mock_recommend: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        mock_recommend.side_effect = lambda row, **_kwargs: RefinementRecommendation(
+            source_tag=row["tag"],
+            normalized_tag=row["tag"],
+            needs_refinement=row["tag"] == "flower",
+            score=0.6 if row["tag"] == "flower" else 0.0,
+            reasons=[RefinementReason(code="broad_single_word", message="broad")]
+            if row["tag"] == "flower"
+            else [],
+            suggestions=[RefinementSuggestion(kind="review_only")] if row["tag"] == "flower" else [],
+        )
+        stdin = io.StringIO(
+            "\n".join(
+                [
+                    json.dumps({"kind": "item", "tag": "flower", "tag_id": 1, "format_name": "danbooru"}),
+                    json.dumps({"kind": "result", "ok": True, "message": "search completed"}),
+                    json.dumps({"kind": "item", "tag": "1girl", "tag_id": 2, "format_name": "danbooru"}),
+                ]
+            )
+        )
+        monkeypatch.setattr("sys.stdin", stdin)
+        args = argparse.Namespace(
+            format_name="danbooru",
+            target_scope="base",
+            base_db=None,
+            user_db_dir=None,
+        )
+
+        cmd_recommend_record(args)
+
+        assert mock_recommend.call_count == 2
+        assert mock_recommend.call_args_list[0].kwargs == {
+            "format_name": "danbooru",
+            "target_scope": "base",
+            "repo": None,
+        }
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert [line["kind"] for line in lines] == ["item", "item", "result"]
+        assert lines[-1]["total"] == 2
+        assert lines[-1]["needs_refinement_count"] == 1
+
+    def test_upstream_error_line_is_invalid_input(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        stdin = io.StringIO(
+            json.dumps(
+                {
+                    "kind": "error",
+                    "ok": False,
+                    "code": "DB_ERROR",
+                    "message": "upstream failed",
+                }
+            )
+        )
+        monkeypatch.setattr("sys.stdin", stdin)
+        args = argparse.Namespace(format_name=None, target_scope=None, base_db=None, user_db_dir=None)
+
+        with pytest.raises(ValueError, match="upstream error"):
+            cmd_recommend_record(args)
+
+    def test_empty_search_result_stream_is_success(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        stdin = io.StringIO(json.dumps({"kind": "result", "ok": True, "message": "search completed"}))
+        monkeypatch.setattr("sys.stdin", stdin)
+        args = argparse.Namespace(format_name=None, target_scope=None, base_db=None, user_db_dir=None)
+
+        cmd_recommend_record(args)
+
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert lines == [
+            {
+                "kind": "result",
+                "ok": True,
+                "message": "record recommendations completed",
+                "total": 0,
+                "needs_refinement_count": 0,
+            }
+        ]
+
+    def test_malformed_item_missing_tag_id_is_invalid_input(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        stdin = io.StringIO(json.dumps({"kind": "item", "tag": "flower"}))
+        monkeypatch.setattr("sys.stdin", stdin)
+        args = argparse.Namespace(format_name=None, target_scope=None, base_db=None, user_db_dir=None)
+
+        with pytest.raises(ValueError, match="missing tag_id"):
+            cmd_recommend_record(args)
+
+    @patch("genai_tag_db_tools.core_api.recommend_tag_record_refinement")
+    def test_numeric_format_status_keys_fall_back_to_row_level_without_repo(
+        self,
+        mock_recommend: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        mock_recommend.return_value = RefinementRecommendation(
+            source_tag="custom tag",
+            normalized_tag="custom tag",
+            needs_refinement=False,
+            score=0.0,
+        )
+        stdin = io.StringIO(
+            json.dumps(
+                {
+                    "kind": "item",
+                    "tag": "custom tag",
+                    "tag_id": 1_000_000_001,
+                    "format_name": "Lorairo",
+                    "format_statuses": {
+                        "1000": {
+                            "alias": False,
+                            "deprecated": False,
+                            "type_id": 0,
+                            "type_name": "unknown",
+                            "preferred_tag_id": 1_000_000_001,
+                        }
+                    },
+                }
+            )
+        )
+        monkeypatch.setattr("sys.stdin", stdin)
+        args = argparse.Namespace(format_name=None, target_scope=None, base_db=None, user_db_dir=None)
+
+        cmd_recommend_record(args)
+
+        passed_row = mock_recommend.call_args.args[0]
+        assert "format_statuses" not in passed_row
+        assert mock_recommend.call_args.kwargs["repo"] is None
+
+    @patch("genai_tag_db_tools.core_api.recommend_tag_record_refinement")
+    def test_mixed_format_status_keys_are_preserved_without_repo(
+        self,
+        mock_recommend: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        mock_recommend.return_value = RefinementRecommendation(
+            source_tag="custom tag",
+            normalized_tag="custom tag",
+            needs_refinement=True,
+            score=0.5,
+        )
+        format_statuses = {
+            "e621": {
+                "alias": False,
+                "deprecated": False,
+                "type_id": 0,
+                "type_name": "general",
+                "preferred_tag_id": 1_000_000_001,
+            },
+            "1000": {
+                "alias": False,
+                "deprecated": False,
+                "type_id": 0,
+                "type_name": "unknown",
+                "preferred_tag_id": 1_000_000_001,
+            },
+        }
+        stdin = io.StringIO(
+            json.dumps(
+                {
+                    "kind": "item",
+                    "tag": "custom tag",
+                    "tag_id": 1_000_000_001,
+                    "format_name": "Lorairo",
+                    "format_statuses": format_statuses,
+                }
+            )
+        )
+        monkeypatch.setattr("sys.stdin", stdin)
+        args = argparse.Namespace(format_name="danbooru", target_scope=None, base_db=None, user_db_dir=None)
+
+        cmd_recommend_record(args)
+
+        passed_row = mock_recommend.call_args.args[0]
+        assert passed_row["format_statuses"] == format_statuses
+        assert mock_recommend.call_args.kwargs["repo"] is None

@@ -3,7 +3,7 @@ import csv
 import json
 import sys
 import traceback
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from genai_tag_db_tools import errors
@@ -29,6 +29,7 @@ from genai_tag_db_tools.models import (
     DbCacheConfig,
     DbSourceRef,
     EnsureDbRequest,
+    RecordRecommendRequest,
     RefinementRecommendRequest,
     TagRegisterRequest,
     TagSearchRequest,
@@ -393,10 +394,16 @@ def cmd_recommend_tag(args: argparse.Namespace) -> None:
         sys.exit(2)
 
     # introspection 契約 (RefinementRecommendRequest) で format_name を検証/正規化。
-    request = RefinementRecommendRequest(tags=",".join(tags), format_name=args.format_name)
+    request = RefinementRecommendRequest(
+        tags=",".join(tags),
+        format_name=args.format_name,
+        rule_only=args.rule_only,
+    )
 
-    _set_db_paths(args.base_db, args.user_db_dir)
-    repo = get_default_reader()
+    repo = None
+    if not request.rule_only:
+        _set_db_paths(args.base_db, args.user_db_dir)
+        repo = get_default_reader()
 
     needs_refinement_count = 0
     for tag in tags:
@@ -421,13 +428,158 @@ def cmd_recommend_translation(args: argparse.Namespace) -> None:
         source_tag=args.source_tag,
         translation=args.translation,
         language=args.language,
+        target_scope=args.target_scope,
+        target_tag_id=args.target_tag_id,
     )
     recommendation = recommend_translation_quality(
         request.source_tag,
         request.translation,
         language=request.language,
+        target_scope=request.target_scope,
+        target_tag_id=request.target_tag_id,
     )
     emit_result("translation recommendation", **recommendation.model_dump())
+
+
+def _validate_recommend_record_row(row: Mapping[str, object], line_number: int) -> None:
+    if "tag_id" not in row:
+        raise ValueError(f"stdin line {line_number} item is missing tag_id")
+    tag_id = row["tag_id"]
+    if not isinstance(tag_id, int | str):
+        raise ValueError(f"stdin line {line_number} item has invalid tag_id")
+    try:
+        int(tag_id)
+    except ValueError as exc:
+        raise ValueError(f"stdin line {line_number} item has invalid tag_id") from exc
+    if not row.get("tag") and not row.get("source_tag"):
+        raise ValueError(f"stdin line {line_number} item is missing tag/source_tag")
+
+
+def _iter_recommend_record_rows(lines: Iterable[str]) -> Iterable[tuple[dict[str, object] | None, bool]]:
+    """Yield parsed record rows and result-line markers from `search` output.
+
+    Search result summaries and events are ignored. Structured error lines are treated
+    as invalid input because recommendation output would otherwise hide upstream failure.
+    """
+    for line_number, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid JSONL on stdin at line {line_number}") from exc
+        if not isinstance(payload, dict):
+            raise ValueError(f"stdin line {line_number} must be a JSON object")
+
+        kind = payload.get("kind")
+        if kind == "item":
+            row = dict(payload)
+            row.pop("kind", None)
+            _validate_recommend_record_row(row, line_number)
+            yield row, False
+        elif kind == "error":
+            raise ValueError(f"stdin line {line_number} is an upstream error line")
+        elif kind == "result":
+            yield None, True
+        elif kind == "event":
+            continue
+        else:
+            raise ValueError(f"stdin line {line_number} has unsupported kind: {kind!r}")
+
+
+def _prepare_recommend_record_row(
+    row: dict[str, object],
+    *,
+    format_name: str | None,
+    repo: object | None,
+) -> dict[str, object]:
+    """Avoid false missing-format findings when only numeric status keys are available."""
+    if repo is not None:
+        return row
+    requested_format = format_name or row.get("format_name")
+    if not requested_format or str(requested_format) == "unknown":
+        return row
+    format_statuses = row.get("format_statuses") or {}
+    if not isinstance(format_statuses, Mapping):
+        return row
+    if str(requested_format) in format_statuses:
+        return row
+    if not all(str(key).isdigit() for key in format_statuses):
+        return row
+
+    fallback_row = dict(row)
+    fallback_row.pop("format_statuses", None)
+    return fallback_row
+
+
+def cmd_recommend_record(args: argparse.Namespace) -> None:
+    """`recommend record`: `search` JSONL item rows の refinement を advisory 判定する。"""
+    from genai_tag_db_tools.core_api import recommend_tag_record_refinement
+
+    if sys.stdin.isatty():
+        emit_error(
+            errors.INVALID_INPUT,
+            "no JSONL records provided on stdin (pipe tag-db search output)",
+            retryable=False,
+            user_action_required=True,
+        )
+        sys.exit(2)
+
+    request = RecordRecommendRequest(
+        format_name=args.format_name,
+        target_scope=args.target_scope,
+    )
+    repo = None
+    if args.base_db or args.user_db_dir:
+        _set_db_paths(args.base_db, args.user_db_dir)
+        repo = get_default_reader()
+
+    total = 0
+    needs_refinement_count = 0
+    saw_result = False
+    for row, is_result in _iter_recommend_record_rows(sys.stdin):
+        if is_result:
+            saw_result = True
+            continue
+        assert row is not None
+        prepared_row = _prepare_recommend_record_row(
+            row,
+            format_name=request.format_name,
+            repo=repo,
+        )
+        recommendation = recommend_tag_record_refinement(
+            prepared_row,
+            format_name=request.format_name,
+            target_scope=request.target_scope,
+            repo=repo,
+        )
+        emit_item(recommendation)
+        total += 1
+        if recommendation.needs_refinement:
+            needs_refinement_count += 1
+
+    if total == 0:
+        if saw_result:
+            emit_result(
+                "record recommendations completed",
+                total=0,
+                needs_refinement_count=0,
+            )
+            return
+        emit_error(
+            errors.INVALID_INPUT,
+            "no item records found on stdin",
+            retryable=False,
+            user_action_required=True,
+        )
+        sys.exit(2)
+
+    emit_result(
+        "record recommendations completed",
+        total=total,
+        needs_refinement_count=needs_refinement_count,
+    )
 
 
 def cmd_describe(args: argparse.Namespace) -> None:
@@ -598,6 +750,11 @@ def build_parser(prog: str = "tag-db") -> argparse.ArgumentParser:
         default="unknown",
         help="Target format name for DB-backed reasons (default: unknown).",
     )
+    recommend_tag_parser.add_argument(
+        "--rule-only",
+        action="store_true",
+        help="Bypass DB reads and use deterministic rule-only recommendation logic.",
+    )
     _add_base_db_args(recommend_tag_parser)
     recommend_tag_parser.set_defaults(func=cmd_recommend_tag)
 
@@ -615,7 +772,33 @@ def build_parser(prog: str = "tag-db") -> argparse.ArgumentParser:
         default="ja",
         help="Translation language code (default: ja).",
     )
+    recommend_translation_parser.add_argument(
+        "--target-scope",
+        choices=["base", "user"],
+        help="Patch target scope for proposal output. Must be paired with --target-tag-id.",
+    )
+    recommend_translation_parser.add_argument(
+        "--target-tag-id",
+        type=int,
+        help="Patch target tag id for proposal output. Must be paired with --target-scope.",
+    )
     recommend_translation_parser.set_defaults(func=cmd_recommend_translation)
+
+    recommend_record_parser = recommend_subs.add_parser(
+        "record",
+        help="Recommend refinement for tag search JSONL item records from stdin.",
+    )
+    recommend_record_parser.add_argument(
+        "--format-name",
+        help="Target format name. Defaults to each input row format_name or unknown.",
+    )
+    recommend_record_parser.add_argument(
+        "--target-scope",
+        choices=["base", "user"],
+        help="Override proposal target scope. Defaults to inference from tag_id.",
+    )
+    _add_base_db_args(recommend_record_parser)
+    recommend_record_parser.set_defaults(func=cmd_recommend_record)
 
     list_commands_parser = subparsers.add_parser(
         "list-commands",

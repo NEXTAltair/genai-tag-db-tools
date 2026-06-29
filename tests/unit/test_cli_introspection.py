@@ -29,8 +29,9 @@ class TestListCommands:
             "aliases/register",
             "recommend/tag",
             "recommend/translation",
+            "recommend/record",
         }
-        assert objs[-1] == {"kind": "result", "ok": True, "message": "commands listed", "count": 8}
+        assert objs[-1] == {"kind": "result", "ok": True, "message": "commands listed", "count": 9}
 
     def test_side_effects_and_read_only(self, capsys: pytest.CaptureFixture[str]) -> None:
         tools = {
@@ -48,6 +49,16 @@ class TestListCommands:
         assert tools["recommend/tag"]["side_effects"] == ["db_read"]
         assert tools["recommend/translation"]["read_only"] is True
         assert tools["recommend/translation"]["side_effects"] == []
+        assert tools["recommend/record"]["read_only"] is True
+        assert tools["recommend/record"]["side_effects"] == ["db_read"]
+
+    def test_describe_recommend_record(self, capsys: pytest.CaptureFixture[str]) -> None:
+        objs = [json.loads(line) for line in _run(["describe", "recommend/record"], capsys)]
+        assert objs[0]["kind"] == "tool"
+        assert objs[0]["name"] == "recommend/record"
+        models = {o["role"]: o for o in objs if o["kind"] == "model"}
+        assert models["input"]["name"] == "RecordRecommendRequest"
+        assert models["output"]["name"] == "RefinementRecommendation"
 
 
 class TestDescribeCompact:

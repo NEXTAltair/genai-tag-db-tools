@@ -3,7 +3,7 @@ type: Contract
 title: tag-db CLI Contract
 status: Accepted
 timestamp: 2026-06-29
-tags: [cli, search, db-read, db-write, tag-conversion]
+tags: [cli, search, db-read, db-write, tag-conversion, recommendation, advisory, introspection]
 depends_on: [pydantic, sqlalchemy, sqlite]
 ---
 
@@ -114,6 +114,7 @@ The classification below is the **steady state** (base DBs already present, no
 | `convert` | `db_read` | conditional (see notes) |
 | `recommend tag` | `db_read` | conditional (see notes) |
 | `recommend translation` | none (pure compute) | yes |
+| `recommend record` | `db_read` | yes |
 | `register` | `db_write` | no |
 | `ensure-dbs` | `network_read`, `file_write` | no |
 
@@ -210,10 +211,13 @@ branching on the exit code.
 Tags come from `--tag` (comma-separated and/or repeated), `--file` (one tag per
 line), or stdin (one tag per line), resolved in that precedence. Reasons are
 rule-based; when a base DB is present, alias / deprecated / preferred-status
-reasons are added. With no DB hit it falls back to rule-only reasons.
+reasons are added. With no DB hit it falls back to rule-only reasons. Pass
+`--rule-only` to bypass DB initialization entirely and force the deterministic
+`repo=None` path even when base DBs are installed.
 
 ```bash
 tag-db recommend tag --tag "flower,1girl" --format-name danbooru
+tag-db recommend tag --tag flower --rule-only
 printf 'flower\n1girl\n' | tag-db recommend tag        # via stdin
 ```
 
@@ -228,15 +232,39 @@ printf 'flower\n1girl\n' | tag-db recommend tag        # via stdin
 Advisory only and **DB-independent** (pure compute, no side effects). Evaluates a
 single `--source-tag` / `--translation` pair and emits the `RefinementRecommendation`
 on the `result` line. Omit / empty `--translation` runs a missing-translation
-check. Exit code is always 0 on success. `proposals` is always empty in the CLI
-(target-scoped proposals are tracked in the follow-up issue #105).
+check. Exit code is always 0 on success.
+
+Pass `--target-scope {base,user}` and `--target-tag-id N` together to emit
+target-scoped `translation_correction` proposals. Providing only one of the pair
+is invalid input.
 
 ```bash
 tag-db recommend translation --source-tag flower --translation "花" --language ja
+tag-db recommend translation --source-tag flower --translation flower --language ja --target-scope user --target-tag-id 1000000001
 ```
 
 ```jsonl
 {"kind": "result", "ok": true, "message": "translation recommendation", "source_tag": "flower", "normalized_tag": "flower", "needs_refinement": false, "score": 0.0, "reasons": [], "suggestions": [], "proposals": []}
+```
+
+### recommend record — advisory refinement recommendation for search records (`db_read`)
+
+Consumes `tag-db search` JSONL from stdin and evaluates each `kind:"item"` row
+with `recommend_tag_record_refinement`. `kind:"result"` and `kind:"event"` lines
+are ignored; `kind:"error"` or invalid JSONL is invalid input. Each input item
+emits one `RefinementRecommendation` `item`, followed by a final count `result`.
+
+The default path uses the data already present in the search row and does not
+initialize DBs again. `--base-db` / `--user-db-dir` may be provided when
+repository metadata is needed.
+
+```bash
+tag-db search --query flower --limit 3 | tag-db recommend record --format-name danbooru
+```
+
+```jsonl
+{"kind": "item", "source_tag": "flower", "normalized_tag": "flower", "needs_refinement": false, "score": 0.0, "reasons": [], "suggestions": [], "proposals": []}
+{"kind": "result", "ok": true, "message": "record recommendations completed", "total": 1, "needs_refinement_count": 0}
 ```
 
 ### ensure-dbs — download base DBs (`network_read`, `file_write`)
