@@ -314,8 +314,12 @@ tag-db feedback apply-base-patches --file patches.jsonl --base-db build/cc0.sqli
 ```
 
 > Note: `aliases/register` は introspection registry (`TOOL_SPECS`) に登録済みで
-> `list-commands` / `describe` に現れるが、**`feedback` 群は未登録**のため introspection
-> には出ない。registry 同期は issue #103 で追跡中。
+> `list-commands` / `describe` に現れるが、**`feedback` 群は意図的に未登録**のため
+> introspection には出ない。これは確定方針: introspection registry は **エージェントが
+> 実行時に呼ぶ runtime コマンド面**（user DB への read/write・recommend）を公開する契約で、
+> `feedback` 群は **base DB ビルド時の保守者/builder パイプライン**（JSONL patch ファイルの
+> validate/export/apply、人間承認＋検証が前提）であり runtime のエージェント呼び出し対象では
+> ないため除外する。詳細は ADR 0009（feedback routing）/ ADR 0005（introspection contract）。
 
 ## Introspection
 
