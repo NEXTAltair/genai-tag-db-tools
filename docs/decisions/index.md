@@ -10,3 +10,4 @@
 * [ADR 0008: Stable Public API Boundary](0008-stable-public-api-boundary.md)
 * [ADR 0009: Recommendation Advisory and Feedback Routing](0009-recommendation-advisory-and-feedback-routing.md)
 * [ADR 0010: OKF YAML Frontmatter for Documentation](0010-okf-frontmatter-for-docs.md)
+* [ADR 0011: Recommendation CLI Follow-up Adapters](0011-recommend-cli-followups.md)

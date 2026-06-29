@@ -426,6 +426,7 @@ class RefinementRecommendRequest(BaseModel):
 
     tags: str = Field(..., description="Comma-separated input tags")
     format_name: str = Field(default="unknown", description="Target format name for DB-backed reasons")
+    rule_only: bool = Field(default=False, description="Bypass DB reads and use deterministic rule-only checks")
 
 
 class TranslationRecommendRequest(BaseModel):
@@ -437,6 +438,37 @@ class TranslationRecommendRequest(BaseModel):
     source_tag: str = Field(..., description="Original source tag")
     translation: str | None = Field(default=None, description="Observed translation (None/empty = missing)")
     language: str = Field(default="ja", description="Translation language code")
+    target_scope: Literal["base", "user"] | None = Field(
+        default=None,
+        description="Patch target scope; must be paired with target_tag_id",
+    )
+    target_tag_id: int | None = Field(
+        default=None,
+        description="Patch target tag id; must be paired with target_scope",
+    )
+
+    @model_validator(mode="after")
+    def _validate_target_pair(self) -> TranslationRecommendRequest:
+        if (self.target_scope is None) != (self.target_tag_id is None):
+            raise ValueError("target_scope and target_tag_id must be provided together")
+        return self
+
+
+class RecordRecommendRequest(BaseModel):
+    """`recommend record` リクエスト（CLI/introspection 契約用）。
+
+    実レコードは stdin JSONL の `kind:"item"` 行から受け取る。CLI 引数としては、
+    行内の format 情報を解釈するための補助指定だけを持つ。
+    """
+
+    format_name: str | None = Field(
+        default=None,
+        description="Target format name; defaults to each input row format_name or unknown",
+    )
+    target_scope: Literal["base", "user"] | None = Field(
+        default=None,
+        description="Override target scope; otherwise inferred from tag_id",
+    )
 
 
 class ApprovedDbFeedback(BaseModel):

@@ -25,6 +25,7 @@ frontmatter（`type` / `title` / `status` / `timestamp` / `deciders` / `tags`、
 | [0008](0008-stable-public-api-boundary.md) | ADR 0008: Stable Public API Boundary | 2026-06-29 | Accepted |
 | [0009](0009-recommendation-advisory-and-feedback-routing.md) | ADR 0009: Recommendation Advisory and Feedback Routing | 2026-06-29 | Accepted |
 | [0010](0010-okf-frontmatter-for-docs.md) | ADR 0010: OKF YAML Frontmatter for Documentation | 2026-06-29 | Accepted |
+| [0011](0011-recommend-cli-followups.md) | ADR 0011: Recommendation CLI Follow-up Adapters | 2026-06-29 | Accepted |
 <!-- OKF-TABLE:END -->
 
 > このテーブルは `make adr-index` が frontmatter から生成する。手編集しない。
