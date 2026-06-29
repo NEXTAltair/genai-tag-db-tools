@@ -1,9 +1,10 @@
 ---
-type: doc
+type: Reference
 title: genai-tag-db-tools
 status: Accepted
 timestamp: 2026-06-29
-tags: [readme, overview]
+tags: [overview, cli, search, overlay, recommendation]
+depends_on: [pyside6, sqlalchemy, sqlite, pydantic, polars, huggingface-hub]
 ---
 
 # genai-tag-db-tools

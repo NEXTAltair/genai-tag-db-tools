@@ -4,7 +4,8 @@ title: "ADR 0005: CLI Command Introspection Contract"
 status: Accepted
 timestamp: 2026-06-02
 deciders: NEXTAltair
-tags: []
+tags: [cli, introspection]
+depends_on: [pydantic]
 ---
 
 # ADR 0005: CLI Command Introspection Contract

@@ -4,7 +4,8 @@ title: "ADR 0002: CLI and GUI Entrypoint Policy"
 status: Accepted
 timestamp: 2026-06-02
 deciders: NEXTAltair
-tags: []
+tags: [cli, gui-view, packaging]
+depends_on: [pyside6, argparse]
 ---
 
 # ADR 0002: CLI and GUI Entrypoint Policy

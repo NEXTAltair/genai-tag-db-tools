@@ -5,6 +5,7 @@ status: Accepted
 timestamp: 2026-06-29
 deciders: NEXTAltair
 tags: [recommendation, feedback, advisory]
+depends_on: [pydantic]
 ---
 
 # ADR 0009: Recommendation Advisory and Feedback Routing

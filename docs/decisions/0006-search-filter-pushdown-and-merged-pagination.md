@@ -4,7 +4,8 @@ title: "ADR 0006: Search Filter Pushdown and Merged Pagination"
 status: Accepted
 timestamp: 2026-06-03
 deciders: NEXTAltair
-tags: []
+tags: [search, pagination, db-read, overlay]
+depends_on: [sqlalchemy, sqlite]
 ---
 
 # ADR 0006: Search Filter Pushdown and Merged Pagination

@@ -4,7 +4,8 @@ title: "ADR 0003: CLI JSONL Output and Structured Error Contract"
 status: Accepted
 timestamp: 2026-06-02
 deciders: NEXTAltair
-tags: []
+tags: [cli, error-handling, validation]
+depends_on: [pydantic]
 ---
 
 # ADR 0003: CLI JSONL Output and Structured Error Contract

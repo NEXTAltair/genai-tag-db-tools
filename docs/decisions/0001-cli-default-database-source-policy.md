@@ -4,7 +4,8 @@ title: "ADR 0001: CLI Default Database Source Policy"
 status: Accepted
 timestamp: 2026-06-02
 deciders: NEXTAltair
-tags: []
+tags: [cli, config, db-read]
+depends_on: [sqlite, huggingface-hub]
 ---
 
 # ADR 0001: CLI Default Database Source Policy

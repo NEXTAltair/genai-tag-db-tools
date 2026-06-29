@@ -4,7 +4,8 @@ title: "ADR 0007: User Overlay Patch DB"
 status: Accepted
 timestamp: 2026-06-29
 deciders: NEXTAltair
-tags: [database, overlay, schema]
+tags: [overlay, db-read, db-write, schema]
+depends_on: [sqlalchemy, sqlite]
 ---
 
 # ADR 0007: User Overlay Patch DB

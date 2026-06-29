@@ -1,9 +1,10 @@
 ---
-type: doc
+type: Contract
 title: tag-db CLI Contract
 status: Accepted
 timestamp: 2026-06-29
-tags: [cli, contract]
+tags: [cli, search, db-read, db-write, tag-conversion]
+depends_on: [pydantic, sqlalchemy, sqlite]
 ---
 
 # tag-db CLI Contract

@@ -4,7 +4,8 @@ title: "ADR 0004: Bounded and Correct Search Pagination"
 status: Accepted
 timestamp: 2026-06-02
 deciders: NEXTAltair
-tags: []
+tags: [search, pagination, db-read]
+depends_on: [sqlalchemy, sqlite]
 ---
 
 # ADR 0004: Bounded and Correct Search Pagination

@@ -1,3 +1,12 @@
+---
+type: Investigation
+title: "Issue #63: tag-db CLI search/status output inconsistencies"
+status: Accepted
+timestamp: 2026-06-28
+tags: [cli, search, db-read]
+depends_on: [sqlalchemy, sqlite]
+---
+
 # Issue #63 — tag-db CLI search/status output inconsistencies
 
 Status: investigated, one bug fixed, remaining items documented as expected behavior / doc-UX gaps.

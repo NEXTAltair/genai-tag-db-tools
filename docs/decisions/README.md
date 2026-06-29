@@ -1,5 +1,5 @@
 ---
-type: doc
+type: Reference
 title: Architecture Decision Records
 status: Accepted
 timestamp: 2026-06-29
@@ -9,10 +9,12 @@ tags: [adr, index]
 # Architecture Decision Records
 
 genai-tag-db-tools の重要な設計判断を記録するドキュメント群。各 ADR は先頭に YAML
-frontmatter（`type` / `title` / `status` / `timestamp` / `deciders` / `tags`）を持つ。
+frontmatter（`type` / `title` / `status` / `timestamp` / `deciders` / `tags`、必要に応じ
+`depends_on`）を持つ。docs 全体の frontmatter 規約は [ADR 0010](0010-okf-frontmatter-for-docs.md) を参照。
 
 | ADR | タイトル | 日付 | ステータス |
 |-----|---------|------|-----------|
+| [0010](0010-okf-frontmatter-for-docs.md) | OKF YAML Frontmatter for Documentation | 2026-06-29 | Accepted |
 | [0009](0009-recommendation-advisory-and-feedback-routing.md) | Recommendation Advisory and Feedback Routing | 2026-06-29 | Accepted |
 | [0008](0008-stable-public-api-boundary.md) | Stable Public API Boundary | 2026-06-29 | Accepted |
 | [0007](0007-user-overlay-patch-db.md) | User Overlay Patch DB | 2026-06-29 | Accepted |
@@ -33,6 +35,7 @@ status: Proposed | Accepted | Deprecated | Superseded by [XXXX]
 timestamp: YYYY-MM-DD
 deciders: NEXTAltair
 tags: []
+depends_on: []
 ---
 
 # ADR XXXX: タイトル

@@ -1,3 +1,12 @@
+---
+type: Reference
+title: "Design: tag-db aliases register"
+status: Implemented
+timestamp: 2026-06-08
+tags: [cli, db-write, tag-normalization, service-layer]
+depends_on: [argparse, pydantic, sqlalchemy]
+---
+
 # Design: `tag-db aliases register` — 誤字alias一括登録CLI
 
 **Issue:** NEXTAltair/genai-tag-db-tools#47  
