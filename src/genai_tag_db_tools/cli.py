@@ -29,9 +29,11 @@ from genai_tag_db_tools.models import (
     DbCacheConfig,
     DbSourceRef,
     EnsureDbRequest,
+    RefinementRecommendRequest,
     TagRegisterRequest,
     TagSearchRequest,
     TagTranslationInput,
+    TranslationRecommendRequest,
 )
 from genai_tag_db_tools.services.tag_register import TagRegisterService
 
@@ -347,6 +349,87 @@ def cmd_convert(args: argparse.Namespace) -> None:
     )
 
 
+def _clean_tag_lines(lines: Iterable[str]) -> list[str]:
+    """1 行 1 タグ。前後空白を除去し、空行は捨てる。"""
+    return [stripped for line in lines if (stripped := line.strip())]
+
+
+def _collect_recommend_tags(args: argparse.Namespace) -> list[str]:
+    """`recommend tag` の入力を解決する。
+
+    優先順位: ``--tag``（カンマ区切り / 複数指定可）> ``--file``（1行1タグ）>
+    stdin（パイプ時のみ、1行1タグ）。いずれも無ければ空リスト。
+    """
+    if args.tag:
+        tags: list[str] = []
+        for value in args.tag:
+            tags.extend(part.strip() for part in value.split(",") if part.strip())
+        return tags
+    if args.file:
+        from pathlib import Path
+
+        return _clean_tag_lines(Path(args.file).read_text(encoding="utf-8").splitlines())
+    if not sys.stdin.isatty():
+        return _clean_tag_lines(sys.stdin)
+    return []
+
+
+def cmd_recommend_tag(args: argparse.Namespace) -> None:
+    """`recommend tag`: タグの手動 refinement を advisory 判定する (read-only, batch)。
+
+    ロジックは core_api に委譲する薄いアダプタ。base DB のヒットが無ければ
+    rule-only の理由付けへ自動フォールバックする (core 側の repo 経路)。
+    """
+    from genai_tag_db_tools.core_api import recommend_manual_refinement
+
+    tags = _collect_recommend_tags(args)
+    if not tags:
+        emit_error(
+            errors.INVALID_INPUT,
+            "no tags provided (use --tag, --file, or pipe via stdin)",
+            retryable=False,
+            user_action_required=True,
+        )
+        sys.exit(2)
+
+    # introspection 契約 (RefinementRecommendRequest) で format_name を検証/正規化。
+    request = RefinementRecommendRequest(tags=",".join(tags), format_name=args.format_name)
+
+    _set_db_paths(args.base_db, args.user_db_dir)
+    repo = get_default_reader()
+
+    needs_refinement_count = 0
+    for tag in tags:
+        recommendation = recommend_manual_refinement(tag, repo, format_name=request.format_name)
+        emit_item(recommendation)
+        if recommendation.needs_refinement:
+            needs_refinement_count += 1
+
+    # advisory: 要 refinement が出ても exit 0。判定件数は result 行に載せる (#102)。
+    emit_result(
+        "recommendations completed",
+        total=len(tags),
+        needs_refinement_count=needs_refinement_count,
+    )
+
+
+def cmd_recommend_translation(args: argparse.Namespace) -> None:
+    """`recommend translation`: 翻訳品質を advisory 判定する (rule-only, DB 非依存)。"""
+    from genai_tag_db_tools.core_api import recommend_translation_quality
+
+    request = TranslationRecommendRequest(
+        source_tag=args.source_tag,
+        translation=args.translation,
+        language=args.language,
+    )
+    recommendation = recommend_translation_quality(
+        request.source_tag,
+        request.translation,
+        language=request.language,
+    )
+    emit_result("translation recommendation", **recommendation.model_dump())
+
+
 def cmd_describe(args: argparse.Namespace) -> None:
     spec = get_tool_spec(args.target_command)
     if args.schema == "json_schema":
@@ -490,6 +573,49 @@ def build_parser(prog: str = "tag-db") -> argparse.ArgumentParser:
     )
     _add_base_db_args(aliases_register_parser)
     aliases_register_parser.set_defaults(func=cmd_aliases_register)
+
+    recommend_parser = subparsers.add_parser(
+        "recommend",
+        help="Advisory refinement recommendations (read-only, non-blocking).",
+    )
+    recommend_subs = recommend_parser.add_subparsers(dest="recommend_command", required=True)
+
+    recommend_tag_parser = recommend_subs.add_parser(
+        "tag",
+        help="Recommend manual refinement for one or more tags (batch).",
+    )
+    recommend_tag_parser.add_argument(
+        "--tag",
+        action="append",
+        help="Tag to evaluate. Comma-separated values and/or repeated flags are accepted.",
+    )
+    recommend_tag_parser.add_argument(
+        "--file",
+        help="Input file path (one tag per line).",
+    )
+    recommend_tag_parser.add_argument(
+        "--format-name",
+        default="unknown",
+        help="Target format name for DB-backed reasons (default: unknown).",
+    )
+    _add_base_db_args(recommend_tag_parser)
+    recommend_tag_parser.set_defaults(func=cmd_recommend_tag)
+
+    recommend_translation_parser = recommend_subs.add_parser(
+        "translation",
+        help="Recommend translation quality for a source tag (rule-only, no DB).",
+    )
+    recommend_translation_parser.add_argument("--source-tag", required=True)
+    recommend_translation_parser.add_argument(
+        "--translation",
+        help="Observed translation. Omit or pass empty for a missing-translation check.",
+    )
+    recommend_translation_parser.add_argument(
+        "--language",
+        default="ja",
+        help="Translation language code (default: ja).",
+    )
+    recommend_translation_parser.set_defaults(func=cmd_recommend_translation)
 
     list_commands_parser = subparsers.add_parser(
         "list-commands",

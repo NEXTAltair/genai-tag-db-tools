@@ -30,11 +30,14 @@ from genai_tag_db_tools.models import (
     ConvertTagsResult,
     EnsureDbRequest,
     EnsureDbResult,
+    RefinementRecommendation,
+    RefinementRecommendRequest,
     TagRegisterRequest,
     TagRegisterResult,
     TagSearchRequest,
     TagSearchResult,
     TagStatisticsResult,
+    TranslationRecommendRequest,
 )
 
 SchemaMode = Literal["compact", "json_schema"]
@@ -117,6 +120,22 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         read_only=False,
         input_model=AliasRegisterInput,
         output_model=AliasRegisterResult,
+    ),
+    "recommend/tag": ToolSpec(
+        name="recommend/tag",
+        description="Advisory refinement recommendation for tags (read-only, non-blocking).",
+        side_effects=("db_read",),
+        read_only=True,
+        input_model=RefinementRecommendRequest,
+        output_model=RefinementRecommendation,
+    ),
+    "recommend/translation": ToolSpec(
+        name="recommend/translation",
+        description="Advisory translation-quality recommendation (rule-only, no DB).",
+        side_effects=(),
+        read_only=True,
+        input_model=TranslationRecommendRequest,
+        output_model=RefinementRecommendation,
     ),
 }
 

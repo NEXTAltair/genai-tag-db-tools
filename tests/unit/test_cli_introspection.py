@@ -27,8 +27,10 @@ class TestListCommands:
             "stats",
             "convert",
             "aliases/register",
+            "recommend/tag",
+            "recommend/translation",
         }
-        assert objs[-1] == {"kind": "result", "ok": True, "message": "commands listed", "count": 6}
+        assert objs[-1] == {"kind": "result", "ok": True, "message": "commands listed", "count": 8}
 
     def test_side_effects_and_read_only(self, capsys: pytest.CaptureFixture[str]) -> None:
         tools = {
@@ -41,6 +43,11 @@ class TestListCommands:
         assert tools["register"]["read_only"] is False
         assert tools["register"]["side_effects"] == ["db_write"]
         assert tools["ensure-dbs"]["side_effects"] == ["network_read", "file_write"]
+        # recommend は advisory read-only。tag は DB を引き、translation は純計算。
+        assert tools["recommend/tag"]["read_only"] is True
+        assert tools["recommend/tag"]["side_effects"] == ["db_read"]
+        assert tools["recommend/translation"]["read_only"] is True
+        assert tools["recommend/translation"]["side_effects"] == []
 
 
 class TestDescribeCompact:

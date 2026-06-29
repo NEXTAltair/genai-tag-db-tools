@@ -22,11 +22,16 @@ import pytest
 
 from genai_tag_db_tools.cli import (
     cmd_convert,
+    cmd_recommend_tag,
+    cmd_recommend_translation,
     cmd_register,
     cmd_search,
     cmd_stats,
 )
 from genai_tag_db_tools.models import (
+    RefinementReason,
+    RefinementRecommendation,
+    RefinementSuggestion,
     TagRecordPublic,
     TagRegisterResult,
     TagSearchResult,
@@ -441,3 +446,167 @@ class TestCmdConvert:
 
         # Verify separator parameter
         assert mock_convert.call_args[1]["separator"] == "|"
+
+
+class TestCmdRecommendTag:
+    """Test cmd_recommend_tag command (thin adapter, batch, read-only)."""
+
+    @patch("genai_tag_db_tools.cli.get_default_reader")
+    @patch("genai_tag_db_tools.core_api.recommend_manual_refinement")
+    def test_batch_emits_item_per_tag_plus_result(
+        self,
+        mock_recommend: MagicMock,
+        mock_reader: MagicMock,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """複数タグで kind=item×N + kind=result(件数サマリ)を出す。"""
+
+        def _fake(tag: str, repo: object, *, format_name: str) -> RefinementRecommendation:
+            needs = tag == "flower"
+            return RefinementRecommendation(
+                source_tag=tag,
+                normalized_tag=tag,
+                needs_refinement=needs,
+                score=1.0 if needs else 0.0,
+                reasons=[RefinementReason(code="broad_single_word", message="x")] if needs else [],
+                suggestions=[RefinementSuggestion(kind="review_only")] if needs else [],
+            )
+
+        mock_recommend.side_effect = _fake
+
+        base_db = tmp_path / "base.db"
+        base_db.touch()
+        args = argparse.Namespace(
+            tag=["flower,1girl"],
+            file=None,
+            format_name="danbooru",
+            base_db=[str(base_db)],
+            user_db_dir=None,
+        )
+        cmd_recommend_tag(args)
+
+        # core_api へ委譲。format_name と repo が配線される。
+        assert mock_recommend.call_count == 2
+        assert mock_recommend.call_args_list[0].kwargs["format_name"] == "danbooru"
+        assert mock_recommend.call_args_list[0].args[1] is mock_reader.return_value
+
+        lines = _parse_jsonl(capsys.readouterr().out)
+        items = [line for line in lines if line["kind"] == "item"]
+        assert [item["source_tag"] for item in items] == ["flower", "1girl"]
+        assert lines[-1]["kind"] == "result"
+        assert lines[-1]["total"] == 2
+        assert lines[-1]["needs_refinement_count"] == 1
+
+    @patch("genai_tag_db_tools.cli.get_default_reader")
+    @patch("genai_tag_db_tools.core_api.recommend_manual_refinement")
+    def test_single_tag_still_emits_item_and_result(
+        self,
+        mock_recommend: MagicMock,
+        mock_reader: MagicMock,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """単一タグでも出力形状は item + result で一定。"""
+        mock_recommend.return_value = RefinementRecommendation(
+            source_tag="flower",
+            normalized_tag="flower",
+            needs_refinement=False,
+            score=0.0,
+        )
+        base_db = tmp_path / "base.db"
+        base_db.touch()
+        args = argparse.Namespace(
+            tag=["flower"],
+            file=None,
+            format_name="unknown",
+            base_db=[str(base_db)],
+            user_db_dir=None,
+        )
+        cmd_recommend_tag(args)
+
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert [line["kind"] for line in lines] == ["item", "result"]
+        assert lines[-1]["total"] == 1
+        assert lines[-1]["needs_refinement_count"] == 0
+
+    @patch("genai_tag_db_tools.cli.get_default_reader")
+    @patch("genai_tag_db_tools.core_api.recommend_manual_refinement")
+    def test_reads_tags_from_file(
+        self,
+        mock_recommend: MagicMock,
+        mock_reader: MagicMock,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--file は1行1タグで読み、空行を捨てる。"""
+        mock_recommend.side_effect = lambda tag, repo, *, format_name: RefinementRecommendation(
+            source_tag=tag, normalized_tag=tag, needs_refinement=False, score=0.0
+        )
+        tags_file = tmp_path / "tags.txt"
+        tags_file.write_text("flower\n\n1girl\n", encoding="utf-8")
+        base_db = tmp_path / "base.db"
+        base_db.touch()
+        args = argparse.Namespace(
+            tag=None,
+            file=str(tags_file),
+            format_name="unknown",
+            base_db=[str(base_db)],
+            user_db_dir=None,
+        )
+        cmd_recommend_tag(args)
+
+        lines = _parse_jsonl(capsys.readouterr().out)
+        items = [line for line in lines if line["kind"] == "item"]
+        assert [item["source_tag"] for item in items] == ["flower", "1girl"]
+
+    def test_no_tags_emits_error_and_exit_2(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """タグ未指定(stdin も tty)なら構造化エラー + exit 2。"""
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        args = argparse.Namespace(
+            tag=None,
+            file=None,
+            format_name="unknown",
+            base_db=None,
+            user_db_dir=None,
+        )
+        with pytest.raises(SystemExit) as exc:
+            cmd_recommend_tag(args)
+        assert exc.value.code == 2
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert lines[-1]["kind"] == "error"
+        assert lines[-1]["code"] == "INVALID_INPUT"
+
+
+class TestCmdRecommendTranslation:
+    """Test cmd_recommend_translation command (rule-only, no DB)."""
+
+    @patch("genai_tag_db_tools.core_api.recommend_translation_quality")
+    def test_delegates_and_emits_result(
+        self,
+        mock_recommend: MagicMock,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """core_api へ委譲し、recommendation を result 行に展開する。"""
+        mock_recommend.return_value = RefinementRecommendation(
+            source_tag="flower",
+            normalized_tag="flower",
+            needs_refinement=True,
+            score=1.0,
+            reasons=[RefinementReason(code="missing_translation", message="empty")],
+            suggestions=[RefinementSuggestion(kind="review_only")],
+        )
+        args = argparse.Namespace(source_tag="flower", translation="", language="ja")
+        cmd_recommend_translation(args)
+
+        mock_recommend.assert_called_once_with("flower", "", language="ja")
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert len(lines) == 1
+        assert lines[0]["kind"] == "result"
+        assert lines[0]["source_tag"] == "flower"
+        assert lines[0]["needs_refinement"] is True
+        assert lines[0]["reasons"][0]["code"] == "missing_translation"
