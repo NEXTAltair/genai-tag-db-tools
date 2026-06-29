@@ -1,7 +1,13 @@
-# ADR 0004: Bounded and Correct Search Pagination
+---
+type: ADR
+title: "ADR 0004: Bounded and Correct Search Pagination"
+status: Accepted
+timestamp: 2026-06-02
+deciders: NEXTAltair
+tags: []
+---
 
-- **日付**: 2026-06-02
-- **ステータス**: Accepted
+# ADR 0004: Bounded and Correct Search Pagination
 
 ## Context
 

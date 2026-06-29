@@ -1,7 +1,13 @@
-# ADR 0005: CLI Command Introspection Contract
+---
+type: ADR
+title: "ADR 0005: CLI Command Introspection Contract"
+status: Accepted
+timestamp: 2026-06-02
+deciders: NEXTAltair
+tags: []
+---
 
-- **日付**: 2026-06-02
-- **ステータス**: Accepted
+# ADR 0005: CLI Command Introspection Contract
 
 ## Context
 
