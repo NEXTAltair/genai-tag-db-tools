@@ -1,3 +1,12 @@
+---
+type: Plan
+title: "aliases register Implementation Plan"
+status: Implemented
+timestamp: 2026-06-08
+tags: [cli, db-write, tag-normalization, service-layer]
+depends_on: [argparse, pydantic, sqlalchemy, polars]
+---
+
 # aliases register Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

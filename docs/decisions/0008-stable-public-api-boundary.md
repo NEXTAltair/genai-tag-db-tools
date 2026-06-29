@@ -4,7 +4,8 @@ title: "ADR 0008: Stable Public API Boundary"
 status: Accepted
 timestamp: 2026-06-29
 deciders: NEXTAltair
-tags: [api, boundary, packaging]
+tags: [public-api, packaging, service-layer]
+depends_on: [pydantic]
 ---
 
 # ADR 0008: Stable Public API Boundary
