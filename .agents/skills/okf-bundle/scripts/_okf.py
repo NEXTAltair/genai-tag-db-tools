@@ -32,6 +32,11 @@ def split_frontmatter(text: str) -> tuple[str, str]:
     Returns:
         ``(frontmatter_block, body)`` のタプル。frontmatter が無ければ
         ``("", text)`` を返す。frontmatter_block は ``---`` 区切り行を含まない。
+
+    Raises:
+        ValueError: 開始 ``---`` 区切りがあるのに閉じ ``---`` が無い
+            (unterminated frontmatter) 場合。``--skip-missing`` で malformed を
+            「未付与」と取り違えないための guardrail。
     """
     if not text.startswith("---"):
         return "", text
@@ -45,14 +50,22 @@ def split_frontmatter(text: str) -> tuple[str, str]:
             block = "".join(lines[1:i])
             body = "".join(lines[i + 1 :])
             return block, body
-    return "", text
+    raise ValueError("frontmatter の閉じ '---' が無い (unterminated)")
 
 
 def _strip_scalar(value: str) -> str:
-    """スカラー値の前後空白と一重/二重引用符を除去する。"""
+    """スカラー値の前後空白と一重/二重引用符を除去する。
+
+    クォートで始まるのに同じクォートで閉じていない値 (例: ``"Broken``) は
+    不正な YAML スカラーとして ``ValueError`` を送出する。frontmatter を契約とする
+    OKF バンドル (ADR 0010 / LoRAIro ADR 0082) で、検証が malformed scalar を
+    silently 通さないための guardrail。
+    """
     value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-        return value[1:-1]
+    if value and value[0] in "\"'":
+        if len(value) >= 2 and value[-1] == value[0]:
+            return value[1:-1]
+        raise ValueError(f"不正な quoted scalar (クォート未終端): {value!r}")
     return value
 
 
@@ -92,7 +105,12 @@ def parse_frontmatter(text: str) -> dict[str, str | list[str]]:
         key, _, raw = line.partition(":")
         key = key.strip()
         raw = raw.strip()
-        if raw.startswith("[") and raw.endswith("]"):
+        if raw.startswith("["):
+            # inline list は ']' で閉じる必要がある。未終端 (例: ``[webapi``) は
+            # plain scalar に fall through させず reject する (tags/depends_on は
+            # 機械可読な list である契約。ADR 0010)。
+            if not raw.endswith("]"):
+                raise ValueError(f"不正な inline list (']' 未終端): {raw!r}")
             result[key] = _parse_inline_list(raw)
         elif raw == "":
             # ブロックリストの可能性: 次行以降の "  - item" を集める。
