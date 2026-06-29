@@ -1,7 +1,13 @@
-# ADR 0002: CLI and GUI Entrypoint Policy
+---
+type: ADR
+title: "ADR 0002: CLI and GUI Entrypoint Policy"
+status: Accepted
+timestamp: 2026-06-02
+deciders: NEXTAltair
+tags: []
+---
 
-- **日付**: 2026-06-02
-- **ステータス**: Accepted
+# ADR 0002: CLI and GUI Entrypoint Policy
 
 ## Context
 

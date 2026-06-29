@@ -1,3 +1,11 @@
+---
+type: doc
+title: tag-db CLI Contract
+status: Accepted
+timestamp: 2026-06-29
+tags: [cli, contract]
+---
+
 # tag-db CLI Contract
 
 This document is the contract for the `tag-db` command-line interface. It is the
@@ -197,6 +205,45 @@ tag-db ensure-dbs --source NEXTAltair/genai-image-tag-db/genai-image-tag-db-cc0.
 {"kind": "item", "db_path": "/home/user/.cache/.../genai-image-tag-db-cc0.sqlite", "sha256": "...", "revision": null, "cached": true}
 {"kind": "result", "ok": true, "message": "databases ensured", "count": 1}
 ```
+
+### aliases register — bulk-register aliases (`db_write`)
+
+Reads alias entries from a `.jsonl` / `.csv` file and registers them to the user
+DB. **Dry-run by default**; pass `--apply` to write. Each entry is an `item` line
+(`status`: `would_create` / `created` / `skipped` / `conflict` / `missing_preferred`)
+and the final `result` carries the per-status counts.
+
+```bash
+tag-db aliases register --file aliases.jsonl          # dry-run
+tag-db aliases register --file aliases.jsonl --apply   # write to user DB
+```
+
+```jsonl
+{"kind": "item", "alias": "blakc_hair", "preferred": "black_hair", "format_name": "danbooru", "status": "would_create"}
+{"kind": "result", "ok": true, "message": "dry-run complete", "dry_run": true, "total": 1, "created": 1, "skipped": 0, "conflicts": 0, "missing_preferred": 0}
+```
+
+### feedback — base DB correction patch pipeline
+
+Validate / export / apply correction patches for the **base DB build sources**
+(`#58` / `#60` / `#61`). These operate on JSONL patch files, not the live user DB.
+
+- `feedback validate-base-patches --file <patch.jsonl>` — schema / scope / alias /
+  type / translation の整合性を検証する（`db_read` 相当、副作用なし）。
+- `feedback export-base-patches ...` — 承認済み feedback から base 用 correction patch
+  JSONL を出力する（`file_write`）。
+- `feedback apply-base-patches --file <patch.jsonl> --base-db <path> --apply` —
+  validated patch を base DB build 出力へ適用する（`db_write`）。`--apply` 省略時は
+  dry-run。`scope=user/local` や未承認・未検証の patch は拒否する。
+
+```bash
+tag-db feedback validate-base-patches --file patches.jsonl
+tag-db feedback apply-base-patches --file patches.jsonl --base-db build/cc0.sqlite --apply
+```
+
+> Note: `aliases/register` は introspection registry (`TOOL_SPECS`) に登録済みで
+> `list-commands` / `describe` に現れるが、**`feedback` 群は未登録**のため introspection
+> には出ない。registry 同期は issue #103 で追跡中。
 
 ## Introspection
 
