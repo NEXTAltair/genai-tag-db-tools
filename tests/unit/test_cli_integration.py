@@ -765,3 +765,80 @@ class TestCmdRecommendRecord:
 
         with pytest.raises(ValueError, match="upstream error"):
             cmd_recommend_record(args)
+
+    def test_empty_search_result_stream_is_success(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        stdin = io.StringIO(json.dumps({"kind": "result", "ok": True, "message": "search completed"}))
+        monkeypatch.setattr("sys.stdin", stdin)
+        args = argparse.Namespace(format_name=None, target_scope=None, base_db=None, user_db_dir=None)
+
+        cmd_recommend_record(args)
+
+        lines = _parse_jsonl(capsys.readouterr().out)
+        assert lines == [
+            {
+                "kind": "result",
+                "ok": True,
+                "message": "record recommendations completed",
+                "total": 0,
+                "needs_refinement_count": 0,
+            }
+        ]
+
+    def test_malformed_item_missing_tag_id_is_invalid_input(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        stdin = io.StringIO(json.dumps({"kind": "item", "tag": "flower"}))
+        monkeypatch.setattr("sys.stdin", stdin)
+        args = argparse.Namespace(format_name=None, target_scope=None, base_db=None, user_db_dir=None)
+
+        with pytest.raises(ValueError, match="missing tag_id"):
+            cmd_recommend_record(args)
+
+    @patch("genai_tag_db_tools.cli.get_default_reader")
+    @patch("genai_tag_db_tools.cli._set_db_paths")
+    @patch("genai_tag_db_tools.core_api.recommend_tag_record_refinement")
+    def test_numeric_format_status_keys_initialize_repo_metadata(
+        self,
+        mock_recommend: MagicMock,
+        mock_set_db_paths: MagicMock,
+        mock_reader: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        mock_recommend.return_value = RefinementRecommendation(
+            source_tag="custom tag",
+            normalized_tag="custom tag",
+            needs_refinement=False,
+            score=0.0,
+        )
+        stdin = io.StringIO(
+            json.dumps(
+                {
+                    "kind": "item",
+                    "tag": "custom tag",
+                    "tag_id": 1_000_000_001,
+                    "format_name": "Lorairo",
+                    "format_statuses": {
+                        "1000": {
+                            "alias": False,
+                            "deprecated": False,
+                            "type_id": 0,
+                            "type_name": "unknown",
+                            "preferred_tag_id": 1_000_000_001,
+                        }
+                    },
+                }
+            )
+        )
+        monkeypatch.setattr("sys.stdin", stdin)
+        args = argparse.Namespace(format_name=None, target_scope=None, base_db=None, user_db_dir=None)
+
+        cmd_recommend_record(args)
+
+        mock_set_db_paths.assert_called_once_with(None, None)
+        mock_reader.assert_called_once()
+        assert mock_recommend.call_args.kwargs["repo"] is mock_reader.return_value

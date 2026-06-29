@@ -3,7 +3,7 @@ import csv
 import json
 import sys
 import traceback
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from genai_tag_db_tools import errors
@@ -441,12 +441,28 @@ def cmd_recommend_translation(args: argparse.Namespace) -> None:
     emit_result("translation recommendation", **recommendation.model_dump())
 
 
-def _iter_recommend_record_rows(lines: Iterable[str]) -> Iterable[dict[str, object]]:
-    """Yield `kind:item` JSONL payloads from `search` output.
+def _validate_recommend_record_row(row: Mapping[str, object], line_number: int) -> None:
+    if "tag_id" not in row:
+        raise ValueError(f"stdin line {line_number} item is missing tag_id")
+    tag_id = row["tag_id"]
+    if not isinstance(tag_id, int | str):
+        raise ValueError(f"stdin line {line_number} item has invalid tag_id")
+    try:
+        int(tag_id)
+    except ValueError as exc:
+        raise ValueError(f"stdin line {line_number} item has invalid tag_id") from exc
+    if not row.get("tag") and not row.get("source_tag"):
+        raise ValueError(f"stdin line {line_number} item is missing tag/source_tag")
+
+
+def _collect_recommend_record_rows(lines: Iterable[str]) -> tuple[list[dict[str, object]], bool]:
+    """Collect `kind:item` JSONL payloads from `search` output.
 
     Search result summaries and events are ignored. Structured error lines are treated
     as invalid input because recommendation output would otherwise hide upstream failure.
     """
+    rows: list[dict[str, object]] = []
+    saw_result = False
     for line_number, line in enumerate(lines, start=1):
         stripped = line.strip()
         if not stripped:
@@ -462,13 +478,32 @@ def _iter_recommend_record_rows(lines: Iterable[str]) -> Iterable[dict[str, obje
         if kind == "item":
             row = dict(payload)
             row.pop("kind", None)
-            yield row
+            _validate_recommend_record_row(row, line_number)
+            rows.append(row)
         elif kind == "error":
             raise ValueError(f"stdin line {line_number} is an upstream error line")
         elif kind in {"event", "result"}:
+            saw_result = saw_result or kind == "result"
             continue
         else:
             raise ValueError(f"stdin line {line_number} has unsupported kind: {kind!r}")
+    return rows, saw_result
+
+
+def _record_rows_need_repo(rows: Iterable[Mapping[str, object]], format_name: str | None) -> bool:
+    """Return True when repo metadata is needed to resolve numeric format_status keys."""
+    for row in rows:
+        requested_format = format_name or row.get("format_name")
+        if not requested_format or str(requested_format) == "unknown":
+            continue
+        format_statuses = row.get("format_statuses") or {}
+        if not isinstance(format_statuses, Mapping):
+            continue
+        if str(requested_format) in format_statuses:
+            continue
+        if any(str(key).isdigit() for key in format_statuses):
+            return True
+    return False
 
 
 def cmd_recommend_record(args: argparse.Namespace) -> None:
@@ -488,14 +523,15 @@ def cmd_recommend_record(args: argparse.Namespace) -> None:
         format_name=args.format_name,
         target_scope=args.target_scope,
     )
+    rows, saw_result = _collect_recommend_record_rows(sys.stdin)
     repo = None
-    if args.base_db or args.user_db_dir:
+    if args.base_db or args.user_db_dir or _record_rows_need_repo(rows, request.format_name):
         _set_db_paths(args.base_db, args.user_db_dir)
         repo = get_default_reader()
 
     total = 0
     needs_refinement_count = 0
-    for row in _iter_recommend_record_rows(sys.stdin):
+    for row in rows:
         recommendation = recommend_tag_record_refinement(
             row,
             format_name=request.format_name,
@@ -508,6 +544,13 @@ def cmd_recommend_record(args: argparse.Namespace) -> None:
             needs_refinement_count += 1
 
     if total == 0:
+        if saw_result:
+            emit_result(
+                "record recommendations completed",
+                total=0,
+                needs_refinement_count=0,
+            )
+            return
         emit_error(
             errors.INVALID_INPUT,
             "no item records found on stdin",
