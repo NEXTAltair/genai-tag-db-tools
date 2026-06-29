@@ -45,3 +45,10 @@ epic #2「タグ手動変更リコメンド」は、`needs_manual_refinement(tag
 - リコメンド自体は DB を書き換えない。書き込みは feedback apply（user-local）／builder apply（base）に限定。
 - 下流（LoRAIro）はレビュー UI で本 API を public API 経由で消費する（ADR 0008）。
 - CLI からの recommend 露出は別途 issue #102 で対応（public API との parity）。
+- **introspection registry（`TOOL_SPECS`, ADR 0005）への登録は runtime のエージェント呼び出し
+  対象に限る。** `recommend/*` と `aliases/register`（runtime・user DB 操作）は登録して
+  `list-commands` / `describe` に露出するが、**CLI `feedback` 群（base DB ビルド時の保守者/builder
+  パイプライン）は意図的に未登録**とする。base patch の validate/export/apply は人間承認＋検証を
+  前提とするビルド工程であり、エージェントが実行時に発見・自動実行する runtime コマンド面では
+  ないため。この非対称は `tests/unit/test_cli_feedback.py::test_list_commands_unchanged_by_feedback_group`
+  で固定する（issue #103）。

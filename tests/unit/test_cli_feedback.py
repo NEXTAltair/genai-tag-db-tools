@@ -90,8 +90,11 @@ def test_export_then_apply_cli(tmp_path: Path, capsys: pytest.CaptureFixture[str
 
 
 def test_list_commands_unchanged_by_feedback_group(capsys: pytest.CaptureFixture[str]) -> None:
-    # feedback subcommands are intentionally not registered as tool specs,
-    # so the introspection command set stays stable.
+    # feedback subcommands are intentionally not registered as tool specs
+    # (settled policy: ADR 0009 / ADR 0005 / docs/cli.md, issue #103). The
+    # introspection registry exposes runtime agent-callable commands only;
+    # the feedback group is a base-DB build-time maintainer pipeline, so it
+    # stays out of the introspection command set.
     objs = _run(["list-commands"], capsys)
     names = {o["name"] for o in objs if o["kind"] == "tool"}
     assert "feedback" not in names
