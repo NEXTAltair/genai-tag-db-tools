@@ -455,14 +455,12 @@ def _validate_recommend_record_row(row: Mapping[str, object], line_number: int) 
         raise ValueError(f"stdin line {line_number} item is missing tag/source_tag")
 
 
-def _collect_recommend_record_rows(lines: Iterable[str]) -> tuple[list[dict[str, object]], bool]:
-    """Collect `kind:item` JSONL payloads from `search` output.
+def _iter_recommend_record_rows(lines: Iterable[str]) -> Iterable[tuple[dict[str, object] | None, bool]]:
+    """Yield parsed record rows and result-line markers from `search` output.
 
     Search result summaries and events are ignored. Structured error lines are treated
     as invalid input because recommendation output would otherwise hide upstream failure.
     """
-    rows: list[dict[str, object]] = []
-    saw_result = False
     for line_number, line in enumerate(lines, start=1):
         stripped = line.strip()
         if not stripped:
@@ -479,31 +477,40 @@ def _collect_recommend_record_rows(lines: Iterable[str]) -> tuple[list[dict[str,
             row = dict(payload)
             row.pop("kind", None)
             _validate_recommend_record_row(row, line_number)
-            rows.append(row)
+            yield row, False
         elif kind == "error":
             raise ValueError(f"stdin line {line_number} is an upstream error line")
-        elif kind in {"event", "result"}:
-            saw_result = saw_result or kind == "result"
+        elif kind == "result":
+            yield None, True
+        elif kind == "event":
             continue
         else:
             raise ValueError(f"stdin line {line_number} has unsupported kind: {kind!r}")
-    return rows, saw_result
 
 
-def _record_rows_need_repo(rows: Iterable[Mapping[str, object]], format_name: str | None) -> bool:
-    """Return True when repo metadata is needed to resolve numeric format_status keys."""
-    for row in rows:
-        requested_format = format_name or row.get("format_name")
-        if not requested_format or str(requested_format) == "unknown":
-            continue
-        format_statuses = row.get("format_statuses") or {}
-        if not isinstance(format_statuses, Mapping):
-            continue
-        if str(requested_format) in format_statuses:
-            continue
-        if any(str(key).isdigit() for key in format_statuses):
-            return True
-    return False
+def _prepare_recommend_record_row(
+    row: dict[str, object],
+    *,
+    format_name: str | None,
+    repo: object | None,
+) -> dict[str, object]:
+    """Avoid false missing-format findings when only numeric status keys are available."""
+    if repo is not None:
+        return row
+    requested_format = format_name or row.get("format_name")
+    if not requested_format or str(requested_format) == "unknown":
+        return row
+    format_statuses = row.get("format_statuses") or {}
+    if not isinstance(format_statuses, Mapping):
+        return row
+    if str(requested_format) in format_statuses:
+        return row
+    if not any(str(key).isdigit() for key in format_statuses):
+        return row
+
+    fallback_row = dict(row)
+    fallback_row.pop("format_statuses", None)
+    return fallback_row
 
 
 def cmd_recommend_record(args: argparse.Namespace) -> None:
@@ -523,17 +530,26 @@ def cmd_recommend_record(args: argparse.Namespace) -> None:
         format_name=args.format_name,
         target_scope=args.target_scope,
     )
-    rows, saw_result = _collect_recommend_record_rows(sys.stdin)
     repo = None
-    if args.base_db or args.user_db_dir or _record_rows_need_repo(rows, request.format_name):
+    if args.base_db or args.user_db_dir:
         _set_db_paths(args.base_db, args.user_db_dir)
         repo = get_default_reader()
 
     total = 0
     needs_refinement_count = 0
-    for row in rows:
-        recommendation = recommend_tag_record_refinement(
+    saw_result = False
+    for row, is_result in _iter_recommend_record_rows(sys.stdin):
+        if is_result:
+            saw_result = True
+            continue
+        assert row is not None
+        prepared_row = _prepare_recommend_record_row(
             row,
+            format_name=request.format_name,
+            repo=repo,
+        )
+        recommendation = recommend_tag_record_refinement(
+            prepared_row,
             format_name=request.format_name,
             target_scope=request.target_scope,
             repo=repo,

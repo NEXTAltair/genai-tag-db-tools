@@ -799,14 +799,10 @@ class TestCmdRecommendRecord:
         with pytest.raises(ValueError, match="missing tag_id"):
             cmd_recommend_record(args)
 
-    @patch("genai_tag_db_tools.cli.get_default_reader")
-    @patch("genai_tag_db_tools.cli._set_db_paths")
     @patch("genai_tag_db_tools.core_api.recommend_tag_record_refinement")
-    def test_numeric_format_status_keys_initialize_repo_metadata(
+    def test_numeric_format_status_keys_fall_back_to_row_level_without_repo(
         self,
         mock_recommend: MagicMock,
-        mock_set_db_paths: MagicMock,
-        mock_reader: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         mock_recommend.return_value = RefinementRecommendation(
@@ -839,6 +835,6 @@ class TestCmdRecommendRecord:
 
         cmd_recommend_record(args)
 
-        mock_set_db_paths.assert_called_once_with(None, None)
-        mock_reader.assert_called_once()
-        assert mock_recommend.call_args.kwargs["repo"] is mock_reader.return_value
+        passed_row = mock_recommend.call_args.args[0]
+        assert "format_statuses" not in passed_row
+        assert mock_recommend.call_args.kwargs["repo"] is None
