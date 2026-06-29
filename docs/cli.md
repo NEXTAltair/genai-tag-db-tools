@@ -112,6 +112,8 @@ The classification below is the **steady state** (base DBs already present, no
 | `search` | `db_read` | conditional (see notes) |
 | `stats` | `db_read` | conditional (see notes) |
 | `convert` | `db_read` | conditional (see notes) |
+| `recommend tag` | `db_read` | conditional (see notes) |
+| `recommend translation` | none (pure compute) | yes |
 | `register` | `db_write` | no |
 | `ensure-dbs` | `network_read`, `file_write` | no |
 
@@ -194,6 +196,47 @@ tag-db convert --tags "cat,1girl" --format-name danbooru
 
 ```jsonl
 {"kind": "result", "ok": true, "message": "tags converted", "input": "cat,1girl", "output": "cat, 1girl", "format": "danbooru"}
+```
+
+### recommend tag — advisory refinement recommendation (`db_read`)
+
+Advisory only: **read-only, non-blocking, never auto-replaces**. Evaluates whether
+each tag needs manual refinement before registration and emits an `item` line per
+tag (a `RefinementRecommendation`), then a final `result` with the counts. The
+exit code is **always 0** on success even when tags need refinement — read
+`needs_refinement` per item / `needs_refinement_count` on the result rather than
+branching on the exit code.
+
+Tags come from `--tag` (comma-separated and/or repeated), `--file` (one tag per
+line), or stdin (one tag per line), resolved in that precedence. Reasons are
+rule-based; when a base DB is present, alias / deprecated / preferred-status
+reasons are added. With no DB hit it falls back to rule-only reasons.
+
+```bash
+tag-db recommend tag --tag "flower,1girl" --format-name danbooru
+printf 'flower\n1girl\n' | tag-db recommend tag        # via stdin
+```
+
+```jsonl
+{"kind": "item", "source_tag": "flower", "normalized_tag": "flower", "needs_refinement": true, "score": 0.5, "reasons": [{"code": "broad_single_word", "message": "...", "field": null, "evidence": []}], "suggestions": [{"kind": "review_only", "tag": null}], "proposals": []}
+{"kind": "item", "source_tag": "1girl", "normalized_tag": "1girl", "needs_refinement": false, "score": 0.0, "reasons": [], "suggestions": [], "proposals": []}
+{"kind": "result", "ok": true, "message": "recommendations completed", "total": 2, "needs_refinement_count": 1}
+```
+
+### recommend translation — advisory translation-quality recommendation (no DB)
+
+Advisory only and **DB-independent** (pure compute, no side effects). Evaluates a
+single `--source-tag` / `--translation` pair and emits the `RefinementRecommendation`
+on the `result` line. Omit / empty `--translation` runs a missing-translation
+check. Exit code is always 0 on success. `proposals` is always empty in the CLI
+(target-scoped proposals are tracked in the follow-up issue #105).
+
+```bash
+tag-db recommend translation --source-tag flower --translation "花" --language ja
+```
+
+```jsonl
+{"kind": "result", "ok": true, "message": "translation recommendation", "source_tag": "flower", "normalized_tag": "flower", "needs_refinement": false, "score": 0.0, "reasons": [], "suggestions": [], "proposals": []}
 ```
 
 ### ensure-dbs — download base DBs (`network_read`, `file_write`)

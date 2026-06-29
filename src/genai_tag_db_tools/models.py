@@ -417,6 +417,28 @@ class RefinementRecommendation(BaseModel):
     )
 
 
+class RefinementRecommendRequest(BaseModel):
+    """`recommend tag` リクエスト（CLI/introspection 契約用）。
+
+    CLI は `--tag a,b,c`（カンマ区切り）/ `--file`（1行1タグ）/ stdin の
+    いずれかを `tags` の論理表現（カンマ区切り文字列）へ正規化して渡す。
+    """
+
+    tags: str = Field(..., description="Comma-separated input tags")
+    format_name: str = Field(default="unknown", description="Target format name for DB-backed reasons")
+
+
+class TranslationRecommendRequest(BaseModel):
+    """`recommend translation` リクエスト（CLI/introspection 契約用）。
+
+    DB を一切引かない純計算の advisory リクエスト。
+    """
+
+    source_tag: str = Field(..., description="Original source tag")
+    translation: str | None = Field(default=None, description="Observed translation (None/empty = missing)")
+    language: str = Field(default="ja", description="Translation language code")
+
+
 class ApprovedDbFeedback(BaseModel):
     """人間承認済みの DB feedback proposal。"""
 
