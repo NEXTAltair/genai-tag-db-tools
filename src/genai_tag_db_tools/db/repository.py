@@ -222,6 +222,36 @@ class TagReader:
             result.setdefault(tr.tag_id, []).append(tr)
         return result
 
+    def get_usage_counts_batch(self, tag_ids: list[int]) -> dict[int, dict[int, int]]:
+        """複数タグIDの format 別使用回数を一括取得する (LoRAIro #990 Phase 3)。
+
+        N+1 クエリを回避するため IN 句で一括取得し、tag_id をキーに
+        ``{format_id: count}`` のネスト辞書で返す。表示言語とは独立した「使用頻度」
+        第2軸を chip に補助表示するための読み取り専用 API。``format_id`` →
+        表示名の解決は呼び出し側が :meth:`get_format_map` で行う (count 取得と
+        name 結合の責務を分離する)。SQLite の変数上限 (999) 対策として 900 件ずつ
+        チャンク分割してクエリを発行する。
+
+        Args:
+            tag_ids: 使用回数を取得するタグIDのリスト。空リストの場合は空辞書を返す。
+
+        Returns:
+            tag_id をキーとする ``{format_id: count}`` 辞書のネスト辞書。
+            使用回数が存在しない tag_id はキーに含まれない。
+        """
+        if not tag_ids:
+            return {}
+        _SQLITE_IN_LIMIT = 900
+        with self.session_factory() as session:
+            rows: list[TagUsageCounts] = []
+            for i in range(0, len(tag_ids), _SQLITE_IN_LIMIT):
+                chunk = tag_ids[i : i + _SQLITE_IN_LIMIT]
+                rows.extend(session.query(TagUsageCounts).filter(TagUsageCounts.tag_id.in_(chunk)).all())
+        result: dict[int, dict[int, int]] = {}
+        for row in rows:
+            result.setdefault(row.tag_id, {})[row.format_id] = row.count
+        return result
+
     def list_translations(self) -> list[TagTranslation]:
         with self.session_factory() as session:
             return session.query(TagTranslation).all()
@@ -1982,6 +2012,31 @@ class MergedTagReader:
                     if key not in seen:
                         seen.add(key)
                         result.setdefault(tag_id, []).append(tr)
+        return result
+
+    def get_usage_counts_batch(self, tag_ids: list[int]) -> dict[int, dict[int, int]]:
+        """複数タグIDの format 別使用回数を全リポジトリからバッチ取得してマージする。
+
+        base_repos (低優先度→高優先度) → user_repo の順に ``(tag_id, format_id)``
+        単位で上書きマージする。user_repo の patch が最優先となり、単一取得の
+        :meth:`get_usage_count` (``_first_found``: user 優先) と同じセマンティクスを保つ。
+
+        Args:
+            tag_ids: 使用回数を取得するタグIDのリスト。空リストの場合は空辞書を返す。
+
+        Returns:
+            tag_id をキーとする ``{format_id: count}`` 辞書のネスト辞書。
+        """
+        if not tag_ids:
+            return {}
+        result: dict[int, dict[int, int]] = {}
+        for repo in self._iter_base_repos_low_to_high():
+            for tag_id, counts in repo.get_usage_counts_batch(tag_ids).items():
+                result.setdefault(tag_id, {}).update(counts)
+        if self._has_user():
+            assert self.user_repo is not None
+            for tag_id, counts in self.user_repo.get_usage_counts_batch(tag_ids).items():
+                result.setdefault(tag_id, {}).update(counts)
         return result
 
     def list_translations(self) -> list[TagTranslation]:

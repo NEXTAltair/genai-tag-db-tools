@@ -17,6 +17,7 @@ from genai_tag_db_tools.db.schema import (
     TagTranslation,
     TagTypeFormatMapping,
     TagTypeName,
+    TagUsageCounts,
 )
 
 pytestmark = pytest.mark.db_tools
@@ -579,6 +580,104 @@ def test_merged_reader_get_translations_batch_deduplicates_across_repos(
     assert 1 in result
     assert len(result[1]) == 1
     assert result[1][0].translation == "女の子"
+
+
+def test_get_usage_counts_batch_returns_empty_for_empty_input(
+    session_factory: Callable[[], Session],
+) -> None:
+    """空リスト入力時に空辞書を返すこと"""
+    reader = TagReader(session_factory)
+    assert reader.get_usage_counts_batch([]) == {}
+
+
+def test_get_usage_counts_batch_groups_by_tag_and_format(
+    session_factory: Callable[[], Session],
+) -> None:
+    """複数 tag_id の使用回数が tag_id → {format_id: count} でグループ化されること"""
+    reader = TagReader(session_factory)
+
+    with session_factory() as session:
+        session.add(Tag(tag_id=1, tag="girl", source_tag="girl"))
+        session.add(Tag(tag_id=2, tag="boy", source_tag="boy"))
+        session.add(TagUsageCounts(tag_id=1, format_id=1, count=1234))
+        session.add(TagUsageCounts(tag_id=1, format_id=2, count=42))
+        session.add(TagUsageCounts(tag_id=2, format_id=1, count=7))
+        session.commit()
+
+    result = reader.get_usage_counts_batch([1, 2])
+
+    assert result == {1: {1: 1234, 2: 42}, 2: {1: 7}}
+
+
+def test_get_usage_counts_batch_ignores_unknown_tag_ids(
+    session_factory: Callable[[], Session],
+) -> None:
+    """使用回数が無い tag_id は結果辞書に含まれないこと"""
+    reader = TagReader(session_factory)
+
+    with session_factory() as session:
+        session.add(Tag(tag_id=1, tag="girl", source_tag="girl"))
+        session.add(TagUsageCounts(tag_id=1, format_id=1, count=10))
+        session.commit()
+
+    result = reader.get_usage_counts_batch([1, 999])
+
+    assert 1 in result
+    assert 999 not in result
+
+
+def test_get_usage_counts_batch_handles_sqlite_in_limit(
+    session_factory: Callable[[], Session],
+) -> None:
+    """900件超の tag_ids でもチャンク分割して全件取得できること"""
+    reader = TagReader(session_factory)
+    total = 950
+
+    with session_factory() as session:
+        for tag_id in range(1, total + 1):
+            session.add(Tag(tag_id=tag_id, tag=f"tag_{tag_id}", source_tag=f"tag_{tag_id}"))
+            session.add(TagUsageCounts(tag_id=tag_id, format_id=1, count=tag_id))
+        session.commit()
+
+    tag_ids = list(range(1, total + 1))
+    result = reader.get_usage_counts_batch(tag_ids)
+
+    assert len(result) == total
+    assert result[total] == {1: total}
+
+
+def test_merged_reader_get_usage_counts_batch_user_overrides_base(
+    session_factory: Callable[[], Session],
+) -> None:
+    """user_repo の usage patch が base の (tag_id, format_id) を上書きすること"""
+    from genai_tag_db_tools.db.overlay_reader import OverlayTagReader
+    from genai_tag_db_tools.db.schema import UserOverlayBase
+    from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
+
+    # base リポに使用回数を投入
+    base_reader = TagReader(session_factory)
+    with session_factory() as session:
+        session.add(Tag(tag_id=1, tag="girl", source_tag="girl"))
+        session.add(TagUsageCounts(tag_id=1, format_id=1, count=100))
+        session.add(TagUsageCounts(tag_id=1, format_id=2, count=200))
+        session.commit()
+
+    # user overlay DB を別エンジンで用意し、format_id=1 を上書きする patch を書く
+    user_engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(user_engine)
+    UserOverlayBase.metadata.create_all(user_engine)
+    user_factory: Callable[[], Session] = sessionmaker(bind=user_engine, autoflush=False, autocommit=False)
+    user_repo = UserTagRepository(user_factory)
+    user_repo.write_usage_patch("base", 1, 1, 999)
+    overlay = OverlayTagReader(session_factory=user_factory)
+
+    merged = MergedTagReader(base_repo=base_reader, user_repo=overlay)
+    result = merged.get_usage_counts_batch([1])
+
+    # format_id=1 は user patch (999) で上書き、format_id=2 は base (200) のまま
+    assert result == {1: {1: 999, 2: 200}}
 
 
 def test_merged_reader_search_tags_applies_limit_after_merge(

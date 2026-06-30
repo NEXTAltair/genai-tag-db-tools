@@ -227,6 +227,43 @@ class TestUserTagUsagePatch:
         assert results[0].format_id == 1000
         assert results[0].count == 1
 
+    def test_get_usage_counts_batch_returns_per_tag_format_dict(self, user_repo, overlay_reader):
+        """get_usage_counts_batch が tag_id → {format_id: count} の辞書を返す。"""
+        tag_a = USER_TAG_ID_OFFSET + 30
+        tag_b = USER_TAG_ID_OFFSET + 31
+        user_repo.write_usage_patch("user", tag_a, 1000, 5)
+        user_repo.write_usage_patch("user", tag_a, 2000, 9)
+        user_repo.write_usage_patch("user", tag_b, 1000, 1)
+
+        result = overlay_reader.get_usage_counts_batch([tag_a, tag_b])
+
+        assert result == {tag_a: {1000: 5, 2000: 9}, tag_b: {1000: 1}}
+
+    def test_get_usage_counts_batch_empty_ids(self, overlay_reader):
+        """空リスト入力時は空辞書を返す。"""
+        assert overlay_reader.get_usage_counts_batch([]) == {}
+
+    def test_get_usage_counts_batch_partial_miss(self, user_repo, overlay_reader):
+        """usage が無い tag_id は結果辞書に含まれない。"""
+        tag_id = USER_TAG_ID_OFFSET + 32
+        user_repo.write_usage_patch("user", tag_id, 1000, 7)
+
+        result = overlay_reader.get_usage_counts_batch([tag_id, USER_TAG_ID_OFFSET + 9999])
+
+        assert result == {tag_id: {1000: 7}}
+
+    def test_get_usage_counts_batch_handles_sqlite_in_limit(self, user_repo, overlay_reader):
+        """900件超の tag_ids でもチャンク分割して全件取得できる (Codex #114 P2)。"""
+        total = 950
+        tag_ids = [USER_TAG_ID_OFFSET + 100 + i for i in range(total)]
+        for tag_id in tag_ids:
+            user_repo.write_usage_patch("user", tag_id, 1000, tag_id)
+
+        result = overlay_reader.get_usage_counts_batch(tag_ids)
+
+        assert len(result) == total
+        assert result[tag_ids[-1]] == {1000: tag_ids[-1]}
+
 
 # --- TestOverlayReaderTranslations ---
 
