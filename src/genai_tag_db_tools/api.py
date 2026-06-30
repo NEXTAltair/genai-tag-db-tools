@@ -101,6 +101,7 @@ class TagWriterProtocol(Protocol):
     """
 
     def update_tags_type_batch(self, *args: Any, **kwargs: Any) -> Any: ...
+    def write_user_translation(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 def get_tag_reader() -> TagReaderProtocol:
