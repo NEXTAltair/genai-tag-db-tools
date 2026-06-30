@@ -668,6 +668,23 @@ class OverlayTagReader:
             )
             return row.count if row is not None else None
 
+    def get_usage_counts_batch(self, tag_ids: list[int]) -> dict[int, dict[int, int]]:
+        """USER_TAG_USAGE_PATCH から複数 tag_id の format 別 usage を一括取得する。
+
+        :meth:`TagReader.get_usage_counts_batch` と同じ
+        ``{tag_id: {format_id: count}}`` 形式で返す (LoRAIro #990 Phase 3)。
+        """
+        if not tag_ids:
+            return {}
+        with self.session_factory() as session:
+            rows = (
+                session.query(UserTagUsagePatch).filter(UserTagUsagePatch.target_tag_id.in_(tag_ids)).all()
+            )
+        result: dict[int, dict[int, int]] = {}
+        for row in rows:
+            result.setdefault(row.target_tag_id, {})[row.format_id] = row.count
+        return result
+
     def list_usage_counts(
         self, tag_id: int | None = None, format_id: int | None = None
     ) -> list[TagUsageCounts]:
