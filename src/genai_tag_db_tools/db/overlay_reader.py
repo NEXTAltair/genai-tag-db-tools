@@ -673,13 +673,21 @@ class OverlayTagReader:
 
         :meth:`TagReader.get_usage_counts_batch` と同じ
         ``{tag_id: {format_id: count}}`` 形式で返す (LoRAIro #990 Phase 3)。
+        SQLite の変数上限 (999) 対策として 900 件ずつチャンク分割する
+        (MergedTagReader が全 tag_ids を委譲するため overlay 側でも分割が必要)。
         """
         if not tag_ids:
             return {}
+        _SQLITE_IN_LIMIT = 900
         with self.session_factory() as session:
-            rows = (
-                session.query(UserTagUsagePatch).filter(UserTagUsagePatch.target_tag_id.in_(tag_ids)).all()
-            )
+            rows: list[UserTagUsagePatch] = []
+            for i in range(0, len(tag_ids), _SQLITE_IN_LIMIT):
+                chunk = tag_ids[i : i + _SQLITE_IN_LIMIT]
+                rows.extend(
+                    session.query(UserTagUsagePatch)
+                    .filter(UserTagUsagePatch.target_tag_id.in_(chunk))
+                    .all()
+                )
         result: dict[int, dict[int, int]] = {}
         for row in rows:
             result.setdefault(row.target_tag_id, {})[row.format_id] = row.count
