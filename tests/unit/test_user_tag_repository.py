@@ -633,3 +633,32 @@ class TestWriteUserTranslation:
         rows = self._rows(user_session_factory)
         assert len(rows) == 1
         assert rows[0].translation == "金髪"
+
+    def test_reader_scope_overrides_offset_heuristic(self, user_session_factory):
+        """reader 注入時は get_tag_scope の実スコープ判定を offset より優先する。
+
+        低 ID でも reader が "user" と判定すれば user scope で書く (legacy TAGS path、
+        Codex #113 P2)。
+        """
+
+        class _FakeReader:
+            def get_tag_scope(self, tag_id: int) -> str | None:
+                return "user"  # 低 ID でも user 判定
+
+        repo = TagRepository(session_factory=user_session_factory, reader=_FakeReader())
+        repo.write_user_translation(123, "ja", "猫耳")  # 低 ID だが reader は user
+        rows = self._rows(user_session_factory)
+        assert len(rows) == 1
+        assert rows[0].target_scope == "user"
+
+    def test_rejects_missing_tag_when_reader_present(self, user_session_factory):
+        """reader が tag_id をどの scope にも見つけなければ orphan patch を拒否する。"""
+
+        class _FakeReader:
+            def get_tag_scope(self, tag_id: int) -> str | None:
+                return None  # 存在しない
+
+        repo = TagRepository(session_factory=user_session_factory, reader=_FakeReader())
+        with pytest.raises(ValueError, match="not found in any scope"):
+            repo.write_user_translation(999, "ja", "幽霊")
+        assert self._rows(user_session_factory) == []

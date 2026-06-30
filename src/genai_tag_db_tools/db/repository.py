@@ -1212,17 +1212,26 @@ class TagRepository:
         """Add a translation overlay for ``tag_id`` to the user database.
 
         Writes a row into the user DB ``USER_TAG_TRANSLATION_PATCH`` table (never the
-        base DB). ``target_scope`` is derived from ``tag_id``: ids at or above
-        ``USER_TAG_ID_OFFSET`` belong to the user scope, everything below to the base
-        scope. The base-scope case still writes only to the user DB overlay; the scope
-        merely records which tag the overlay points at so the merged reader can surface
-        it on the corresponding base tag. Duplicate (scope, tag_id, language, translation)
-        rows are ignored.
+        base DB). ``target_scope`` records which tag the overlay points at so the merged
+        reader can surface it on the corresponding base/user tag; the row itself always
+        lives only in the user DB. Duplicate (scope, tag_id, language, translation) rows
+        are ignored.
+
+        Scope is resolved through the injected reader (``get_tag_scope``) when available,
+        which checks actual repository membership rather than the numeric offset. This
+        avoids mis-tagging a low-id user tag (legacy TAGS path) as base scope. If the
+        reader cannot find ``tag_id`` in any scope the write is rejected with
+        ``ValueError`` so callers never create an orphan FK-less patch for a stale or
+        mistyped id. When no reader is injected the method falls back to the
+        ``USER_TAG_ID_OFFSET`` heuristic (no existence validation).
 
         Args:
-            tag_id: Target tag id (base or user scope; scope is derived automatically).
+            tag_id: Target tag id (base or user scope; scope is resolved automatically).
             language: Language code (e.g. ``ja``).
             translation: Translation string to register.
+
+        Raises:
+            ValueError: If a reader is available and ``tag_id`` exists in no scope.
 
         Example:
             >>> repo = get_default_repository()
@@ -1230,7 +1239,14 @@ class TagRepository:
         """
         from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
 
-        target_scope = "user" if tag_id >= USER_TAG_ID_OFFSET else "base"
+        if self._reader is not None:
+            target_scope = self._reader.get_tag_scope(tag_id)
+            if target_scope is None:
+                # 対象タグがどの scope にも存在しない → orphan patch を書かず拒否する。
+                raise ValueError(f"write_user_translation: tag_id={tag_id} not found in any scope")
+        else:
+            # reader 未注入 (直接生成等) は offset ヒューリスティックへ縮退する。
+            target_scope = "user" if tag_id >= USER_TAG_ID_OFFSET else "base"
         user_repo = UserTagRepository(self.session_factory)
         user_repo.write_translation_patch(
             target_scope=target_scope,
