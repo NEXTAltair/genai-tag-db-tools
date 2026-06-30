@@ -18,6 +18,7 @@ from genai_tag_db_tools.db.query_utils import (
     normalize_search_keyword,
 )
 from genai_tag_db_tools.db.schema import (
+    USER_TAG_ID_OFFSET,
     DatabaseMetadata,
     Tag,
     TagFormat,
@@ -1206,6 +1207,37 @@ class TagRepository:
                 session.rollback()
                 self.logger.error(f"Failed to update tag types in batch: {e}", exc_info=True)
                 raise
+
+    def write_user_translation(self, tag_id: int, language: str, translation: str) -> None:
+        """Add a translation overlay for ``tag_id`` to the user database.
+
+        Writes a row into the user DB ``USER_TAG_TRANSLATION_PATCH`` table (never the
+        base DB). ``target_scope`` is derived from ``tag_id``: ids at or above
+        ``USER_TAG_ID_OFFSET`` belong to the user scope, everything below to the base
+        scope. The base-scope case still writes only to the user DB overlay; the scope
+        merely records which tag the overlay points at so the merged reader can surface
+        it on the corresponding base tag. Duplicate (scope, tag_id, language, translation)
+        rows are ignored.
+
+        Args:
+            tag_id: Target tag id (base or user scope; scope is derived automatically).
+            language: Language code (e.g. ``ja``).
+            translation: Translation string to register.
+
+        Example:
+            >>> repo = get_default_repository()
+            >>> repo.write_user_translation(123, "ja", "青い目")
+        """
+        from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
+
+        target_scope = "user" if tag_id >= USER_TAG_ID_OFFSET else "base"
+        user_repo = UserTagRepository(self.session_factory)
+        user_repo.write_translation_patch(
+            target_scope=target_scope,
+            target_tag_id=tag_id,
+            language=language,
+            translation=translation,
+        )
 
 
 class MergedTagReader:

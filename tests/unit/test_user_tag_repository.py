@@ -11,6 +11,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from genai_tag_db_tools.db.runtime import _create_engine
+from genai_tag_db_tools.core_api import write_user_translation
+from genai_tag_db_tools.db.repository import TagRepository
 from genai_tag_db_tools.db.schema import (
     USER_TAG_ID_OFFSET,
     Base,
@@ -20,6 +22,7 @@ from genai_tag_db_tools.db.schema import (
     TagTypeName,
     UserOverlayBase,
     UserTagStatusPatch,
+    UserTagTranslationPatch,
 )
 from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
 from genai_tag_db_tools.models import TagRegisterRequest
@@ -586,3 +589,47 @@ class TestTagRegisterServiceBaseScope:
 
         mock_user_repo.create_user_tag.assert_not_called()
         mock_user_repo.write_patch.assert_not_called()
+
+
+class TestWriteUserTranslation:
+    """TagRepository.write_user_translation と公開ラッパーの overlay 書き込み検証 (#989)。"""
+
+    @pytest.fixture()
+    def repo(self, user_session_factory) -> TagRepository:
+        # write_user_translation は session_factory のみ使用 (reader 不要)。
+        return TagRepository(session_factory=user_session_factory)
+
+    def _rows(self, user_session_factory) -> list[UserTagTranslationPatch]:
+        with user_session_factory() as session:
+            return session.query(UserTagTranslationPatch).all()
+
+    def test_user_scope_derived_from_offset(self, repo, user_session_factory):
+        """tag_id >= USER_TAG_ID_OFFSET なら target_scope='user' で書かれる。"""
+        repo.write_user_translation(USER_TAG_ID_OFFSET + 5, "ja", "青い目")
+        rows = self._rows(user_session_factory)
+        assert len(rows) == 1
+        assert rows[0].target_scope == "user"
+        assert rows[0].target_tag_id == USER_TAG_ID_OFFSET + 5
+        assert rows[0].language == "ja"
+        assert rows[0].translation == "青い目"
+
+    def test_base_scope_derived_for_low_tag_id(self, repo, user_session_factory):
+        """tag_id < USER_TAG_ID_OFFSET なら base タグを指す overlay を user DB に書く。"""
+        repo.write_user_translation(123, "ja", "猫耳")
+        rows = self._rows(user_session_factory)
+        assert len(rows) == 1
+        assert rows[0].target_scope == "base"
+        assert rows[0].target_tag_id == 123
+
+    def test_duplicate_is_ignored(self, repo, user_session_factory):
+        """同一 (scope, tag_id, language, translation) の重複は無視される。"""
+        repo.write_user_translation(123, "ja", "猫耳")
+        repo.write_user_translation(123, "ja", "猫耳")
+        assert len(self._rows(user_session_factory)) == 1
+
+    def test_public_wrapper_delegates(self, repo, user_session_factory):
+        """公開ラッパー write_user_translation が repo_writer へ委譲する。"""
+        write_user_translation(repo, USER_TAG_ID_OFFSET + 1, "ja", "金髪")
+        rows = self._rows(user_session_factory)
+        assert len(rows) == 1
+        assert rows[0].translation == "金髪"

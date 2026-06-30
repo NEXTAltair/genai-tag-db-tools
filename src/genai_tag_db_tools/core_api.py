@@ -1559,3 +1559,29 @@ def update_tags_type_batch(repo_writer, tag_updates: list, format_id: int) -> No
         >>> update_tags_type_batch(repo, updates, format_id=1000)
     """
     repo_writer.update_tags_type_batch(tag_updates, format_id)
+
+
+def write_user_translation(repo_writer, tag_id: int, language: str, translation: str) -> None:
+    """タグに言語別翻訳を user DB overlay として追加します。
+
+    翻訳行は user DB の ``USER_TAG_TRANSLATION_PATCH`` にのみ書き込まれます（base DB は
+    書き換えません）。``target_scope`` は ``tag_id`` から自動導出されます
+    （``USER_TAG_ID_OFFSET`` 以上なら "user"、それ未満なら "base"）。同一
+    (scope, tag_id, language, translation) の重複は無視されます。
+
+    Args:
+        repo_writer: TagRepository インスタンス（``get_user_repository()`` で取得、書き込み権限が必要）
+        tag_id: 翻訳を付与する対象タグの tag_id（base / user どちらでも可）
+        language: 言語コード（例: ``ja``）
+        translation: 翻訳文字列
+
+    Raises:
+        Exception: 書き込みに失敗した場合
+
+    Example:
+        >>> from genai_tag_db_tools import write_user_translation
+        >>> from genai_tag_db_tools.db.runtime import get_default_repository
+        >>> repo = get_default_repository()
+        >>> write_user_translation(repo, 123, "ja", "青い目")
+    """
+    repo_writer.write_user_translation(tag_id, language, translation)

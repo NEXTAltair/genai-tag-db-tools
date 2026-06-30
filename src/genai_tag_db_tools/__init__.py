@@ -38,6 +38,7 @@ from .core_api import (
     register_tag,
     search_tags,
     update_tags_type_batch,
+    write_user_translation,
 )
 from .models import (
     ApprovedDbFeedback,
@@ -103,6 +104,7 @@ __all__ = [
     "register_tag",
     "search_tags",
     "update_tags_type_batch",
+    "write_user_translation",
 ]
 
 
