@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Engine, StaticPool, create_engine, event
+from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from genai_tag_db_tools.db.schema import Base, UserOverlayBase
@@ -51,7 +51,6 @@ def _create_engine(db_path: Path) -> Engine:
     engine = create_engine(
         f"sqlite:///{db_path.absolute()}",
         connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
         echo=False,
     )
     event.listen(engine, "connect", enable_foreign_keys)
