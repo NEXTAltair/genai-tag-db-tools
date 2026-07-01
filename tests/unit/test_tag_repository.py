@@ -736,6 +736,122 @@ def test_merged_reader_search_tags_applies_offset_after_merge(
     assert [row["tag_id"] for row in result] == [4, 5]
 
 
+def _seed_bulk_all_rows(session: Session) -> None:
+    """1 keyword が複数 tag_id にマッチする状況を作る (tag 直接一致 + 翻訳経由一致)。"""
+    session.add(TagFormat(format_id=1, format_name="test"))
+    session.add(TagTypeName(type_name_id=1, type_name="general"))
+    session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=1))
+    # tag_id 1: "cat" に直接一致する canonical タグ
+    session.add(Tag(tag_id=1, tag="cat", source_tag="cat"))
+    session.add(
+        TagStatus(tag_id=1, format_id=1, type_id=0, alias=False, preferred_tag_id=1, deprecated=False)
+    )
+    # tag_id 2: 別タグ "feline" だが翻訳 "cat" を持つ (keyword "cat" に翻訳経由で一致)
+    session.add(Tag(tag_id=2, tag="feline", source_tag="feline"))
+    session.add(
+        TagStatus(tag_id=2, format_id=1, type_id=0, alias=False, preferred_tag_id=2, deprecated=False)
+    )
+    session.add(TagTranslation(tag_id=2, language="english", translation="cat"))
+    session.commit()
+
+
+def test_search_tags_bulk_all_returns_all_matching_rows(
+    session_factory: Callable[[], Session],
+) -> None:
+    """search_tags_bulk_all は keyword ごとに全マッチ行を返す (bulk は最初の 1 行のみ)。"""
+    reader = TagReader(session_factory)
+    with session_factory() as session:
+        _seed_bulk_all_rows(session)
+
+    bulk = reader.search_tags_bulk(["cat"])
+    all_rows = reader.search_tags_bulk_all(["cat"])
+
+    # bulk は最小 tag_id の 1 行のみ
+    assert bulk["cat"]["tag_id"] == 1
+    # bulk_all は tag 直接一致 (1) と翻訳経由一致 (2) の両方を返す
+    assert {row["tag_id"] for row in all_rows["cat"]} == {1, 2}
+
+
+def test_search_tags_bulk_all_empty_and_no_match(
+    session_factory: Callable[[], Session],
+) -> None:
+    """空入力・未一致 keyword は空 dict / キー欠落で返す。"""
+    reader = TagReader(session_factory)
+    with session_factory() as session:
+        _seed_bulk_all_rows(session)
+
+    assert reader.search_tags_bulk_all([]) == {}
+    assert reader.search_tags_bulk_all(["nonexistent"]) == {}
+
+
+def test_merged_reader_search_tags_bulk_all_merges_and_dedups(
+    session_factory: Callable[[], Session],
+) -> None:
+    """複数 base DB の全マッチ行をマージし tag_id で dedup する。"""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    engine_b = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine_b)
+    session_factory_b: Callable[[], Session] = sessionmaker(
+        bind=engine_b, autoflush=False, autocommit=False
+    )
+
+    reader_a = TagReader(session_factory)
+    reader_b = TagReader(session_factory_b)
+    with session_factory() as session:
+        _seed_bulk_all_rows(session)
+    with session_factory_b() as session:
+        _seed_bulk_all_rows(session)
+
+    merged = MergedTagReader(base_repo=[reader_a, reader_b])
+    result = merged.search_tags_bulk_all(["cat"])
+
+    # 両 DB とも同一 tag_id 1,2 → dedup 後は tag_id 昇順で [1, 2] (search_tags と同じ順序)
+    assert [row["tag_id"] for row in result["cat"]] == [1, 2]
+
+
+def test_merged_reader_search_tags_bulk_all_higher_priority_db_wins(
+    session_factory: Callable[[], Session],
+) -> None:
+    """同一 tag_id が複数 base DB にある場合、高優先度 (base_repos[0]) の行を採用する。"""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    engine_b = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine_b)
+    session_factory_b: Callable[[], Session] = sessionmaker(
+        bind=engine_b, autoflush=False, autocommit=False
+    )
+
+    def _seed_cat(session: Session, translation: str) -> None:
+        session.add(TagFormat(format_id=1, format_name="test"))
+        session.add(TagTypeName(type_name_id=1, type_name="general"))
+        session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=1))
+        session.add(Tag(tag_id=1, tag="cat", source_tag="cat"))
+        session.add(
+            TagStatus(tag_id=1, format_id=1, type_id=0, alias=False, preferred_tag_id=1, deprecated=False)
+        )
+        session.add(TagTranslation(tag_id=1, language="japanese", translation=translation))
+        session.commit()
+
+    reader_a = TagReader(session_factory)
+    reader_b = TagReader(session_factory_b)
+    with session_factory() as session:
+        _seed_cat(session, "猫A")  # 高優先度 (base_repos[0])
+    with session_factory_b() as session:
+        _seed_cat(session, "猫B")  # 低優先度
+
+    merged = MergedTagReader(base_repo=[reader_a, reader_b])
+    result = merged.search_tags_bulk_all(["cat"])
+
+    assert len(result["cat"]) == 1
+    # 高優先度 DB (reader_a) の翻訳が採用される (_merge_by_key と同じ後勝ち意味論)
+    assert result["cat"][0]["translations"] == {"japanese": ["猫A"]}
+
+
 def _seed_search_rows(session: Session, tag_ids: range) -> None:
     session.add(TagFormat(format_id=1, format_name="test"))
     session.add(TagTypeName(type_name_id=1, type_name="general"))

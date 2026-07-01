@@ -369,6 +369,59 @@ class TagReader:
 
             return result
 
+    def search_tags_bulk_all(
+        self,
+        keywords: list[str],
+        *,
+        format_name: str | None = None,
+        resolve_preferred: bool = False,
+    ) -> dict[str, list[TagSearchRow]]:
+        """`search_tags_bulk` の全マッチ行版。keyword -> マッチ行リストを返す (#998)。
+
+        `search_tags_bulk` は keyword ごとに最初の 1 行だけ返すため、alias / preferred の
+        全マッチ行を要する翻訳品質評価に不足する。ロジックは `search_tags_bulk` と同一で、
+        keyword ごとに `break` せず全行を集める点だけが異なる。
+        """
+        cleaned = [keyword.strip() for keyword in keywords if keyword and keyword.strip()]
+        if not cleaned:
+            return {}
+
+        with self.session_factory() as session:
+            builder = TagSearchQueryBuilder(session)
+            tag_ids_by_keyword = builder.initial_tag_ids_for_keywords(cleaned)
+            if not tag_ids_by_keyword:
+                return {}
+
+            all_tag_ids: set[int] = set()
+            for tag_ids in tag_ids_by_keyword.values():
+                all_tag_ids |= set(tag_ids)
+
+            tag_ids, format_id = builder.apply_format_filter(all_tag_ids, format_name)
+            if not tag_ids:
+                return {}
+
+            preloader = TagSearchPreloader(session)
+            preloaded = preloader.load(tag_ids)
+            result_builder = TagSearchResultBuilder(
+                format_id=format_id,
+                resolve_preferred=resolve_preferred,
+                logger=self.logger,
+            )
+
+            row_by_input_id: dict[int, TagSearchRow] = {}
+            for t_id in sorted(tag_ids):
+                row = result_builder.build_row(t_id, preloaded)
+                if row is not None:
+                    row_by_input_id[t_id] = row
+
+            result: dict[str, list[TagSearchRow]] = {}
+            for keyword, ids in tag_ids_by_keyword.items():
+                rows = [row_by_input_id[tag_id] for tag_id in sorted(ids) if tag_id in row_by_input_id]
+                if rows:
+                    result[keyword] = rows
+
+            return result
+
     def get_all_tag_ids(self) -> list[int]:
         with self.session_factory() as session:
             return [tag.tag_id for tag in session.query(Tag).all()]
@@ -1961,6 +2014,74 @@ class MergedTagReader:
             rows = self.search_tags(kw, partial=False, format_name=format_name, resolve_preferred=True)
             if rows:
                 merged[kw] = rows[0]
+        return merged
+
+    def search_tags_bulk_all(
+        self,
+        keywords: list[str],
+        *,
+        format_name: str | None = None,
+        resolve_preferred: bool = False,
+    ) -> dict[str, list[TagSearchRow]]:
+        """`search_tags_bulk` の全マッチ行版をマージして返す (#998)。
+
+        `_merge_search_tags_adaptive` (= `search_tags`) の batch 版。base repos を low->high、
+        続けて `user_repo` の順に各 `search_tags_bulk_all` を呼び、keyword ごとに tag_id -> row
+        の dict で結合する (後勝ち: 高優先度 base → user_repo が最優先。`_merge_by_key` /
+        `search_tags` と同じ意味論、Codex PR #115 P2)。これにより:
+
+        - 複数 base DB で同一 tag_id が重複しても高優先度 DB の行を採用する。
+        - user-only タグ / user 翻訳パッチ / user-only reader (Overlay を base とする構成) の
+          行も `search_tags` と同じく取りこぼさない。
+
+        大 base DB は `TagReader.search_tags_bulk_all` が SQL レベルで batch するため N+1 は
+        起きない (user overlay は小さいので `OverlayTagReader.search_tags_bulk_all` の
+        per-keyword ループで実用上問題ない)。結合後、user patch (翻訳 / status / usage) を全行へ
+        `_apply_user_patches_to_search_rows` で一括適用し、`resolve_preferred=True` なら
+        cross-scope preferred を解決する。
+        """
+        # base low->high の後に user_repo。keyword ごとに tag_id -> row (後勝ち = 高優先度が勝つ)。
+        repos: list[TagReader | OverlayTagReader] = [*self._iter_base_repos_low_to_high()]
+        if self._has_user():
+            assert self.user_repo is not None
+            repos.append(self.user_repo)
+
+        merged_by_keyword: dict[str, dict[int, TagSearchRow]] = {}
+        for repo in repos:
+            result = repo.search_tags_bulk_all(
+                keywords,
+                format_name=format_name,
+                resolve_preferred=False,
+            )
+            for keyword, rows in result.items():
+                bucket = merged_by_keyword.setdefault(keyword, {})
+                for row in rows:
+                    bucket[row["tag_id"]] = row
+        # tag_id 昇順で返す (`_merge_search_tags_adaptive` / `TagReader.search_tags_bulk_all` と
+        # 同じ決定的順序。batch へ切替えても per-query search と行順が一致する、Codex PR #115 P3)。
+        merged: dict[str, list[TagSearchRow]] = {
+            keyword: [rows[tag_id] for tag_id in sorted(rows)]
+            for keyword, rows in merged_by_keyword.items()
+        }
+
+        if merged:
+            requested_format_id = self._requested_format_id(format_name)
+            all_rows = [row for rows in merged.values() for row in rows]
+            patched = self._apply_user_patches_to_search_rows(
+                all_rows,
+                requested_format_id=requested_format_id,
+            )
+            patched_by_tag_id = {row["tag_id"]: row for row in patched}
+            merged = {
+                keyword: [patched_by_tag_id.get(row["tag_id"], row) for row in rows]
+                for keyword, rows in merged.items()
+            }
+
+        if resolve_preferred:
+            merged = {
+                keyword: self._resolve_cross_scope_preferred(rows) for keyword, rows in merged.items()
+            }
+
         return merged
 
     def get_format_map(self) -> dict[int, str]:

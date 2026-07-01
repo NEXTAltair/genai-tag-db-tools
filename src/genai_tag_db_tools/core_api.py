@@ -340,23 +340,72 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
         total = len(rows)
         page = rows[request.offset :] if request.offset else rows
 
-    items = [
-        TagRecordPublic(
-            tag=row["tag"],
-            source_tag=row["source_tag"],
-            tag_id=row["tag_id"],
-            format_name=format_name,
-            type_id=row["type_id"],
-            type_name=row["type_name"],
-            alias=row["alias"],
-            deprecated=row["deprecated"],
-            usage_count=row["usage_count"],
-            translations=row["translations"],
-            format_statuses=row["format_statuses"],
-        )
-        for row in page
-    ]
+    items = [_row_to_public(row, format_name) for row in page]
     return TagSearchResult(items=items, total=total)
+
+
+def _row_to_public(row: TagSearchRow, format_name: str | None) -> TagRecordPublic:
+    """TagSearchRow (repository の内部行) を公開型 TagRecordPublic へ変換する。"""
+    return TagRecordPublic(
+        tag=row["tag"],
+        source_tag=row["source_tag"],
+        tag_id=row["tag_id"],
+        format_name=format_name,
+        type_id=row["type_id"],
+        type_name=row["type_name"],
+        alias=row["alias"],
+        deprecated=row["deprecated"],
+        usage_count=row["usage_count"],
+        translations=row["translations"],
+        format_statuses=row["format_statuses"],
+    )
+
+
+def search_tags_batch(
+    repo: MergedTagReader,
+    queries: list[str],
+    *,
+    format_names: list[str] | None = None,
+    resolve_preferred: bool = False,
+) -> dict[str, TagSearchResult]:
+    """複数クエリを 1 リポ往復で完全一致検索し ``query -> TagSearchResult`` を返す。
+
+    per-query の :func:`search_tags` を N 回呼ぶ N+1 を避けるための batch エントリポイント
+    (LoRAIro #998)。各クエリは完全一致 (``partial=False``) で検索し、alias/deprecated 行も
+    含めた全マッチ行を返す (完全一致フィルタや翻訳品質評価は呼び出し元が行う)。
+
+    format フィルタは単一の concrete format 指定時のみ効く (bulk API の制約と一致する)。
+    ``format_names`` が None / "all" / 複数指定の場合は format 非依存で検索する。マッチ行が
+    無かったクエリは戻り値の dict に含まれない (呼び出し元は「完全一致なし」として扱う)。
+
+    Args:
+        repo: マージ済みタグリーダー。
+        queries: 検索クエリ (タグ文字列) のリスト。
+        format_names: 絞り込む format 名。単一 concrete のときだけ filter に使う。
+        resolve_preferred: alias 行を preferred タグへ解決するか。
+
+    Returns:
+        マッチしたクエリごとの ``TagSearchResult``。マッチ無しのクエリは含まれない。
+    """
+    concrete = _concrete_filter_names(format_names)
+    format_name = concrete[0] if len(concrete) == 1 else None
+    rows_by_query = repo.search_tags_bulk_all(
+        queries,
+        format_name=format_name,
+        resolve_preferred=resolve_preferred,
+    )
+    # bulk_all は strip 済みキーで返すため、呼び出し元の元クエリ文字列でキーし直す
+    # (`result.get(original_query)` が成功マッチを取りこぼさないように、Codex PR #115 P3)。
+    result: dict[str, TagSearchResult] = {}
+    for query in queries:
+        rows = rows_by_query.get(query)
+        if rows is None and query is not None:
+            rows = rows_by_query.get(query.strip())
+        if not rows:
+            continue
+        items = [_row_to_public(row, format_name) for row in rows]
+        result[query] = TagSearchResult(items=items, total=len(items))
+    return result
 
 
 def register_tag(service: TagRegisterService, request: TagRegisterRequest) -> TagRegisterResult:

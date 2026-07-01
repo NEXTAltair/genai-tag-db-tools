@@ -791,3 +791,30 @@ class OverlayTagReader:
         resolve_preferred: bool = False,
     ) -> dict[str, TagSearchRow]:
         return {}
+
+    def search_tags_bulk_all(
+        self,
+        keywords: list[str],
+        *,
+        format_name: str | None = None,
+        resolve_preferred: bool = False,
+    ) -> dict[str, list[TagSearchRow]]:
+        """keyword ごとの全マッチ user 行を返す (#998)。
+
+        user DB は小さいため keyword ごとに `search_tags` を呼んで完全一致行を集める
+        (大 base DB のような N+1 懸念は無い。base 側は `TagReader.search_tags_bulk_all` が
+        SQL レベルで batch する)。これにより `MergedTagReader.search_tags_bulk_all` が
+        `_merge_search_tags_adaptive` (= `search_tags`) と同じく user overlay 行を merge でき、
+        user-only タグ / user 翻訳パッチを取りこぼさない (Codex PR #115 P2)。
+        """
+        result: dict[str, list[TagSearchRow]] = {}
+        for keyword in keywords:
+            cleaned = keyword.strip() if keyword else ""
+            if not cleaned or cleaned in result:
+                continue
+            rows = self.search_tags(
+                cleaned, partial=False, format_name=format_name, resolve_preferred=resolve_preferred
+            )
+            if rows:
+                result[cleaned] = rows
+        return result

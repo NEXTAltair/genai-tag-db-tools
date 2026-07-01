@@ -37,6 +37,7 @@ from .core_api import (
     recommend_translation_quality,
     register_tag,
     search_tags,
+    search_tags_batch,
     update_tags_type_batch,
     write_user_translation,
 )
@@ -103,6 +104,7 @@ __all__ = [
     "recommend_translation_quality",
     "register_tag",
     "search_tags",
+    "search_tags_batch",
     "update_tags_type_batch",
     "write_user_translation",
 ]

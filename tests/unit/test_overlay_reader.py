@@ -267,6 +267,13 @@ class TestOverlayTagReaderSearch:
         def search_tags_bulk(self, keywords: list[str], **kwargs) -> dict[str, TagSearchRow]:
             return {keyword: dict(self._rows[20]) for keyword in keywords if keyword == "blue eyes"}  # type: ignore[misc]
 
+        def search_tags_bulk_all(self, keywords: list[str], **kwargs) -> dict[str, list[TagSearchRow]]:
+            return {
+                keyword: [dict(self._rows[20])]  # type: ignore[list-item]
+                for keyword in keywords
+                if keyword == "blue eyes"
+            }
+
         def get_tag_by_id(self, tag_id: int) -> Tag | None:
             row = self._rows.get(tag_id)
             if row is None:
@@ -474,6 +481,105 @@ class TestOverlayTagReaderSearch:
 
         assert result["blue eyes"]["tag_id"] == 99
         assert result["blue eyes"]["tag"] == "azure eyes"
+
+    def test_merged_bulk_all_applies_base_scope_status_patch(self, overlay_reader, overlay_session_factory):
+        """search_tags_bulk_all も base-scope status patch + cross-scope preferred を解決する (#998)。"""
+        with overlay_session_factory() as session:
+            session.add(
+                UserTagStatusPatch(
+                    target_scope="base",
+                    target_tag_id=20,
+                    format_id=1,
+                    type_id=1,
+                    alias=True,
+                    preferred_scope="base",
+                    preferred_tag_id=99,
+                    deprecated=False,
+                )
+            )
+            session.commit()
+
+        merged = MergedTagReader(base_repo=self._BaseSearchReader(), user_repo=overlay_reader)
+
+        result = merged.search_tags_bulk_all(["blue eyes"], format_name="danbooru", resolve_preferred=True)
+
+        assert [row["tag_id"] for row in result["blue eyes"]] == [99]
+        assert result["blue eyes"][0]["tag"] == "azure eyes"
+
+    def test_overlay_reader_search_tags_bulk_all_empty_when_no_match(self, overlay_reader):
+        """OverlayTagReader.search_tags_bulk_all は未一致 keyword で空 dict を返す (#998)。"""
+        assert overlay_reader.search_tags_bulk_all(["blue eyes"]) == {}
+
+    def test_overlay_reader_search_tags_bulk_all_returns_user_rows(
+        self, overlay_reader, overlay_session_factory
+    ):
+        """OverlayTagReader.search_tags_bulk_all は user タグの全マッチ行を返す (#998)。"""
+        tag_id = USER_TAG_ID_OFFSET + 410
+        with overlay_session_factory() as session:
+            session.add(UserTag(tag_id=tag_id, source_tag="ub_src", tag="user_bulk_tag"))
+            session.commit()
+
+        result = overlay_reader.search_tags_bulk_all(["user_bulk_tag", "missing"])
+
+        assert [row["tag_id"] for row in result["user_bulk_tag"]] == [tag_id]
+        assert "missing" not in result
+
+    def test_merged_bulk_all_merges_user_only_tag(self, overlay_reader, overlay_session_factory):
+        """base bulk が拾えない user-only タグを user overlay の merge で取りこぼさない。
+
+        MergedTagReader.search_tags_bulk_all は `_merge_search_tags_adaptive` (= search_tags)
+        と同じく user_repo も merge するため、user-only タグを返す (#998, Codex PR #115 P2)。
+        """
+        tag_id = USER_TAG_ID_OFFSET + 400
+        with overlay_session_factory() as session:
+            session.add(UserTag(tag_id=tag_id, source_tag="uo_src", tag="user_only_tag"))
+            session.commit()
+
+        merged = MergedTagReader(base_repo=self._BaseSearchReader(), user_repo=overlay_reader)
+
+        result = merged.search_tags_bulk_all(["user_only_tag"])
+
+        assert [row["tag_id"] for row in result["user_only_tag"]] == [tag_id]
+
+    def test_merged_bulk_all_user_only_reader_returns_user_tags(
+        self, overlay_reader, overlay_session_factory
+    ):
+        """user-only reader (get_user_tag_reader 相当: Overlay を base とする) でも user 行を返す。
+
+        get_user_tag_reader() は MergedTagReader(base_repo=OverlayTagReader, user_repo=None) を
+        返す。base loop が Overlay の search_tags_bulk_all を叩くため user タグを取得できる
+        (#998, Codex PR #115 P2)。
+        """
+        tag_id = USER_TAG_ID_OFFSET + 420
+        with overlay_session_factory() as session:
+            session.add(UserTag(tag_id=tag_id, source_tag="uor_src", tag="user_only_reader_tag"))
+            session.commit()
+
+        merged = MergedTagReader(base_repo=overlay_reader, user_repo=None)
+
+        result = merged.search_tags_bulk_all(["user_only_reader_tag"])
+
+        assert [row["tag_id"] for row in result["user_only_reader_tag"]] == [tag_id]
+
+    def test_merged_bulk_all_returns_both_base_and_user_rows_for_same_keyword(
+        self, overlay_reader, overlay_session_factory
+    ):
+        """同一 keyword が base タグと別 tag_id の user タグに一致したら両方返す。
+
+        base hit があっても user overlay の別 tag_id 行を取りこぼさない (Codex PR #115 P2 の
+        「additional user tag sharing a base keyword」ケース、#998)。
+        """
+        user_tag_id = USER_TAG_ID_OFFSET + 430
+        with overlay_session_factory() as session:
+            # base の "blue eyes" (tag_id 20) と同じ文字列を user タグとしても登録
+            session.add(UserTag(tag_id=user_tag_id, source_tag="blue eyes", tag="blue eyes"))
+            session.commit()
+
+        merged = MergedTagReader(base_repo=self._BaseSearchReader(), user_repo=overlay_reader)
+
+        result = merged.search_tags_bulk_all(["blue eyes"])
+
+        assert {row["tag_id"] for row in result["blue eyes"]} == {20, user_tag_id}
 
 
 class TestOverlayTagReaderSearchFilters:

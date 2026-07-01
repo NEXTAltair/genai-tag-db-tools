@@ -51,6 +51,25 @@ class DummyRepo:
         rows = rows[offset:] if offset else rows
         return rows[:limit] if limit is not None else rows
 
+    def search_tags_bulk_all(
+        self, queries: list[str], *, format_name=None, resolve_preferred: bool = False
+    ) -> dict[str, list[dict]]:
+        self.calls.append(
+            {"bulk_all": list(queries), "format_name": format_name, "resolve_preferred": resolve_preferred}
+        )
+        # 実 bulk_all と同じく strip 済みキーで返す (core_api 側の元クエリ remap を検証するため)
+        result: dict[str, list[dict]] = {}
+        for query in queries:
+            cleaned = query.strip() if query else ""
+            if not cleaned:
+                continue
+            matched = [
+                row for row in self._rows if row["tag"] == cleaned or row.get("source_tag") == cleaned
+            ]
+            if matched:
+                result[cleaned] = matched
+        return result
+
 
 class DummyService:
     def __init__(self) -> None:
@@ -248,6 +267,92 @@ def test_search_tags_filters_and_maps():
         )
     ]
     assert result.total == 1
+
+
+def _batch_rows() -> list[dict]:
+    return [
+        {
+            "tag": "cat",
+            "source_tag": "cat",
+            "tag_id": 1,
+            "type_id": 1,
+            "type_name": "general",
+            "alias": False,
+            "deprecated": False,
+            "usage_count": 100,
+            "translations": {"japanese": ["猫"]},
+            "format_statuses": {"danbooru": {"status": "active"}},
+        },
+        {
+            "tag": "dog",
+            "source_tag": "dog",
+            "tag_id": 2,
+            "type_id": 1,
+            "type_name": "general",
+            "alias": False,
+            "deprecated": False,
+            "usage_count": 80,
+            "translations": {"japanese": ["犬"]},
+            "format_statuses": {"danbooru": {"status": "active"}},
+        },
+    ]
+
+
+def test_search_tags_batch_maps_rows_per_query():
+    """search_tags_batch は query ごとに TagSearchResult を返し、未一致 query は含めない (#998)。"""
+    repo = DummyRepo(_batch_rows())
+
+    result = core_api.search_tags_batch(repo, ["cat", "dog", "missing"])
+
+    assert set(result.keys()) == {"cat", "dog"}
+    assert [item.tag_id for item in result["cat"].items] == [1]
+    assert result["cat"].total == 1
+    assert isinstance(result["cat"].items[0], TagRecordPublic)
+    assert result["cat"].items[0].translations == {"japanese": ["猫"]}
+    # bulk_all を 1 回だけ呼ぶ (per-query search_tags を N 回呼ばない)
+    bulk_calls = [c for c in repo.calls if "bulk_all" in c]
+    assert len(bulk_calls) == 1
+    assert bulk_calls[0]["bulk_all"] == ["cat", "dog", "missing"]
+
+
+def test_search_tags_batch_passes_single_concrete_format():
+    """単一 concrete format 指定時は format_name として bulk_all に渡す (#998)。"""
+    repo = DummyRepo(_batch_rows())
+
+    core_api.search_tags_batch(repo, ["cat"], format_names=["danbooru"])
+
+    call = [c for c in repo.calls if "bulk_all" in c][-1]
+    assert call["format_name"] == "danbooru"
+
+
+def test_search_tags_batch_multi_or_all_format_disables_filter():
+    """複数 format / "all" 指定は format 非依存 (format_name=None) で検索する (#998)。"""
+    repo = DummyRepo(_batch_rows())
+
+    core_api.search_tags_batch(repo, ["cat"], format_names=["danbooru", "e621"])
+    core_api.search_tags_batch(repo, ["cat"], format_names=["all"])
+
+    bulk_calls = [c for c in repo.calls if "bulk_all" in c]
+    assert bulk_calls[0]["format_name"] is None
+    assert bulk_calls[1]["format_name"] is None
+
+
+def test_search_tags_batch_empty_queries_returns_empty():
+    """空 query リストは空 dict を返す (#998)。"""
+    repo = DummyRepo(_batch_rows())
+    assert core_api.search_tags_batch(repo, []) == {}
+
+
+def test_search_tags_batch_preserves_original_query_keys():
+    """空白付きクエリでも呼び出し元の元文字列でキーする (#998 P3)。"""
+    repo = DummyRepo(_batch_rows())
+
+    result = core_api.search_tags_batch(repo, [" cat "])
+
+    # strip 済みキー "cat" ではなく元クエリ " cat " で引ける
+    assert " cat " in result
+    assert "cat" not in result
+    assert [item.tag_id for item in result[" cat "].items] == [1]
 
 
 def test_search_tags_applies_offset_and_limit_in_repository():
