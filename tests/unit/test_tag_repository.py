@@ -808,9 +808,8 @@ def test_merged_reader_search_tags_bulk_all_merges_and_dedups(
     merged = MergedTagReader(base_repo=[reader_a, reader_b])
     result = merged.search_tags_bulk_all(["cat"])
 
-    # 両 DB とも同一 tag_id 1,2 → dedup 後は {1, 2}
-    assert {row["tag_id"] for row in result["cat"]} == {1, 2}
-    assert len(result["cat"]) == 2
+    # 両 DB とも同一 tag_id 1,2 → dedup 後は tag_id 昇順で [1, 2] (search_tags と同じ順序)
+    assert [row["tag_id"] for row in result["cat"]] == [1, 2]
 
 
 def test_merged_reader_search_tags_bulk_all_higher_priority_db_wins(

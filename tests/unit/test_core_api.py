@@ -57,13 +57,17 @@ class DummyRepo:
         self.calls.append(
             {"bulk_all": list(queries), "format_name": format_name, "resolve_preferred": resolve_preferred}
         )
+        # 実 bulk_all と同じく strip 済みキーで返す (core_api 側の元クエリ remap を検証するため)
         result: dict[str, list[dict]] = {}
         for query in queries:
+            cleaned = query.strip() if query else ""
+            if not cleaned:
+                continue
             matched = [
-                row for row in self._rows if row["tag"] == query or row.get("source_tag") == query
+                row for row in self._rows if row["tag"] == cleaned or row.get("source_tag") == cleaned
             ]
             if matched:
-                result[query] = matched
+                result[cleaned] = matched
         return result
 
 
@@ -337,6 +341,18 @@ def test_search_tags_batch_empty_queries_returns_empty():
     """空 query リストは空 dict を返す (#998)。"""
     repo = DummyRepo(_batch_rows())
     assert core_api.search_tags_batch(repo, []) == {}
+
+
+def test_search_tags_batch_preserves_original_query_keys():
+    """空白付きクエリでも呼び出し元の元文字列でキーする (#998 P3)。"""
+    repo = DummyRepo(_batch_rows())
+
+    result = core_api.search_tags_batch(repo, [" cat "])
+
+    # strip 済みキー "cat" ではなく元クエリ " cat " で引ける
+    assert " cat " in result
+    assert "cat" not in result
+    assert [item.tag_id for item in result[" cat "].items] == [1]
 
 
 def test_search_tags_applies_offset_and_limit_in_repository():

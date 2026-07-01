@@ -2057,8 +2057,11 @@ class MergedTagReader:
                 bucket = merged_by_keyword.setdefault(keyword, {})
                 for row in rows:
                     bucket[row["tag_id"]] = row
+        # tag_id 昇順で返す (`_merge_search_tags_adaptive` / `TagReader.search_tags_bulk_all` と
+        # 同じ決定的順序。batch へ切替えても per-query search と行順が一致する、Codex PR #115 P3)。
         merged: dict[str, list[TagSearchRow]] = {
-            keyword: list(rows.values()) for keyword, rows in merged_by_keyword.items()
+            keyword: [rows[tag_id] for tag_id in sorted(rows)]
+            for keyword, rows in merged_by_keyword.items()
         }
 
         if merged:

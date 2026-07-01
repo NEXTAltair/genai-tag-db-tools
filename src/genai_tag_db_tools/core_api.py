@@ -394,8 +394,15 @@ def search_tags_batch(
         format_name=format_name,
         resolve_preferred=resolve_preferred,
     )
+    # bulk_all は strip 済みキーで返すため、呼び出し元の元クエリ文字列でキーし直す
+    # (`result.get(original_query)` が成功マッチを取りこぼさないように、Codex PR #115 P3)。
     result: dict[str, TagSearchResult] = {}
-    for query, rows in rows_by_query.items():
+    for query in queries:
+        rows = rows_by_query.get(query)
+        if rows is None and query is not None:
+            rows = rows_by_query.get(query.strip())
+        if not rows:
+            continue
         items = [_row_to_public(row, format_name) for row in rows]
         result[query] = TagSearchResult(items=items, total=len(items))
     return result
