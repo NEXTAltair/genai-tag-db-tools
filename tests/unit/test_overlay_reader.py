@@ -482,9 +482,7 @@ class TestOverlayTagReaderSearch:
         assert result["blue eyes"]["tag_id"] == 99
         assert result["blue eyes"]["tag"] == "azure eyes"
 
-    def test_merged_bulk_all_applies_base_scope_status_patch(
-        self, overlay_reader, overlay_session_factory
-    ):
+    def test_merged_bulk_all_applies_base_scope_status_patch(self, overlay_reader, overlay_session_factory):
         """search_tags_bulk_all も base-scope status patch + cross-scope preferred を解決する (#998)。"""
         with overlay_session_factory() as session:
             session.add(
@@ -503,9 +501,7 @@ class TestOverlayTagReaderSearch:
 
         merged = MergedTagReader(base_repo=self._BaseSearchReader(), user_repo=overlay_reader)
 
-        result = merged.search_tags_bulk_all(
-            ["blue eyes"], format_name="danbooru", resolve_preferred=True
-        )
+        result = merged.search_tags_bulk_all(["blue eyes"], format_name="danbooru", resolve_preferred=True)
 
         assert [row["tag_id"] for row in result["blue eyes"]] == [99]
         assert result["blue eyes"][0]["tag"] == "azure eyes"
@@ -513,6 +509,26 @@ class TestOverlayTagReaderSearch:
     def test_overlay_reader_search_tags_bulk_all_is_stub(self, overlay_reader):
         """OverlayTagReader.search_tags_bulk_all はスタブ ({} を返す) (#998)。"""
         assert overlay_reader.search_tags_bulk_all(["blue eyes"]) == {}
+
+    def test_merged_bulk_all_falls_back_to_search_tags_for_user_only_tag(
+        self, overlay_reader, overlay_session_factory
+    ):
+        """base bulk が拾えない user-only タグを search_tags fallback で補完する。
+
+        OverlayTagReader.search_tags_bulk_all はスタブ ({}) だが、MergedTagReader は
+        base bulk で空だった keyword を per-tag と同じ search_tags 経路で補完し、user 行を
+        取りこぼさない (#998, Codex PR #115 P2)。
+        """
+        tag_id = USER_TAG_ID_OFFSET + 400
+        with overlay_session_factory() as session:
+            session.add(UserTag(tag_id=tag_id, source_tag="uo_src", tag="user_only_tag"))
+            session.commit()
+
+        merged = MergedTagReader(base_repo=self._BaseSearchReader(), user_repo=overlay_reader)
+
+        result = merged.search_tags_bulk_all(["user_only_tag"])
+
+        assert [row["tag_id"] for row in result["user_only_tag"]] == [tag_id]
 
 
 class TestOverlayTagReaderSearchFilters:

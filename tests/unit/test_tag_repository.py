@@ -813,6 +813,46 @@ def test_merged_reader_search_tags_bulk_all_merges_and_dedups(
     assert len(result["cat"]) == 2
 
 
+def test_merged_reader_search_tags_bulk_all_higher_priority_db_wins(
+    session_factory: Callable[[], Session],
+) -> None:
+    """同一 tag_id が複数 base DB にある場合、高優先度 (base_repos[0]) の行を採用する。"""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    engine_b = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine_b)
+    session_factory_b: Callable[[], Session] = sessionmaker(
+        bind=engine_b, autoflush=False, autocommit=False
+    )
+
+    def _seed_cat(session: Session, translation: str) -> None:
+        session.add(TagFormat(format_id=1, format_name="test"))
+        session.add(TagTypeName(type_name_id=1, type_name="general"))
+        session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=1))
+        session.add(Tag(tag_id=1, tag="cat", source_tag="cat"))
+        session.add(
+            TagStatus(tag_id=1, format_id=1, type_id=0, alias=False, preferred_tag_id=1, deprecated=False)
+        )
+        session.add(TagTranslation(tag_id=1, language="japanese", translation=translation))
+        session.commit()
+
+    reader_a = TagReader(session_factory)
+    reader_b = TagReader(session_factory_b)
+    with session_factory() as session:
+        _seed_cat(session, "猫A")  # 高優先度 (base_repos[0])
+    with session_factory_b() as session:
+        _seed_cat(session, "猫B")  # 低優先度
+
+    merged = MergedTagReader(base_repo=[reader_a, reader_b])
+    result = merged.search_tags_bulk_all(["cat"])
+
+    assert len(result["cat"]) == 1
+    # 高優先度 DB (reader_a) の翻訳が採用される (_merge_by_key と同じ後勝ち意味論)
+    assert result["cat"][0]["translations"] == {"japanese": ["猫A"]}
+
+
 def _seed_search_rows(session: Session, tag_ids: range) -> None:
     session.add(TagFormat(format_id=1, format_name="test"))
     session.add(TagTypeName(type_name_id=1, type_name="general"))
