@@ -2025,22 +2025,29 @@ class MergedTagReader:
     ) -> dict[str, list[TagSearchRow]]:
         """`search_tags_bulk` の全マッチ行版をマージして返す (#998)。
 
-        `_merge_by_key` は dict の後勝ち上書き (`dict.update`) 前提で list 値の結合に非対応
-        のため、keyword ごとに tag_id -> row の dict で結合する専用マージを行う。tag_id が
-        複数 base DB で重複した場合は low->high 順の**後勝ち = 高優先度 DB の行**を採用する
-        (`_merge_by_key` / `search_tags` と同じ意味論、Codex PR #115 P2)。user patch
-        (翻訳 / status / usage) は結合済み全行へ `_apply_user_patches_to_search_rows` で一括
-        適用する。
+        `_merge_search_tags_adaptive` (= `search_tags`) の batch 版。base repos を low->high、
+        続けて `user_repo` の順に各 `search_tags_bulk_all` を呼び、keyword ごとに tag_id -> row
+        の dict で結合する (後勝ち: 高優先度 base → user_repo が最優先。`_merge_by_key` /
+        `search_tags` と同じ意味論、Codex PR #115 P2)。これにより:
 
-        `OverlayTagReader.search_tags_bulk_all` はスタブ ({}) のため base bulk では拾えない
-        user-only タグ / user 翻訳パッチ / user-only reader の keyword を、per-tag と同じ
-        完全な `search_tags` 経路で補完する (`resolve_preferred` に依らず無条件、Codex PR #115
-        P2)。大 base DB は上で batch 済みなので、fallback に来るのは base bulk が空だった
-        keyword のみ (大 DB の N+1 は再発しない)。
+        - 複数 base DB で同一 tag_id が重複しても高優先度 DB の行を採用する。
+        - user-only タグ / user 翻訳パッチ / user-only reader (Overlay を base とする構成) の
+          行も `search_tags` と同じく取りこぼさない。
+
+        大 base DB は `TagReader.search_tags_bulk_all` が SQL レベルで batch するため N+1 は
+        起きない (user overlay は小さいので `OverlayTagReader.search_tags_bulk_all` の
+        per-keyword ループで実用上問題ない)。結合後、user patch (翻訳 / status / usage) を全行へ
+        `_apply_user_patches_to_search_rows` で一括適用し、`resolve_preferred=True` なら
+        cross-scope preferred を解決する。
         """
-        # keyword ごとに tag_id -> row。low->high 順で後勝ち上書き (高優先度 DB が勝つ)。
+        # base low->high の後に user_repo。keyword ごとに tag_id -> row (後勝ち = 高優先度が勝つ)。
+        repos: list[TagReader | OverlayTagReader] = [*self._iter_base_repos_low_to_high()]
+        if self._has_user():
+            assert self.user_repo is not None
+            repos.append(self.user_repo)
+
         merged_by_keyword: dict[str, dict[int, TagSearchRow]] = {}
-        for repo in self._iter_base_repos_low_to_high():
+        for repo in repos:
             result = repo.search_tags_bulk_all(
                 keywords,
                 format_name=format_name,
@@ -2072,22 +2079,6 @@ class MergedTagReader:
                 keyword: self._resolve_cross_scope_preferred(rows) for keyword, rows in merged.items()
             }
 
-        # base bulk が拾えなかった keyword を per-tag と同じ search_tags で補完する。
-        # merged のキーは cleaned (strip 済み) keyword なので、fallback 判定も strip + dedup で揃える。
-        missing: list[str] = []
-        seen_missing: set[str] = set()
-        for kw in keywords:
-            stripped = kw.strip() if kw else ""
-            if not stripped or stripped in merged or stripped in seen_missing:
-                continue
-            seen_missing.add(stripped)
-            missing.append(stripped)
-        for kw in missing:
-            rows = self.search_tags(
-                kw, partial=False, format_name=format_name, resolve_preferred=resolve_preferred
-            )
-            if rows:
-                merged[kw] = rows
         return merged
 
     def get_format_map(self) -> dict[int, str]:
