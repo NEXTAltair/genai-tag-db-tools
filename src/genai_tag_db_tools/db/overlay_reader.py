@@ -791,3 +791,14 @@ class OverlayTagReader:
         resolve_preferred: bool = False,
     ) -> dict[str, TagSearchRow]:
         return {}
+
+    def search_tags_bulk_all(
+        self,
+        keywords: list[str],
+        *,
+        format_name: str | None = None,
+        resolve_preferred: bool = False,
+    ) -> dict[str, list[TagSearchRow]]:
+        # search_tags_bulk と同様スタブ。user 行は MergedTagReader が
+        # _apply_user_patches_to_search_rows で base 行へパッチ適用する (#998)。
+        return {}

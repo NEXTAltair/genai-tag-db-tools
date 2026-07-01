@@ -267,6 +267,13 @@ class TestOverlayTagReaderSearch:
         def search_tags_bulk(self, keywords: list[str], **kwargs) -> dict[str, TagSearchRow]:
             return {keyword: dict(self._rows[20]) for keyword in keywords if keyword == "blue eyes"}  # type: ignore[misc]
 
+        def search_tags_bulk_all(self, keywords: list[str], **kwargs) -> dict[str, list[TagSearchRow]]:
+            return {
+                keyword: [dict(self._rows[20])]  # type: ignore[list-item]
+                for keyword in keywords
+                if keyword == "blue eyes"
+            }
+
         def get_tag_by_id(self, tag_id: int) -> Tag | None:
             row = self._rows.get(tag_id)
             if row is None:
@@ -474,6 +481,38 @@ class TestOverlayTagReaderSearch:
 
         assert result["blue eyes"]["tag_id"] == 99
         assert result["blue eyes"]["tag"] == "azure eyes"
+
+    def test_merged_bulk_all_applies_base_scope_status_patch(
+        self, overlay_reader, overlay_session_factory
+    ):
+        """search_tags_bulk_all も base-scope status patch + cross-scope preferred を解決する (#998)。"""
+        with overlay_session_factory() as session:
+            session.add(
+                UserTagStatusPatch(
+                    target_scope="base",
+                    target_tag_id=20,
+                    format_id=1,
+                    type_id=1,
+                    alias=True,
+                    preferred_scope="base",
+                    preferred_tag_id=99,
+                    deprecated=False,
+                )
+            )
+            session.commit()
+
+        merged = MergedTagReader(base_repo=self._BaseSearchReader(), user_repo=overlay_reader)
+
+        result = merged.search_tags_bulk_all(
+            ["blue eyes"], format_name="danbooru", resolve_preferred=True
+        )
+
+        assert [row["tag_id"] for row in result["blue eyes"]] == [99]
+        assert result["blue eyes"][0]["tag"] == "azure eyes"
+
+    def test_overlay_reader_search_tags_bulk_all_is_stub(self, overlay_reader):
+        """OverlayTagReader.search_tags_bulk_all はスタブ ({} を返す) (#998)。"""
+        assert overlay_reader.search_tags_bulk_all(["blue eyes"]) == {}
 
 
 class TestOverlayTagReaderSearchFilters:

@@ -369,6 +369,59 @@ class TagReader:
 
             return result
 
+    def search_tags_bulk_all(
+        self,
+        keywords: list[str],
+        *,
+        format_name: str | None = None,
+        resolve_preferred: bool = False,
+    ) -> dict[str, list[TagSearchRow]]:
+        """`search_tags_bulk` の全マッチ行版。keyword -> マッチ行リストを返す (#998)。
+
+        `search_tags_bulk` は keyword ごとに最初の 1 行だけ返すため、alias / preferred の
+        全マッチ行を要する翻訳品質評価に不足する。ロジックは `search_tags_bulk` と同一で、
+        keyword ごとに `break` せず全行を集める点だけが異なる。
+        """
+        cleaned = [keyword.strip() for keyword in keywords if keyword and keyword.strip()]
+        if not cleaned:
+            return {}
+
+        with self.session_factory() as session:
+            builder = TagSearchQueryBuilder(session)
+            tag_ids_by_keyword = builder.initial_tag_ids_for_keywords(cleaned)
+            if not tag_ids_by_keyword:
+                return {}
+
+            all_tag_ids: set[int] = set()
+            for tag_ids in tag_ids_by_keyword.values():
+                all_tag_ids |= set(tag_ids)
+
+            tag_ids, format_id = builder.apply_format_filter(all_tag_ids, format_name)
+            if not tag_ids:
+                return {}
+
+            preloader = TagSearchPreloader(session)
+            preloaded = preloader.load(tag_ids)
+            result_builder = TagSearchResultBuilder(
+                format_id=format_id,
+                resolve_preferred=resolve_preferred,
+                logger=self.logger,
+            )
+
+            row_by_input_id: dict[int, TagSearchRow] = {}
+            for t_id in sorted(tag_ids):
+                row = result_builder.build_row(t_id, preloaded)
+                if row is not None:
+                    row_by_input_id[t_id] = row
+
+            result: dict[str, list[TagSearchRow]] = {}
+            for keyword, ids in tag_ids_by_keyword.items():
+                rows = [row_by_input_id[tag_id] for tag_id in sorted(ids) if tag_id in row_by_input_id]
+                if rows:
+                    result[keyword] = rows
+
+            return result
+
     def get_all_tag_ids(self) -> list[int]:
         with self.session_factory() as session:
             return [tag.tag_id for tag in session.query(Tag).all()]
@@ -1961,6 +2014,65 @@ class MergedTagReader:
             rows = self.search_tags(kw, partial=False, format_name=format_name, resolve_preferred=True)
             if rows:
                 merged[kw] = rows[0]
+        return merged
+
+    def search_tags_bulk_all(
+        self,
+        keywords: list[str],
+        *,
+        format_name: str | None = None,
+        resolve_preferred: bool = False,
+    ) -> dict[str, list[TagSearchRow]]:
+        """`search_tags_bulk` の全マッチ行版をマージして返す (#998)。
+
+        `_merge_by_key` は dict の後勝ち上書き (`dict.update`) 前提で list 値の結合に非対応
+        のため、keyword ごとに全 base repo の行を結合し tag_id で dedup する専用マージを行う。
+        `OverlayTagReader.search_tags_bulk_all` はスタブ ({}) のため user 分の行は寄与しないが、
+        user patch (翻訳 / status / usage) は結合済み全行へ `_apply_user_patches_to_search_rows`
+        で一括適用する。`resolve_preferred=True` の未解決 keyword は個別 `search_tags` で補完する
+        (`search_tags_bulk` と同じ fallback)。
+        """
+        merged: dict[str, list[TagSearchRow]] = {}
+        seen_by_keyword: dict[str, set[int]] = {}
+        for repo in self._iter_base_repos_low_to_high():
+            result = repo.search_tags_bulk_all(
+                keywords,
+                format_name=format_name,
+                resolve_preferred=False,
+            )
+            for keyword, rows in result.items():
+                bucket = merged.setdefault(keyword, [])
+                seen = seen_by_keyword.setdefault(keyword, set())
+                for row in rows:
+                    if row["tag_id"] in seen:
+                        continue
+                    seen.add(row["tag_id"])
+                    bucket.append(row)
+
+        if merged:
+            requested_format_id = self._requested_format_id(format_name)
+            all_rows = [row for rows in merged.values() for row in rows]
+            patched = self._apply_user_patches_to_search_rows(
+                all_rows,
+                requested_format_id=requested_format_id,
+            )
+            patched_by_tag_id = {row["tag_id"]: row for row in patched}
+            merged = {
+                keyword: [patched_by_tag_id.get(row["tag_id"], row) for row in rows]
+                for keyword, rows in merged.items()
+            }
+
+        if not resolve_preferred:
+            return merged
+
+        merged = {keyword: self._resolve_cross_scope_preferred(rows) for keyword, rows in merged.items()}
+        # OverlayTagReader.search_tags_bulk_all がスタブのため、未解決キーワードを
+        # 個別 search_tags で補完する (cross-scope preferred 解決を含む)
+        missing = [kw for kw in keywords if kw not in merged]
+        for kw in missing:
+            rows = self.search_tags(kw, partial=False, format_name=format_name, resolve_preferred=True)
+            if rows:
+                merged[kw] = rows
         return merged
 
     def get_format_map(self) -> dict[int, str]:
