@@ -252,6 +252,9 @@ class _RepoWithDanbooruOverlayStatus:
     def list_tags(self):
         return []
 
+    def list_tag_rows_by_length(self, min_length: int, max_length: int, any_substrings=None):
+        return []
+
     def list_tag_statuses(self):
         return []
 
@@ -467,3 +470,123 @@ def test_exact_deprecated_tag_needs_review(merged_reader):
 
     assert _codes(recommendation) == ["deprecated_tag"]
     assert recommendation.suggestions[0].kind == "review_only"
+
+
+# ---------------------------------------------------------------------------
+# typo 候補探索の絞り込み (#118): 全タグ ORM 実体化の廃止
+# ---------------------------------------------------------------------------
+
+
+def test_typo_query_pieces_splits_evenly():
+    from genai_tag_db_tools.core_api import _typo_query_pieces
+
+    assert _typo_query_pieces("abcdef", 2) == ["ab", "cd", "ef"]
+    assert _typo_query_pieces("abcde", 2) == ["ab", "cd", "e"]
+    assert _typo_query_pieces("ab", 1) == ["a", "b"]
+
+
+def test_typo_query_pieces_returns_none_when_too_short():
+    """非空 k+1 分割が作れない長さでは鳩の巣原理が成立しないため None。"""
+    from genai_tag_db_tools.core_api import _typo_query_pieces
+
+    assert _typo_query_pieces("a", 1) is None
+    assert _typo_query_pieces("ab", 2) is None
+
+
+def test_contains_like_pattern_escapes_wildcards():
+    from genai_tag_db_tools.db.query_utils import contains_like_pattern
+
+    assert contains_like_pattern("o_b") == "%o\\_b%"
+    assert contains_like_pattern("100%") == "%100\\%%"
+    assert contains_like_pattern("a\\b") == "%a\\\\b%"
+
+
+def test_list_tag_rows_by_length_window(merged_reader):
+    rows = merged_reader.list_tag_rows_by_length(8, 9)
+    tags = {tag for _tag_id, tag in rows}
+    assert "blue eyes" in tags  # len 9
+    assert "blu eyes" in tags  # len 8
+    assert "wedding dress" not in tags  # len 13 は窓の外
+
+
+def test_list_tag_rows_by_length_substring_filter(merged_reader):
+    rows = merged_reader.list_tag_rows_by_length(8, 9, ["blue"])
+    tags = {tag for _tag_id, tag in rows}
+    assert "blue eyes" in tags
+    assert "blu eyes" not in tags  # "blue" を含まない
+
+
+def test_list_tag_rows_by_length_escapes_underscore(base_session_factory, populated_base):
+    """piece 中の `_` がリテラル扱いされる (LIKE ワイルドカード化しない)。"""
+    with base_session_factory() as session:
+        session.add(Tag(tag_id=9001, source_tag="foo_bar", tag="foo_bar"))
+        session.add(Tag(tag_id=9002, source_tag="fooxbar", tag="fooxbar"))
+        session.commit()
+    reader = TagReader(session_factory=base_session_factory)
+
+    rows = reader.list_tag_rows_by_length(7, 7, ["o_b"])
+    tags = {tag for _tag_id, tag in rows}
+    assert tags == {"foo_bar"}  # `_` が任意一致なら fooxbar も入ってしまう
+
+
+def test_find_typo_candidates_matches_close_tag(merged_reader):
+    """piece 前絞り込み経由でも距離1の候補を取りこぼさない。"""
+    from genai_tag_db_tools.core_api import _find_typo_candidates
+
+    candidates = _find_typo_candidates(merged_reader, "blue eyez", format_id=None)
+    assert [tag for _tag_id, tag, _distance in candidates][:1] == ["blue eyes"]
+
+
+def test_find_typo_candidates_excludes_deprecated(merged_reader):
+    """deprecated status の候補は距離が近くても提示しない (従来挙動の維持)。"""
+    from genai_tag_db_tools.core_api import _find_typo_candidates
+
+    candidates = _find_typo_candidates(merged_reader, "old tagg", format_id=None)
+    assert all(tag != "old tag" for _tag_id, tag, _distance in candidates)
+
+
+def _base_reader_with_tags(tmp_path: Path, name: str, tags: list[tuple[int, str]]) -> TagReader:
+    """指定タグだけを持つ base DB リーダーを作る (multi-base shadow 検証用)。"""
+    engine = create_engine(
+        f"sqlite:///{tmp_path / name}",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    with factory() as session:
+        session.add_all([Tag(tag_id=tag_id, source_tag=tag, tag=tag) for tag_id, tag in tags])
+        session.commit()
+    return TagReader(session_factory=factory)
+
+
+def test_list_tag_rows_by_length_drops_shadowed_lower_priority_rows(tmp_path: Path):
+    """上位リポの同 tag_id 行が窓外なら、下位の shadowed 行を返さない (Codex P2)。
+
+    user overlay は ck_user_tag_id_offset 制約で base と同じ tag_id を持てないため、
+    shadowing が起こり得るのは multi-base 構成 (_merge_by_key がサポートする、
+    同 tag_id を複数 base が持つケース) のみ。上位 base が同 tag_id を窓外の
+    文字列で持つ場合、マージ視点の勝者は窓外なので下位 base の旧文字列が
+    絞り込み結果へ漏れてはならない。
+    """
+    high = _base_reader_with_tags(tmp_path, "base_high.sqlite", [(7001, "renamed far outside window")])
+    low = _base_reader_with_tags(tmp_path, "base_low.sqlite", [(7001, "blue eyes"), (7002, "blu eyes")])
+    reader = MergedTagReader(base_repo=[high, low])  # base_repos[0] が最上位
+
+    rows = reader.list_tag_rows_by_length(8, 9)
+    tags_by_id = dict(rows)
+
+    assert 7001 not in tags_by_id  # 勝者 (上位 base の行) は窓外なので現れない
+    assert tags_by_id[7002] == "blu eyes"  # shadow されていない行は残る
+
+
+def test_list_tag_rows_by_length_prefers_higher_priority_row_in_window(tmp_path: Path):
+    """同 tag_id が両リポで窓内の場合は上位リポの文字列が勝つ。"""
+    high = _base_reader_with_tags(tmp_path, "base_high.sqlite", [(7001, "bluee eyes")])
+    low = _base_reader_with_tags(tmp_path, "base_low.sqlite", [(7001, "blue eyes")])
+    reader = MergedTagReader(base_repo=[high, low])
+
+    rows = reader.list_tag_rows_by_length(8, 10)
+    tags_by_id = dict(rows)
+
+    assert tags_by_id[7001] == "bluee eyes"  # 上位 base の行 (len 10) が勝つ

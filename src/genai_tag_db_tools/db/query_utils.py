@@ -28,6 +28,26 @@ class StatusInfo(TypedDict):
     deprecated: bool
 
 
+# tag_id IN (...) クエリのチャンクサイズ (SQLite の bind 変数上限より十分小さく取る)
+TAG_ID_IN_CHUNK = 900
+
+
+def contains_like_pattern(substring: str) -> str:
+    """部分文字列一致 (`LIKE '%s%' ESCAPE '\\'`) 用のパターンを生成する (#118)。
+
+    substring 中のワイルドカード文字 (% / _) とエスケープ文字 (\\) をリテラルとして
+    扱えるようエスケープする。danbooru 系タグは `_` を多用するため必須。
+
+    Args:
+        substring: リテラルとして含有判定したい部分文字列。
+
+    Returns:
+        `LIKE ... ESCAPE '\\'` に渡す `%...%` パターン。
+    """
+    escaped = substring.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
 def normalize_search_keyword(keyword: str, partial: bool) -> tuple[str, bool]:
     """Normalize a search keyword for SQL LIKE conditions."""
     has_wildcard = "*" in keyword or "%" in keyword or partial

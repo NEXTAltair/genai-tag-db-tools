@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from logging import getLogger
 from typing import TYPE_CHECKING, Any, cast
@@ -7,14 +7,16 @@ if TYPE_CHECKING:
     from genai_tag_db_tools.db.overlay_reader import OverlayTagReader
 
 import polars as pl
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from genai_tag_db_tools.db.query_utils import (
+    TAG_ID_IN_CHUNK,
     TagSearchPreloader,
     TagSearchQueryBuilder,
     TagSearchResultBuilder,
+    contains_like_pattern,
     normalize_search_keyword,
 )
 from genai_tag_db_tools.db.schema import (
@@ -77,6 +79,60 @@ class TagReader:
     def list_tags(self) -> list[Tag]:
         with self.session_factory() as session:
             return session.query(Tag).all()
+
+    def list_tag_rows_by_length(
+        self,
+        min_length: int,
+        max_length: int,
+        any_substrings: Sequence[str] | None = None,
+    ) -> list[tuple[int, str]]:
+        """タグ文字列長が [min_length, max_length] の (tag_id, tag) タプルを返す。
+
+        typo 候補探索 (#118) 用の軽量列挙。編集距離 <= k の候補は長さ差 <= k が
+        必要条件なので、SQL 側の長さ窓で候補を絞り、ORM エンティティを実体化しない
+        タプル取得で全件走査のコストを抑える。
+
+        Args:
+            min_length: タグ文字列長の下限 (両端含む)。
+            max_length: タグ文字列長の上限 (両端含む)。
+            any_substrings: 指定時、いずれかを部分文字列として含む行に絞る
+                (`LIKE '%s%'` の OR)。編集距離 <= k ならクエリを k+1 分割した
+                部分文字列の少なくとも1つが候補に無傷で含まれる (鳩の巣原理) ため、
+                呼び出し側はこの必要条件で候補を大幅に絞れる。
+
+        Returns:
+            条件を満たす (tag_id, tag) タプルのリスト。
+        """
+        with self.session_factory() as session:
+            query = session.query(Tag.tag_id, Tag.tag).filter(
+                func.length(Tag.tag).between(min_length, max_length)
+            )
+            if any_substrings:
+                query = query.filter(
+                    or_(*[Tag.tag.like(contains_like_pattern(s), escape="\\") for s in any_substrings])
+                )
+            return [(tag_id, tag) for tag_id, tag in query.all()]
+
+    def list_existing_tag_ids(self, tag_ids: Sequence[int]) -> set[int]:
+        """指定 tag_id のうち TAGS に存在するものを返す (#118)。
+
+        MergedTagReader が絞り込み結果の shadow 検証 (上位リポに同 tag_id の行が
+        存在するか) に使う。PK インデックス参照の IN クエリを SQLite の bind 変数
+        上限に収まるチャンクで実行する。
+
+        Args:
+            tag_ids: 存在確認する tag_id の列。
+
+        Returns:
+            存在した tag_id の集合。
+        """
+        existing: set[int] = set()
+        with self.session_factory() as session:
+            for start in range(0, len(tag_ids), TAG_ID_IN_CHUNK):
+                chunk = list(tag_ids[start : start + TAG_ID_IN_CHUNK])
+                rows = session.query(Tag.tag_id).filter(Tag.tag_id.in_(chunk)).all()
+                existing.update(tag_id for (tag_id,) in rows)
+        return existing
 
     def get_max_tag_id(self) -> int:
         with self.session_factory() as session:
@@ -1823,6 +1879,56 @@ class MergedTagReader:
 
     def list_tags(self) -> list[Tag]:
         return self._merge_by_key("list_tags", lambda t: t.tag_id)
+
+    def list_tag_rows_by_length(
+        self,
+        min_length: int,
+        max_length: int,
+        any_substrings: Sequence[str] | None = None,
+    ) -> list[tuple[int, str]]:
+        """全リポジトリから長さ窓に合う (tag_id, tag) を収集し tag_id でマージする (#118)。
+
+        「マージ勝者の行にフィルタを適用した」結果と一致するよう、優先度順マージの
+        後に shadow 検証を行う。リポジトリごとに絞ってから素朴にマージすると、
+        上位リポの同 tag_id 行が窓外のとき (絞り込み結果に現れないとき) に下位の
+        shadowed 行が漏れ、list_tags() のマージ視点では存在しないタグ文字列を
+        返してしまう (Codex P2)。下位リポが勝った tag_id は、より上位のリポに同
+        tag_id の行が存在しないこと (= 真の勝者であること) を PK 参照で検証する。
+
+        Args:
+            min_length: タグ文字列長の下限 (両端含む)。
+            max_length: タグ文字列長の上限 (両端含む)。
+            any_substrings: 指定時、いずれかを部分文字列として含む行に絞る。
+
+        Returns:
+            マージ視点で有効な行だけを含む (tag_id, tag) タプルのリスト。
+        """
+        # 優先度 高→低 (user が最優先、base は base_repos[0] が最上位)
+        repos: list[TagReader | OverlayTagReader] = []
+        if self.user_repo is not None:
+            repos.append(self.user_repo)
+        repos.extend(self._iter_base_repos())
+
+        merged: dict[int, str] = {}
+        winner_level: dict[int, int] = {}
+        for level, repo in enumerate(repos):
+            for tag_id, tag in repo.list_tag_rows_by_length(min_length, max_length, any_substrings):
+                if tag_id not in merged:  # 先勝ち = 上位リポ優先
+                    merged[tag_id] = tag
+                    winner_level[tag_id] = level
+
+        # shadow 検証: level h より下位で勝った tag_id が repos[h] に存在するなら、
+        # 上位の行が窓外だったことを意味する (真の勝者は窓外) ため除外する。
+        for level in range(len(repos) - 1):
+            lower_winner_ids = [tag_id for tag_id, winner in winner_level.items() if winner > level]
+            if not lower_winner_ids:
+                continue
+            shadowed = repos[level].list_existing_tag_ids(lower_winner_ids)
+            for tag_id in shadowed:
+                merged.pop(tag_id, None)
+                winner_level.pop(tag_id, None)
+
+        return list(merged.items())
 
     def list_tag_statuses(self, tag_id: int | None = None) -> list[TagStatus]:
         return self._merge_by_key(
