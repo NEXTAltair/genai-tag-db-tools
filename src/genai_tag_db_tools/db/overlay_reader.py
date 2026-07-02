@@ -9,7 +9,11 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
-from genai_tag_db_tools.db.query_utils import contains_like_pattern, normalize_search_keyword
+from genai_tag_db_tools.db.query_utils import (
+    TAG_ID_IN_CHUNK,
+    contains_like_pattern,
+    normalize_search_keyword,
+)
 from genai_tag_db_tools.db.schema import (
     Tag,
     TagFormat,
@@ -100,6 +104,25 @@ class OverlayTagReader:
                     or_(*[UserTag.tag.like(contains_like_pattern(s), escape="\\") for s in any_substrings])
                 )
             return [(tag_id, tag) for tag_id, tag in query.all()]
+
+    def list_existing_tag_ids(self, tag_ids: Sequence[int]) -> set[int]:
+        """指定 tag_id のうち USER_TAGS に存在するものを返す (#118)。
+
+        TagReader.list_existing_tag_ids と同一契約 (shadow 検証用)。
+
+        Args:
+            tag_ids: 存在確認する tag_id の列。
+
+        Returns:
+            存在した tag_id の集合。
+        """
+        existing: set[int] = set()
+        with self.session_factory() as session:
+            for start in range(0, len(tag_ids), TAG_ID_IN_CHUNK):
+                chunk = list(tag_ids[start : start + TAG_ID_IN_CHUNK])
+                rows = session.query(UserTag.tag_id).filter(UserTag.tag_id.in_(chunk)).all()
+                existing.update(tag_id for (tag_id,) in rows)
+        return existing
 
     def get_all_tag_ids(self) -> list[int]:
         """USER_TAGS の全 tag_id を返す。"""

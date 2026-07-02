@@ -28,6 +28,10 @@ class StatusInfo(TypedDict):
     deprecated: bool
 
 
+# tag_id IN (...) クエリのチャンクサイズ (SQLite の bind 変数上限より十分小さく取る)
+TAG_ID_IN_CHUNK = 900
+
+
 def contains_like_pattern(substring: str) -> str:
     """部分文字列一致 (`LIKE '%s%' ESCAPE '\\'`) 用のパターンを生成する (#118)。
 

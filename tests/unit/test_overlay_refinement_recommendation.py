@@ -543,3 +543,50 @@ def test_find_typo_candidates_excludes_deprecated(merged_reader):
 
     candidates = _find_typo_candidates(merged_reader, "old tagg", format_id=None)
     assert all(tag != "old tag" for _tag_id, tag, _distance in candidates)
+
+
+def _base_reader_with_tags(tmp_path: Path, name: str, tags: list[tuple[int, str]]) -> TagReader:
+    """指定タグだけを持つ base DB リーダーを作る (multi-base shadow 検証用)。"""
+    engine = create_engine(
+        f"sqlite:///{tmp_path / name}",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    with factory() as session:
+        session.add_all([Tag(tag_id=tag_id, source_tag=tag, tag=tag) for tag_id, tag in tags])
+        session.commit()
+    return TagReader(session_factory=factory)
+
+
+def test_list_tag_rows_by_length_drops_shadowed_lower_priority_rows(tmp_path: Path):
+    """上位リポの同 tag_id 行が窓外なら、下位の shadowed 行を返さない (Codex P2)。
+
+    user overlay は ck_user_tag_id_offset 制約で base と同じ tag_id を持てないため、
+    shadowing が起こり得るのは multi-base 構成 (_merge_by_key がサポートする、
+    同 tag_id を複数 base が持つケース) のみ。上位 base が同 tag_id を窓外の
+    文字列で持つ場合、マージ視点の勝者は窓外なので下位 base の旧文字列が
+    絞り込み結果へ漏れてはならない。
+    """
+    high = _base_reader_with_tags(tmp_path, "base_high.sqlite", [(7001, "renamed far outside window")])
+    low = _base_reader_with_tags(tmp_path, "base_low.sqlite", [(7001, "blue eyes"), (7002, "blu eyes")])
+    reader = MergedTagReader(base_repo=[high, low])  # base_repos[0] が最上位
+
+    rows = reader.list_tag_rows_by_length(8, 9)
+    tags_by_id = dict(rows)
+
+    assert 7001 not in tags_by_id  # 勝者 (上位 base の行) は窓外なので現れない
+    assert tags_by_id[7002] == "blu eyes"  # shadow されていない行は残る
+
+
+def test_list_tag_rows_by_length_prefers_higher_priority_row_in_window(tmp_path: Path):
+    """同 tag_id が両リポで窓内の場合は上位リポの文字列が勝つ。"""
+    high = _base_reader_with_tags(tmp_path, "base_high.sqlite", [(7001, "bluee eyes")])
+    low = _base_reader_with_tags(tmp_path, "base_low.sqlite", [(7001, "blue eyes")])
+    reader = MergedTagReader(base_repo=[high, low])
+
+    rows = reader.list_tag_rows_by_length(8, 10)
+    tags_by_id = dict(rows)
+
+    assert tags_by_id[7001] == "bluee eyes"  # 上位 base の行 (len 10) が勝つ
