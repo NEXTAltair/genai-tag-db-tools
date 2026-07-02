@@ -583,31 +583,65 @@ def _candidate_sort_key(input_tag: str, candidate: tuple[int, str, int]) -> tupl
     return (distance, -SequenceMatcher(None, input_tag, tag).ratio(), tag, tag_id)
 
 
-def _recommendation_statuses_by_tag(
+def _typo_candidate_status_usable(
     repo: MergedTagReader,
-    format_id: int | None,
-) -> dict[int, list[Any]]:
-    statuses = repo.list_tag_statuses()
-    result: dict[int, list[object]] = {}
-    for status in statuses:
-        if format_id is not None and status.format_id != format_id:
-            continue
-        result.setdefault(status.tag_id, []).append(status)
-    return result
-
-
-def _is_typo_candidate_status_usable(
-    statuses_by_tag: dict[int, list[Any]],
     tag_id: int,
     *,
     format_id: int | None,
 ) -> bool:
-    statuses = statuses_by_tag.get(tag_id, [])
-    if format_id is not None and not statuses:
-        return False
+    """typo 候補として提示できる status か、候補 tag_id 単位で判定する (#118)。
+
+    従来は list_tag_statuses() の全件実体化 (実データ数千万行) を tag ごとに行って
+    いたため、距離判定を通過した少数候補だけ tag_id 指定で参照する方式に変更した。
+    判定条件は従来と同一: format 指定時は当該 format の status が必須、alias /
+    deprecated を1つでも含む候補は除外する。
+
+    Args:
+        repo: overlay-aware なタグリーダー。
+        tag_id: 判定対象候補の tag_id。
+        format_id: 対象 format。None なら全 format の status を見る。
+
+    Returns:
+        typo 候補として提示できるなら True。
+    """
+    statuses = repo.list_tag_statuses(tag_id=tag_id)
+    if format_id is not None:
+        statuses = [status for status in statuses if status.format_id == format_id]
+        if not statuses:
+            return False
     if not statuses:
         return True
     return not any(status.alias or status.deprecated for status in statuses)
+
+
+def _typo_query_pieces(query_key: str, distance_limit: int) -> list[str] | None:
+    """クエリを distance_limit+1 個の連続部分文字列へ均等分割する (#118)。
+
+    鳩の巣原理: 編集距離 <= k なら k 回の編集が触れる piece は高々 k 個で、
+    少なくとも1つの piece は無傷のまま候補側に連続部分文字列として残る。
+    よって「いずれかの piece を含む」は距離 <= k の必要条件になり、SQL の
+    LIKE OR で候補を大幅に絞れる。
+
+    Args:
+        query_key: 小文字化済みのクエリ文字列。
+        distance_limit: 許容編集距離 k。
+
+    Returns:
+        k+1 個の非空 piece。クエリ長 <= k で非空 k+1 分割が作れない
+        (= 鳩の巣原理が成立しない) 場合は None を返し、呼び出し側は
+        piece 絞り込みを行わない。
+    """
+    piece_count = distance_limit + 1
+    if len(query_key) < piece_count:
+        return None
+    base, remainder = divmod(len(query_key), piece_count)
+    pieces: list[str] = []
+    position = 0
+    for index in range(piece_count):
+        piece_len = base + (1 if index < remainder else 0)
+        pieces.append(query_key[position : position + piece_len])
+        position += piece_len
+    return pieces
 
 
 def _find_typo_candidates(
@@ -617,34 +651,60 @@ def _find_typo_candidates(
     format_id: int | None,
     limit: int = 3,
 ) -> list[tuple[int, str, int]]:
+    """編集距離ベースの typo 候補を上位 limit 件返す (#118 で走査を絞り込み)。
+
+    従来は list_tags() で全タグ (実データ約1,000万行) を ORM 実体化して総当たり
+    しており、未知タグ1個の評価に数十秒かかり呼び出し側 GUI をフリーズさせていた。
+    編集距離 <= k の必要条件で候補を3段階に絞る:
+
+    1. SQL 長さ窓: 長さ差 > k のタグは距離 > k なので、DB 側で
+       length(tag) BETWEEN len-k AND len+k に絞ってタプル取得する
+    2. SQL piece 含有 (鳩の巣原理): クエリの k+1 分割 piece のいずれかを
+       含まないタグは距離 > k なので LIKE OR で除外する (_typo_query_pieces)
+    3. 文字集合の対称差: 1回の編集で文字集合の対称差は高々2しか変わらないため、
+       |set(a) ^ set(b)| > 2k のタグは距離 > k として DP 計算前に除外する
+
+    status 判定は距離を通過した少数候補だけ tag_id 指定で参照する。
+    """
     if not normalized_tag:
         return []
 
     distance_limit = _typo_distance_limit(normalized_tag)
+    query_key = normalized_tag.lower()
+    query_chars = set(query_key)
+    rows = repo.list_tag_rows_by_length(
+        len(normalized_tag) - distance_limit,
+        len(normalized_tag) + distance_limit,
+        _typo_query_pieces(query_key, distance_limit),
+    )
     candidates: list[tuple[int, str, int]] = []
     seen_tags: set[str] = set()
-    statuses_by_tag = _recommendation_statuses_by_tag(repo, format_id)
-    for tag_obj in repo.list_tags():
-        candidate_tag = tag_obj.tag
+    for tag_id, candidate_tag in rows:
         if not candidate_tag:
             continue
         candidate_key = candidate_tag.lower()
-        if candidate_key == normalized_tag.lower() or candidate_key in seen_tags:
+        if candidate_key == query_key or candidate_key in seen_tags:
             continue
         seen_tags.add(candidate_key)
-
-        if not _is_typo_candidate_status_usable(
-            statuses_by_tag,
-            tag_obj.tag_id,
-            format_id=format_id,
-        ):
+        if len(query_chars.symmetric_difference(candidate_key)) > 2 * distance_limit:
             continue
-        distance = _edit_distance_at_most(normalized_tag.lower(), candidate_key, distance_limit)
+        distance = _edit_distance_at_most(query_key, candidate_key, distance_limit)
         if distance is None:
             continue
-        candidates.append((tag_obj.tag_id, candidate_tag, distance))
+        candidates.append((tag_id, candidate_tag, distance))
 
-    return sorted(candidates, key=lambda candidate: _candidate_sort_key(normalized_tag, candidate))[:limit]
+    # 先に提示順へソートし、status 判定 (tag_id ごとの DB 参照) は上位から limit 件
+    # 集まるまでの遅延評価にする。短いタグでは距離合格者が数千件になり得るため、
+    # 全件の status を引くとそこがボトルネックになる (filter→sort と結果は同一)。
+    ordered = sorted(candidates, key=lambda candidate: _candidate_sort_key(normalized_tag, candidate))
+    usable: list[tuple[int, str, int]] = []
+    for candidate in ordered:
+        if not _typo_candidate_status_usable(repo, candidate[0], format_id=format_id):
+            continue
+        usable.append(candidate)
+        if len(usable) >= limit:
+            break
+    return usable
 
 
 def _recommend_from_db(

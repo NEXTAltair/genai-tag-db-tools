@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from logging import getLogger
 from typing import TYPE_CHECKING, Any, cast
@@ -7,7 +7,7 @@ if TYPE_CHECKING:
     from genai_tag_db_tools.db.overlay_reader import OverlayTagReader
 
 import polars as pl
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,7 @@ from genai_tag_db_tools.db.query_utils import (
     TagSearchPreloader,
     TagSearchQueryBuilder,
     TagSearchResultBuilder,
+    contains_like_pattern,
     normalize_search_keyword,
 )
 from genai_tag_db_tools.db.schema import (
@@ -77,6 +78,39 @@ class TagReader:
     def list_tags(self) -> list[Tag]:
         with self.session_factory() as session:
             return session.query(Tag).all()
+
+    def list_tag_rows_by_length(
+        self,
+        min_length: int,
+        max_length: int,
+        any_substrings: Sequence[str] | None = None,
+    ) -> list[tuple[int, str]]:
+        """タグ文字列長が [min_length, max_length] の (tag_id, tag) タプルを返す。
+
+        typo 候補探索 (#118) 用の軽量列挙。編集距離 <= k の候補は長さ差 <= k が
+        必要条件なので、SQL 側の長さ窓で候補を絞り、ORM エンティティを実体化しない
+        タプル取得で全件走査のコストを抑える。
+
+        Args:
+            min_length: タグ文字列長の下限 (両端含む)。
+            max_length: タグ文字列長の上限 (両端含む)。
+            any_substrings: 指定時、いずれかを部分文字列として含む行に絞る
+                (`LIKE '%s%'` の OR)。編集距離 <= k ならクエリを k+1 分割した
+                部分文字列の少なくとも1つが候補に無傷で含まれる (鳩の巣原理) ため、
+                呼び出し側はこの必要条件で候補を大幅に絞れる。
+
+        Returns:
+            条件を満たす (tag_id, tag) タプルのリスト。
+        """
+        with self.session_factory() as session:
+            query = session.query(Tag.tag_id, Tag.tag).filter(
+                func.length(Tag.tag).between(min_length, max_length)
+            )
+            if any_substrings:
+                query = query.filter(
+                    or_(*[Tag.tag.like(contains_like_pattern(s), escape="\\") for s in any_substrings])
+                )
+            return [(tag_id, tag) for tag_id, tag in query.all()]
 
     def get_max_tag_id(self) -> int:
         with self.session_factory() as session:
@@ -1823,6 +1857,32 @@ class MergedTagReader:
 
     def list_tags(self) -> list[Tag]:
         return self._merge_by_key("list_tags", lambda t: t.tag_id)
+
+    def list_tag_rows_by_length(
+        self,
+        min_length: int,
+        max_length: int,
+        any_substrings: Sequence[str] | None = None,
+    ) -> list[tuple[int, str]]:
+        """全リポジトリから長さ窓に合う (tag_id, tag) を収集し tag_id でマージする (#118)。
+
+        list_tags と同じ後勝ちマージ (base 低優先→高優先→user) で user_repo が最優先。
+
+        Args:
+            min_length: タグ文字列長の下限 (両端含む)。
+            max_length: タグ文字列長の上限 (両端含む)。
+            any_substrings: 指定時、いずれかを部分文字列として含む行に絞る。
+
+        Returns:
+            マージ済みの (tag_id, tag) タプルのリスト。
+        """
+        return self._merge_by_key(
+            "list_tag_rows_by_length",
+            lambda row: row[0],
+            min_length,
+            max_length,
+            any_substrings,
+        )
 
     def list_tag_statuses(self, tag_id: int | None = None) -> list[TagStatus]:
         return self._merge_by_key(

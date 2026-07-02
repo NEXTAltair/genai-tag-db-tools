@@ -252,6 +252,9 @@ class _RepoWithDanbooruOverlayStatus:
     def list_tags(self):
         return []
 
+    def list_tag_rows_by_length(self, min_length: int, max_length: int, any_substrings=None):
+        return []
+
     def list_tag_statuses(self):
         return []
 
@@ -467,3 +470,76 @@ def test_exact_deprecated_tag_needs_review(merged_reader):
 
     assert _codes(recommendation) == ["deprecated_tag"]
     assert recommendation.suggestions[0].kind == "review_only"
+
+
+# ---------------------------------------------------------------------------
+# typo 候補探索の絞り込み (#118): 全タグ ORM 実体化の廃止
+# ---------------------------------------------------------------------------
+
+
+def test_typo_query_pieces_splits_evenly():
+    from genai_tag_db_tools.core_api import _typo_query_pieces
+
+    assert _typo_query_pieces("abcdef", 2) == ["ab", "cd", "ef"]
+    assert _typo_query_pieces("abcde", 2) == ["ab", "cd", "e"]
+    assert _typo_query_pieces("ab", 1) == ["a", "b"]
+
+
+def test_typo_query_pieces_returns_none_when_too_short():
+    """非空 k+1 分割が作れない長さでは鳩の巣原理が成立しないため None。"""
+    from genai_tag_db_tools.core_api import _typo_query_pieces
+
+    assert _typo_query_pieces("a", 1) is None
+    assert _typo_query_pieces("ab", 2) is None
+
+
+def test_contains_like_pattern_escapes_wildcards():
+    from genai_tag_db_tools.db.query_utils import contains_like_pattern
+
+    assert contains_like_pattern("o_b") == "%o\\_b%"
+    assert contains_like_pattern("100%") == "%100\\%%"
+    assert contains_like_pattern("a\\b") == "%a\\\\b%"
+
+
+def test_list_tag_rows_by_length_window(merged_reader):
+    rows = merged_reader.list_tag_rows_by_length(8, 9)
+    tags = {tag for _tag_id, tag in rows}
+    assert "blue eyes" in tags  # len 9
+    assert "blu eyes" in tags  # len 8
+    assert "wedding dress" not in tags  # len 13 は窓の外
+
+
+def test_list_tag_rows_by_length_substring_filter(merged_reader):
+    rows = merged_reader.list_tag_rows_by_length(8, 9, ["blue"])
+    tags = {tag for _tag_id, tag in rows}
+    assert "blue eyes" in tags
+    assert "blu eyes" not in tags  # "blue" を含まない
+
+
+def test_list_tag_rows_by_length_escapes_underscore(base_session_factory, populated_base):
+    """piece 中の `_` がリテラル扱いされる (LIKE ワイルドカード化しない)。"""
+    with base_session_factory() as session:
+        session.add(Tag(tag_id=9001, source_tag="foo_bar", tag="foo_bar"))
+        session.add(Tag(tag_id=9002, source_tag="fooxbar", tag="fooxbar"))
+        session.commit()
+    reader = TagReader(session_factory=base_session_factory)
+
+    rows = reader.list_tag_rows_by_length(7, 7, ["o_b"])
+    tags = {tag for _tag_id, tag in rows}
+    assert tags == {"foo_bar"}  # `_` が任意一致なら fooxbar も入ってしまう
+
+
+def test_find_typo_candidates_matches_close_tag(merged_reader):
+    """piece 前絞り込み経由でも距離1の候補を取りこぼさない。"""
+    from genai_tag_db_tools.core_api import _find_typo_candidates
+
+    candidates = _find_typo_candidates(merged_reader, "blue eyez", format_id=None)
+    assert [tag for _tag_id, tag, _distance in candidates][:1] == ["blue eyes"]
+
+
+def test_find_typo_candidates_excludes_deprecated(merged_reader):
+    """deprecated status の候補は距離が近くても提示しない (従来挙動の維持)。"""
+    from genai_tag_db_tools.core_api import _find_typo_candidates
+
+    candidates = _find_typo_candidates(merged_reader, "old tagg", format_id=None)
+    assert all(tag != "old tag" for _tag_id, tag, _distance in candidates)

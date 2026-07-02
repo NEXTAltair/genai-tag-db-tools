@@ -1,7 +1,7 @@
 # genai_tag_db_tools.db.overlay_reader
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from logging import getLogger
 
 from sqlalchemy import func, or_
@@ -9,7 +9,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
-from genai_tag_db_tools.db.query_utils import normalize_search_keyword
+from genai_tag_db_tools.db.query_utils import contains_like_pattern, normalize_search_keyword
 from genai_tag_db_tools.db.schema import (
     Tag,
     TagFormat,
@@ -72,6 +72,34 @@ class OverlayTagReader:
         with self.session_factory() as session:
             rows = session.query(UserTag).all()
             return [Tag(tag_id=r.tag_id, source_tag=r.source_tag, tag=r.tag) for r in rows]
+
+    def list_tag_rows_by_length(
+        self,
+        min_length: int,
+        max_length: int,
+        any_substrings: Sequence[str] | None = None,
+    ) -> list[tuple[int, str]]:
+        """タグ文字列長が [min_length, max_length] の (tag_id, tag) タプルを返す (#118)。
+
+        TagReader.list_tag_rows_by_length と同一契約。USER_TAGS を対象にする。
+
+        Args:
+            min_length: タグ文字列長の下限 (両端含む)。
+            max_length: タグ文字列長の上限 (両端含む)。
+            any_substrings: 指定時、いずれかを部分文字列として含む行に絞る。
+
+        Returns:
+            条件を満たす (tag_id, tag) タプルのリスト。
+        """
+        with self.session_factory() as session:
+            query = session.query(UserTag.tag_id, UserTag.tag).filter(
+                func.length(UserTag.tag).between(min_length, max_length)
+            )
+            if any_substrings:
+                query = query.filter(
+                    or_(*[UserTag.tag.like(contains_like_pattern(s), escape="\\") for s in any_substrings])
+                )
+            return [(tag_id, tag) for tag_id, tag in query.all()]
 
     def get_all_tag_ids(self) -> list[int]:
         """USER_TAGS の全 tag_id を返す。"""
