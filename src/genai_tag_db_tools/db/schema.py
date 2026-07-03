@@ -300,6 +300,32 @@ class UserTagTranslationPatch(UserOverlayBase):
     )
 
 
+class UserTagTranslationPreference(UserOverlayBase):
+    """タグ x 言語ごとの優先翻訳 (主訳) (#122)。
+
+    同一言語に複数の翻訳があるとき、表示に使う訳をユーザーが1つ選んで永続化する。
+    UNIQUE(scope, tag_id, language) により言語ごとの主訳は常に1つ (上書き = 変更)。
+    翻訳候補そのもの (TAG_TRANSLATIONS / USER_TAG_TRANSLATION_PATCH) とは独立で、
+    読み出し側が畳み込み時にこの preference を優先適用する。
+    """
+
+    __tablename__ = "USER_TAG_TRANSLATION_PREFERENCE"
+
+    pref_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    target_scope: Mapped[str] = mapped_column()
+    target_tag_id: Mapped[int] = mapped_column()
+    language: Mapped[str] = mapped_column()
+    translation: Mapped[str] = mapped_column()
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("target_scope", "target_tag_id", "language", name="uix_trans_pref"),
+        CheckConstraint("target_scope IN ('base', 'user')", name="ck_trans_pref_scope"),
+        Index("ix_trans_pref_target", "target_scope", "target_tag_id"),
+    )
+
+
 class UserTagUsagePatch(UserOverlayBase):
     """base / user タグへの usage count パッチ。
     TAG_USAGE_COUNTS の FK なし版。

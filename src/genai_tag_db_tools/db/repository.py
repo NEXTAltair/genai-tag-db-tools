@@ -1378,20 +1378,76 @@ class TagRepository:
         """
         from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
 
-        if self._reader is not None:
-            target_scope = self._reader.get_tag_scope(tag_id)
-            if target_scope is None:
-                # 対象タグがどの scope にも存在しない → orphan patch を書かず拒否する。
-                raise ValueError(f"write_user_translation: tag_id={tag_id} not found in any scope")
-        else:
-            # reader 未注入 (直接生成等) は offset ヒューリスティックへ縮退する。
-            target_scope = "user" if tag_id >= USER_TAG_ID_OFFSET else "base"
+        target_scope = self._resolve_patch_scope(tag_id, operation="write_user_translation")
         user_repo = UserTagRepository(self.session_factory)
         user_repo.write_translation_patch(
             target_scope=target_scope,
             target_tag_id=tag_id,
             language=language,
             translation=translation,
+        )
+
+    def _resolve_patch_scope(self, tag_id: int, *, operation: str) -> str:
+        """patch/preference 書き込み対象タグの scope を解決する (#122)。
+
+        write_user_translation と同一の契約: reader 注入時は実在チェック付きで
+        scope を解決し、どの scope にも無ければ ValueError。未注入時は
+        USER_TAG_ID_OFFSET ヒューリスティックへ縮退する。
+        """
+        if self._reader is not None:
+            target_scope = self._reader.get_tag_scope(tag_id)
+            if target_scope is None:
+                # 対象タグがどの scope にも存在しない → orphan 行を書かず拒否する。
+                raise ValueError(f"{operation}: tag_id={tag_id} not found in any scope")
+            return target_scope
+        return "user" if tag_id >= USER_TAG_ID_OFFSET else "base"
+
+    def set_preferred_translation(self, tag_id: int, language: str, translation: str) -> None:
+        """タグ x 言語の主訳 (優先翻訳) を user DB overlay へ upsert する (#122)。
+
+        言語ごとに主訳は1つで、既存設定は上書きされる。翻訳候補そのものは追加しない
+        (候補の追加は write_user_translation)。
+
+        Args:
+            tag_id: 対象タグの tag_id (base / user どちらでも可)。
+            language: 言語コード (例: ``ja``)。
+            translation: 主訳として表示する翻訳文字列。
+
+        Raises:
+            ValueError: reader 注入時に tag_id がどの scope にも存在しない場合。
+        """
+        from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
+
+        target_scope = self._resolve_patch_scope(tag_id, operation="set_preferred_translation")
+        user_repo = UserTagRepository(self.session_factory)
+        user_repo.write_translation_preference(
+            target_scope=target_scope,
+            target_tag_id=tag_id,
+            language=language,
+            translation=translation,
+        )
+
+    def clear_preferred_translation(self, tag_id: int, language: str) -> bool:
+        """タグ x 言語の主訳設定を削除する (#122)。
+
+        Args:
+            tag_id: 対象タグの tag_id。
+            language: 言語コード。
+
+        Returns:
+            設定を削除したら True、元々無ければ False。
+
+        Raises:
+            ValueError: reader 注入時に tag_id がどの scope にも存在しない場合。
+        """
+        from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
+
+        target_scope = self._resolve_patch_scope(tag_id, operation="clear_preferred_translation")
+        user_repo = UserTagRepository(self.session_factory)
+        return user_repo.delete_translation_preference(
+            target_scope=target_scope,
+            target_tag_id=tag_id,
+            language=language,
         )
 
 
@@ -1929,6 +1985,35 @@ class MergedTagReader:
                 winner_level.pop(tag_id, None)
 
         return list(merged.items())
+
+    def get_preferred_translations_batch(self, tag_ids: list[int]) -> dict[int, dict[str, str]]:
+        """主訳 (優先翻訳) を一括取得する (#122)。
+
+        preference は user overlay にのみ存在するため base repos は参照しない。
+        user_repo 未設定、または user_repo が preference を提供しない (legacy
+        TagReader 等) 場合は空 dict を返す。
+
+        Args:
+            tag_ids: 取得対象の tag_id リスト。
+
+        Returns:
+            ``{tag_id: {language: translation}}`` (設定のあるタグのみ)。
+        """
+        # get_user_tag_reader() は OverlayTagReader を base_repo として単独ラップする
+        # (user_repo=None) ため、user_repo だけを見ると user-only 読みで preference が
+        # 空になる (Codex P2)。preference を提供できる repo を優先度 低→高 の順に
+        # 集め、後勝ちマージ (user が最優先) で畳む。提供 repo が無ければ空 dict。
+        result: dict[int, dict[str, str]] = {}
+        providers = [*self._iter_base_repos_low_to_high()]
+        if self.user_repo is not None:
+            providers.append(self.user_repo)
+        for repo in providers:
+            getter = getattr(repo, "get_preferred_translations_batch", None)
+            if getter is None:
+                continue
+            for tag_id, translations in getter(tag_ids).items():
+                result.setdefault(tag_id, {}).update(translations)
+        return result
 
     def list_tag_statuses(self, tag_id: int | None = None) -> list[TagStatus]:
         return self._merge_by_key(

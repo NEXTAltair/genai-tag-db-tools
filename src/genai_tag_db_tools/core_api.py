@@ -1670,6 +1670,56 @@ def update_tags_type_batch(repo_writer, tag_updates: list, format_id: int) -> No
     repo_writer.update_tags_type_batch(tag_updates, format_id)
 
 
+def set_preferred_translation(repo_writer, tag_id: int, language: str, translation: str) -> None:
+    """タグ x 言語の主訳 (優先翻訳) を user DB overlay へ設定します (#122)。
+
+    同一言語に複数の翻訳がある場合に表示へ使う訳を1つ選んで永続化します。
+    言語ごとに主訳は1つで、再設定は上書きになります。翻訳候補そのものは
+    追加しません (候補の追加は :func:`write_user_translation`)。
+
+    Args:
+        repo_writer: TagRepository インスタンス (``get_user_repository()`` で取得)
+        tag_id: 対象タグの tag_id (base / user どちらでも可)
+        language: 言語コード (例: ``ja``)
+        translation: 主訳として表示する翻訳文字列
+
+    Raises:
+        ValueError: tag_id がどの scope にも存在しない場合
+
+    Example:
+        >>> from genai_tag_db_tools import set_preferred_translation
+        >>> set_preferred_translation(repo, 123, "ja", "青い目")
+    """
+    repo_writer.set_preferred_translation(tag_id, language, translation)
+
+
+def clear_preferred_translation(repo_writer, tag_id: int, language: str) -> bool:
+    """タグ x 言語の主訳設定を削除します (#122)。
+
+    Args:
+        repo_writer: TagRepository インスタンス (``get_user_repository()`` で取得)
+        tag_id: 対象タグの tag_id
+        language: 言語コード
+
+    Returns:
+        設定を削除したら True、元々無ければ False
+    """
+    return repo_writer.clear_preferred_translation(tag_id, language)
+
+
+def get_preferred_translations_batch(reader, tag_ids: list[int]) -> dict[int, dict[str, str]]:
+    """主訳 (優先翻訳) を一括取得します (#122)。
+
+    Args:
+        reader: MergedTagReader (``get_tag_reader()`` で取得)
+        tag_ids: 取得対象の tag_id リスト
+
+    Returns:
+        主訳が設定されている tag_id だけを含む ``{tag_id: {language: translation}}``
+    """
+    return reader.get_preferred_translations_batch(tag_ids)
+
+
 def write_user_translation(repo_writer, tag_id: int, language: str, translation: str) -> None:
     """タグに言語別翻訳を user DB overlay として追加します。
 
