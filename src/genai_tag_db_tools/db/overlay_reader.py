@@ -25,6 +25,7 @@ from genai_tag_db_tools.db.schema import (
     UserTag,
     UserTagStatusPatch,
     UserTagTranslationPatch,
+    UserTagTranslationPreference,
     UserTagUsagePatch,
 )
 from genai_tag_db_tools.models import TagSearchRow
@@ -123,6 +124,34 @@ class OverlayTagReader:
                 rows = session.query(UserTag.tag_id).filter(UserTag.tag_id.in_(chunk)).all()
                 existing.update(tag_id for (tag_id,) in rows)
         return existing
+
+    def get_preferred_translations_batch(self, tag_ids: list[int]) -> dict[int, dict[str, str]]:
+        """指定タグの主訳 (優先翻訳) を一括取得する (#122)。
+
+        USER_TAG_TRANSLATION_PREFERENCE を tag_id の IN 句 (チャンク分割) で読み、
+        ``{tag_id: {language: translation}}`` を返す。scope は問わない (tag_id は
+        base/user で衝突しないため target_tag_id だけで一意に引ける)。
+
+        Args:
+            tag_ids: 取得対象の tag_id リスト。空なら空 dict。
+
+        Returns:
+            主訳が設定されている tag_id だけを含む ``{tag_id: {language: translation}}``。
+        """
+        if not tag_ids:
+            return {}
+        result: dict[int, dict[str, str]] = {}
+        with self.session_factory() as session:
+            for start in range(0, len(tag_ids), TAG_ID_IN_CHUNK):
+                chunk = list(tag_ids[start : start + TAG_ID_IN_CHUNK])
+                rows = (
+                    session.query(UserTagTranslationPreference)
+                    .filter(UserTagTranslationPreference.target_tag_id.in_(chunk))
+                    .all()
+                )
+                for row in rows:
+                    result.setdefault(row.target_tag_id, {})[row.language] = row.translation
+        return result
 
     def get_all_tag_ids(self) -> list[int]:
         """USER_TAGS の全 tag_id を返す。"""

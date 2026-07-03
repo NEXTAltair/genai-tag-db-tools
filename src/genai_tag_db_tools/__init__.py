@@ -23,10 +23,12 @@ from .api import (
 )
 from .core_api import (
     build_downloaded_at_utc,
+    clear_preferred_translation,
     convert_tags,
     ensure_databases,
     get_all_type_names,
     get_format_type_names,
+    get_preferred_translations_batch,
     get_statistics,
     get_tag_formats,
     get_unknown_type_tags,
@@ -38,6 +40,7 @@ from .core_api import (
     register_tag,
     search_tags,
     search_tags_batch,
+    set_preferred_translation,
     update_tags_type_batch,
     write_user_translation,
 )
@@ -82,12 +85,14 @@ __all__ = [
     "TagWriterProtocol",
     "apply_approved_feedback",
     "build_downloaded_at_utc",
+    "clear_preferred_translation",
     "convert_tags",
     "create_tag_register_service",
     "ensure_databases",
     "get_all_type_names",
     "get_default_reader",
     "get_format_type_names",
+    "get_preferred_translations_batch",
     "get_statistics",
     "get_tag_formats",
     "get_tag_reader",
@@ -105,6 +110,7 @@ __all__ = [
     "register_tag",
     "search_tags",
     "search_tags_batch",
+    "set_preferred_translation",
     "update_tags_type_batch",
     "write_user_translation",
 ]

@@ -15,6 +15,7 @@ from genai_tag_db_tools.db.schema import (
     UserTag,
     UserTagStatusPatch,
     UserTagTranslationPatch,
+    UserTagTranslationPreference,
     UserTagUsagePatch,
 )
 
@@ -120,6 +121,66 @@ class UserTagRepository:
                 session.add(patch)
 
             session.commit()
+
+    def write_translation_preference(
+        self, target_scope: str, target_tag_id: int, language: str, translation: str
+    ) -> None:
+        """USER_TAG_TRANSLATION_PREFERENCE へ主訳を upsert する (#122)。
+
+        (scope, tag_id, language) につき1行。既存行があれば translation を更新する。
+
+        Args:
+            target_scope: 対象スコープ ("base" or "user")。
+            target_tag_id: 対象タグID。
+            language: 言語コード (例: ja)。
+            translation: 主訳として表示する翻訳文字列。
+        """
+        with self._session_factory() as session:
+            existing = (
+                session.query(UserTagTranslationPreference)
+                .filter(
+                    UserTagTranslationPreference.target_scope == target_scope,
+                    UserTagTranslationPreference.target_tag_id == target_tag_id,
+                    UserTagTranslationPreference.language == language,
+                )
+                .one_or_none()
+            )
+            if existing is not None:
+                existing.translation = translation
+            else:
+                session.add(
+                    UserTagTranslationPreference(
+                        target_scope=target_scope,
+                        target_tag_id=target_tag_id,
+                        language=language,
+                        translation=translation,
+                    )
+                )
+            session.commit()
+
+    def delete_translation_preference(self, target_scope: str, target_tag_id: int, language: str) -> bool:
+        """主訳設定を削除する (#122)。無ければ何もしない。
+
+        Args:
+            target_scope: 対象スコープ ("base" or "user")。
+            target_tag_id: 対象タグID。
+            language: 言語コード。
+
+        Returns:
+            行を削除したら True、存在しなかったら False。
+        """
+        with self._session_factory() as session:
+            deleted = (
+                session.query(UserTagTranslationPreference)
+                .filter(
+                    UserTagTranslationPreference.target_scope == target_scope,
+                    UserTagTranslationPreference.target_tag_id == target_tag_id,
+                    UserTagTranslationPreference.language == language,
+                )
+                .delete()
+            )
+            session.commit()
+            return deleted > 0
 
     def write_translation_patch(
         self, target_scope: str, target_tag_id: int, language: str, translation: str
