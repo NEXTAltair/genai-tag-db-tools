@@ -1999,12 +1999,21 @@ class MergedTagReader:
         Returns:
             ``{tag_id: {language: translation}}`` (設定のあるタグのみ)。
         """
-        if self.user_repo is None:
-            return {}
-        getter = getattr(self.user_repo, "get_preferred_translations_batch", None)
-        if getter is None:
-            return {}
-        return getter(tag_ids)
+        # get_user_tag_reader() は OverlayTagReader を base_repo として単独ラップする
+        # (user_repo=None) ため、user_repo だけを見ると user-only 読みで preference が
+        # 空になる (Codex P2)。preference を提供できる repo を優先度 低→高 の順に
+        # 集め、後勝ちマージ (user が最優先) で畳む。提供 repo が無ければ空 dict。
+        result: dict[int, dict[str, str]] = {}
+        providers = [*self._iter_base_repos_low_to_high()]
+        if self.user_repo is not None:
+            providers.append(self.user_repo)
+        for repo in providers:
+            getter = getattr(repo, "get_preferred_translations_batch", None)
+            if getter is None:
+                continue
+            for tag_id, translations in getter(tag_ids).items():
+                result.setdefault(tag_id, {}).update(translations)
+        return result
 
     def list_tag_statuses(self, tag_id: int | None = None) -> list[TagStatus]:
         return self._merge_by_key(

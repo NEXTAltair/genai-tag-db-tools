@@ -426,7 +426,9 @@ class RefinementRecommendRequest(BaseModel):
 
     tags: str = Field(..., description="Comma-separated input tags")
     format_name: str = Field(default="unknown", description="Target format name for DB-backed reasons")
-    rule_only: bool = Field(default=False, description="Bypass DB reads and use deterministic rule-only checks")
+    rule_only: bool = Field(
+        default=False, description="Bypass DB reads and use deterministic rule-only checks"
+    )
 
 
 class TranslationRecommendRequest(BaseModel):

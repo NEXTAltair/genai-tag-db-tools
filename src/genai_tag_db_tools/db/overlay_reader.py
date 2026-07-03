@@ -149,7 +149,10 @@ class OverlayTagReader:
                     .filter(UserTagTranslationPreference.target_tag_id.in_(chunk))
                     .all()
                 )
-                for row in rows:
+                # legacy 低 id の user タグでは base/user 両 scope の行が同じ数値 id で
+                # 併存しうる (Codex P2)。呼び出し側はマージ視点 (user が base を shadow)
+                # の tag_id で引くため、base を先に処理し user 行で決定的に上書きする。
+                for row in sorted(rows, key=lambda r: r.target_scope == "user"):
                     result.setdefault(row.target_tag_id, {})[row.language] = row.translation
         return result
 

@@ -173,3 +173,36 @@ class TestTagRepositoryPreferredTranslation:
         )
 
         assert get_preferred_translations_batch(merged, [10]) == {10: {"ja": "青い目"}}
+
+
+# --- Codex P2 対応のリグレッション ---
+
+
+class TestPreferredTranslationEdgeCases:
+    def test_user_only_reader_exposes_preferences(self, user_repo, overlay_reader):
+        """get_user_tag_reader() 相当 (OverlayTagReader を base_repo 単独ラップ) でも
+        preference が読める (Codex P2)。"""
+        user_repo.write_translation_preference("user", USER_TAG_ID_OFFSET + 1, "ja", "訳")
+        merged = MergedTagReader(base_repo=overlay_reader)
+
+        result = merged.get_preferred_translations_batch([USER_TAG_ID_OFFSET + 1])
+
+        assert result == {USER_TAG_ID_OFFSET + 1: {"ja": "訳"}}
+
+    def test_same_numeric_id_user_scope_wins(self, user_repo, overlay_reader):
+        """legacy 低 id で base/user 両 scope の行が併存したら user が決定的に勝つ (Codex P2)。"""
+        user_repo.write_translation_preference("base", 123, "ja", "base側の訳")
+        user_repo.write_translation_preference("user", 123, "ja", "user側の訳")
+
+        result = overlay_reader.get_preferred_translations_batch([123])
+
+        assert result == {123: {"ja": "user側の訳"}}
+
+    def test_writer_protocol_declares_preference_methods(self, user_session_factory):
+        """TagWriterProtocol 経由の handle でも新 API が契約に含まれる (Codex P2)。"""
+        from genai_tag_db_tools.api import TagWriterProtocol
+
+        repo = TagRepository(session_factory=user_session_factory)
+        assert isinstance(repo, TagWriterProtocol)
+        assert hasattr(TagWriterProtocol, "set_preferred_translation")
+        assert hasattr(TagWriterProtocol, "clear_preferred_translation")
