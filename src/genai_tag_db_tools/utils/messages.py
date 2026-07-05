@@ -22,7 +22,6 @@ class ErrorMessages:
 
     # --- データベース関連のエラーメッセージ ---
     DB_OPERATION_FAILED = "データベース操作に失敗しました: {error_msg}"
-    TAG_ID_NOT_FOUND_AFTER_INSERT = "挿入後にタグ ID が見つかりませんでした。"
     INVALID_TAG_ID_DELETION_ATTEMPT = "存在しないタグID {tag_id} の削除を試みました。"
     MISSING_REQUIRED_FIELDS = "登録時に必要なデータが欠けています: {fields}"
     MISSING_TAG_FORMAT = "指定されたタグフォーマットが見つかりません。: {format_name}"

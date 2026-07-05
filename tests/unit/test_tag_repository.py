@@ -42,6 +42,48 @@ def test_create_tag_returns_existing_id(session_factory: Callable[[], Session]) 
     assert first_id == second_id
 
 
+def test_create_tag_returns_inserted_id_without_reader_readback(
+    session_factory: Callable[[], Session],
+) -> None:
+    """#124: reader 読み戻しに依存せず、挿入した行の id を直接返す。
+
+    実運用では writer と reader の間に正規化・可視性のドリフトが起こり得る。
+    「reader が常に None を返す」最悪ケースでも create_tag は挿入 id を返し、
+    TAG_ID_NOT_FOUND_AFTER_INSERT 相当の失敗を起こしてはならない。
+    """
+
+    class _BlindReader:
+        """挿入済みタグを見つけられない (ドリフトした) reader のスタブ。"""
+
+        def get_tag_id_by_name(self, keyword: str, partial: bool = False) -> int | None:
+            return None
+
+    repo = TagRepository(session_factory, reader=_BlindReader())
+
+    tag_id = repo.create_tag("__lock_test__", "lock test")
+
+    assert isinstance(tag_id, int)
+    with session_factory() as session:
+        row = session.query(Tag).filter(Tag.tag == "lock test").one()
+        assert row.tag_id == tag_id
+        assert row.source_tag == "__lock_test__"
+
+
+def test_create_tag_returns_existing_id_when_reader_is_blind(
+    session_factory: Callable[[], Session],
+) -> None:
+    """#124: reader が既存タグを見落としても、同一 session の存在確認で既存 id を返す。"""
+
+    class _BlindReader:
+        def get_tag_id_by_name(self, keyword: str, partial: bool = False) -> int | None:
+            return None
+
+    repo = TagRepository(session_factory, reader=_BlindReader())
+    first_id = repo.create_tag("witch", "witch")
+    second_id = repo.create_tag("witch", "witch")
+    assert first_id == second_id
+
+
 def test_bulk_insert_tags_deduplicates_by_tag(session_factory: Callable[[], Session]) -> None:
     reader = TagReader(session_factory)
     repo = TagRepository(session_factory, reader=MergedTagReader(base_repo=reader))
