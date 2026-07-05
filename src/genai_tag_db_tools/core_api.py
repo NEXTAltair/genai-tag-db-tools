@@ -1744,3 +1744,69 @@ def write_user_translation(repo_writer, tag_id: int, language: str, translation:
         >>> write_user_translation(repo, 123, "ja", "青い目")
     """
     repo_writer.write_user_translation(tag_id, language, translation)
+
+
+def delete_user_translation(repo_writer, tag_id: int, language: str, translation: str) -> bool:
+    """user DB overlay の翻訳 patch 行を削除します (#121)。
+
+    :func:`write_user_translation` で追加した user 由来の翻訳の取り消しに使います。
+    base DB 由来の翻訳行は削除できません (隠すには :func:`suppress_translation`)。
+
+    Args:
+        repo_writer: TagRepository インスタンス (``get_user_repository()`` で取得)
+        tag_id: 対象タグの tag_id (base / user どちらでも可)
+        language: 言語コード (例: ``ja``)
+        translation: 削除する翻訳文字列
+
+    Returns:
+        patch 行を削除したら True、元々無ければ False
+
+    Raises:
+        ValueError: tag_id がどの scope にも存在しない場合
+
+    Example:
+        >>> from genai_tag_db_tools import delete_user_translation
+        >>> delete_user_translation(repo, 123, "ja", "誤った訳")
+    """
+    return repo_writer.delete_user_translation(tag_id, language, translation)
+
+
+def suppress_translation(repo_writer, tag_id: int, language: str, translation: str) -> None:
+    """(tag_id, language, translation) を merged 表示から隠す tombstone を書きます (#121)。
+
+    base DB は書き換えずに、base 由来の誤訳をマージ結果 (``get_translations*`` /
+    ``search_tags*`` / 主訳) から除外します。言語の付け替えは「旧言語行の suppress +
+    新言語での :func:`write_user_translation`」で表現します。重複は無視されます。
+
+    Args:
+        repo_writer: TagRepository インスタンス (``get_user_repository()`` で取得)
+        tag_id: 対象タグの tag_id (base / user どちらでも可)
+        language: 隠す翻訳の言語コード
+        translation: 隠す翻訳文字列
+
+    Raises:
+        ValueError: tag_id がどの scope にも存在しない場合
+
+    Example:
+        >>> from genai_tag_db_tools import suppress_translation
+        >>> suppress_translation(repo, 123, "ja", "中文の誤訳")
+    """
+    repo_writer.suppress_translation(tag_id, language, translation)
+
+
+def unsuppress_translation(repo_writer, tag_id: int, language: str, translation: str) -> bool:
+    """:func:`suppress_translation` の tombstone を取り消します (#121)。
+
+    Args:
+        repo_writer: TagRepository インスタンス (``get_user_repository()`` で取得)
+        tag_id: 対象タグの tag_id
+        language: 言語コード
+        translation: 抑制を解除する翻訳文字列
+
+    Returns:
+        tombstone を削除したら True、元々無ければ False
+
+    Raises:
+        ValueError: tag_id がどの scope にも存在しない場合
+    """
+    return repo_writer.unsuppress_translation(tag_id, language, translation)

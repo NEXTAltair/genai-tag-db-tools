@@ -26,6 +26,7 @@ from genai_tag_db_tools.db.schema import (
     UserTagStatusPatch,
     UserTagTranslationPatch,
     UserTagTranslationPreference,
+    UserTagTranslationTombstone,
     UserTagUsagePatch,
 )
 from genai_tag_db_tools.models import TagSearchRow
@@ -142,6 +143,10 @@ class OverlayTagReader:
             return {}
         result: dict[int, dict[str, str]] = {}
         with self.session_factory() as session:
+            # tombstone (#121) された翻訳を指す preference は行自身の target_scope で
+            # 照合して除外する (scope を落とすと base 宛 tombstone が同 id の
+            # user-scope preference まで隠す。Codex P2)
+            tombstoned = self._load_translation_tombstones(session, set(tag_ids))
             for start in range(0, len(tag_ids), TAG_ID_IN_CHUNK):
                 chunk = list(tag_ids[start : start + TAG_ID_IN_CHUNK])
                 rows = (
@@ -153,8 +158,17 @@ class OverlayTagReader:
                 # 併存しうる (Codex P2)。呼び出し側はマージ視点 (user が base を shadow)
                 # の tag_id で引くため、base を先に処理し user 行で決定的に上書きする。
                 for row in sorted(rows, key=lambda r: r.target_scope == "user"):
+                    hidden = tombstoned.get(row.target_tag_id, set())
+                    if (row.target_scope, row.language, row.translation) in hidden:
+                        # 後勝ち側 (user) の行が tombstone された場合、先に積んだ
+                        # 影 (base) 値を残すと shadow の主訳が漏れるため language ごと
+                        # 取り下げる (Codex P2)
+                        if row.target_scope == "user":
+                            result.get(row.target_tag_id, {}).pop(row.language, None)
+                        continue
                     result.setdefault(row.target_tag_id, {})[row.language] = row.translation
-        return result
+        # 取り下げで空になった tag_id は「設定なし」として返さない
+        return {tag_id: prefs for tag_id, prefs in result.items() if prefs}
 
     def get_all_tag_ids(self) -> list[int]:
         """USER_TAGS の全 tag_id を返す。"""
@@ -410,10 +424,60 @@ class OverlayTagReader:
             .filter(UserTagTranslationPatch.target_tag_id.in_(tag_ids))
             .all()
         )
+        # tombstone (#121) された (scope, language, translation) は patch 由来でも表示しない
+        tombstoned = self._load_translation_tombstones(session, tag_ids)
         result: dict[int, list[UserTagTranslationPatch]] = {}
         for r in rows:
+            if (r.target_scope, r.language, r.translation) in tombstoned.get(r.target_tag_id, set()):
+                continue
             result.setdefault(r.target_tag_id, []).append(r)
         return result
+
+    def _load_translation_tombstones(
+        self, session: Session, tag_ids: set[int]
+    ) -> dict[int, set[tuple[str, str, str]]]:
+        """tag_id ごとの tombstone 済み (target_scope, language, translation) 集合を返す (#121)。
+
+        legacy 低 id の user タグは base タグと数値 id を共有し得るため、scope を落とすと
+        base 宛 tombstone が無関係な user-scope 翻訳まで隠してしまう (Codex P2)。
+        USER_TAG_TRANSLATION_TOMBSTONE テーブルは旧 user DB に無いことがある
+        (init_user_db 前の接続等) ため、欠損は空として扱う。
+        """
+        if not tag_ids:
+            return {}
+        ordered_ids = list(tag_ids)
+        rows: list[UserTagTranslationTombstone] = []
+        try:
+            # SQLite の bind 変数上限を超えないよう他の batch lookup と同じく chunk する (Codex P2)
+            for start in range(0, len(ordered_ids), TAG_ID_IN_CHUNK):
+                chunk = ordered_ids[start : start + TAG_ID_IN_CHUNK]
+                rows.extend(
+                    session.query(UserTagTranslationTombstone)
+                    .filter(UserTagTranslationTombstone.target_tag_id.in_(chunk))
+                    .all()
+                )
+        except OperationalError as exc:
+            # 旧 user DB (init_user_db 前) にはテーブルが無い。それ以外の
+            # OperationalError まで握りつぶすと抑制漏れが silent になるため再送出する
+            if "no such table" in str(exc).lower():
+                return {}
+            raise
+        result: dict[int, set[tuple[str, str, str]]] = {}
+        for r in rows:
+            result.setdefault(r.target_tag_id, set()).add((r.target_scope, r.language, r.translation))
+        return result
+
+    def get_translation_tombstones_batch(
+        self, tag_ids: list[int]
+    ) -> dict[int, set[tuple[str, str, str]]]:
+        """複数 tag_id の tombstone 済み (target_scope, language, translation) 集合を返す (#121)。
+
+        MergedTagReader が base 由来の翻訳をマージ時に除外するために参照する。
+        """
+        if not tag_ids:
+            return {}
+        with self.session_factory() as session:
+            return self._load_translation_tombstones(session, set(tag_ids))
 
     def _load_type_name_map(self, session: Session) -> dict[tuple[int, int], tuple[int, str]]:
         """(format_id, type_id) → (type_name_id, type_name) のマップを返す。"""
@@ -575,7 +639,10 @@ class OverlayTagReader:
     # ------------------------------------------------------------------
 
     def get_translations(self, tag_id: int) -> list[TagTranslation]:
-        """USER_TAG_TRANSLATION_PATCH から翻訳を取得し TagTranslation オブジェクトに変換する。"""
+        """USER_TAG_TRANSLATION_PATCH から翻訳を取得し TagTranslation オブジェクトに変換する。
+
+        tombstone (#121) 済みの (language, translation) は patch 行があっても返さない。
+        """
         with self.session_factory() as session:
             rows = (
                 session.query(UserTagTranslationPatch)
@@ -583,6 +650,25 @@ class OverlayTagReader:
                     UserTagTranslationPatch.target_tag_id == tag_id,
                 )
                 .all()
+            )
+            tombstoned = self._load_translation_tombstones(session, {tag_id}).get(tag_id, set())
+            return [
+                TagTranslation(
+                    translation_id=r.patch_id,
+                    tag_id=r.target_tag_id,
+                    language=r.language,
+                    translation=r.translation,
+                )
+                for r in rows
+                if (r.target_scope, r.language, r.translation) not in tombstoned
+            ]
+
+    def list_translations(self) -> list[TagTranslation]:
+        """USER_TAG_TRANSLATION_PATCH 全件を返す (tombstone 済み行は除外、#121)。"""
+        with self.session_factory() as session:
+            rows = session.query(UserTagTranslationPatch).all()
+            tombstoned = self._load_translation_tombstones(
+                session, {r.target_tag_id for r in rows}
             )
             return [
                 TagTranslation(
@@ -592,23 +678,15 @@ class OverlayTagReader:
                     translation=r.translation,
                 )
                 for r in rows
-            ]
-
-    def list_translations(self) -> list[TagTranslation]:
-        with self.session_factory() as session:
-            rows = session.query(UserTagTranslationPatch).all()
-            return [
-                TagTranslation(
-                    translation_id=r.patch_id,
-                    tag_id=r.target_tag_id,
-                    language=r.language,
-                    translation=r.translation,
-                )
-                for r in rows
+                if (r.target_scope, r.language, r.translation)
+                not in tombstoned.get(r.target_tag_id, set())
             ]
 
     def get_translations_batch(self, tag_ids: list[int]) -> dict[int, list[TagTranslation]]:
-        """複数 tag_id の翻訳をバッチ取得する。"""
+        """複数 tag_id の翻訳をバッチ取得する。
+
+        tombstone (#121) 済みの (language, translation) は patch 行があっても返さない。
+        """
         if not tag_ids:
             return {}
         with self.session_factory() as session:
@@ -619,8 +697,11 @@ class OverlayTagReader:
                 )
                 .all()
             )
+            tombstoned = self._load_translation_tombstones(session, set(tag_ids))
         result: dict[int, list[TagTranslation]] = {}
         for r in rows:
+            if (r.target_scope, r.language, r.translation) in tombstoned.get(r.target_tag_id, set()):
+                continue
             result.setdefault(r.target_tag_id, []).append(
                 TagTranslation(
                     translation_id=r.patch_id,

@@ -1462,6 +1462,80 @@ class TagRepository:
             language=language,
         )
 
+    def delete_user_translation(self, tag_id: int, language: str, translation: str) -> bool:
+        """user DB overlay の翻訳 patch 行を削除する (#121)。
+
+        user 由来の誤登録の取り消しに使う。base DB 由来の翻訳行は削除できない
+        (隠すには :meth:`suppress_translation`)。
+
+        Args:
+            tag_id: 対象タグの tag_id (base / user どちらでも可)。
+            language: 言語コード (例: ``ja``)。
+            translation: 削除する翻訳文字列。
+
+        Returns:
+            patch 行を削除したら True、元々無ければ False。
+
+        Raises:
+            ValueError: reader 注入時に tag_id がどの scope にも存在しない場合。
+        """
+        from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
+
+        target_scope = self._resolve_patch_scope(tag_id, operation="delete_user_translation")
+        user_repo = UserTagRepository(self.session_factory)
+        return user_repo.delete_translation_patch(
+            target_scope=target_scope,
+            target_tag_id=tag_id,
+            language=language,
+            translation=translation,
+        )
+
+    def suppress_translation(self, tag_id: int, language: str, translation: str) -> None:
+        """(tag_id, language, translation) を merged 表示から隠す tombstone を書く (#121)。
+
+        base DB は書き換えない。base 由来の誤訳の抑制と、言語付け替え
+        (旧言語行の suppress + 新言語での write_user_translation) に使う。
+        重複は無視される。
+
+        Args:
+            tag_id: 対象タグの tag_id (base / user どちらでも可)。
+            language: 隠す翻訳の言語コード。
+            translation: 隠す翻訳文字列。
+
+        Raises:
+            ValueError: reader 注入時に tag_id がどの scope にも存在しない場合。
+        """
+        from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
+
+        target_scope = self._resolve_patch_scope(tag_id, operation="suppress_translation")
+        user_repo = UserTagRepository(self.session_factory)
+        user_repo.write_translation_tombstone(
+            target_scope=target_scope,
+            target_tag_id=tag_id,
+            language=language,
+            translation=translation,
+        )
+
+    def unsuppress_translation(self, tag_id: int, language: str, translation: str) -> bool:
+        """suppress_translation の tombstone を取り消す (#121)。
+
+        Returns:
+            tombstone を削除したら True、元々無ければ False。
+
+        Raises:
+            ValueError: reader 注入時に tag_id がどの scope にも存在しない場合。
+        """
+        from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
+
+        target_scope = self._resolve_patch_scope(tag_id, operation="unsuppress_translation")
+        user_repo = UserTagRepository(self.session_factory)
+        return user_repo.delete_translation_tombstone(
+            target_scope=target_scope,
+            target_tag_id=tag_id,
+            language=language,
+            translation=translation,
+        )
+
 
 class MergedTagReader:
     """Read-only view merging base/user repositories."""
@@ -1682,6 +1756,8 @@ class MergedTagReader:
         patched_by_tag: dict[int, list[Any]] = {}
         usage_by_tag: dict[int, list[TagUsageCounts]] = {}
         translations_by_tag = self.user_repo.get_translations_batch(list(tag_ids))
+        # tombstone (#121): base 検索行に載ってきた翻訳もマージ時に除外する
+        tombstones_by_tag = self._translation_tombstones_batch(list(tag_ids))
         for tag_id in tag_ids:
             patched_by_tag[tag_id] = self.user_repo.list_tag_statuses(tag_id)
             usage_by_tag[tag_id] = self.user_repo.list_usage_counts(tag_id=tag_id)
@@ -1690,6 +1766,19 @@ class MergedTagReader:
         for row in rows:
             updated = dict(row)
             format_statuses = dict(row.get("format_statuses") or {})
+
+            # 検索行の translations は base 由来値が主 (user patch は overlay 側で
+            # scope-aware に除外済みの値が後段でマージされる) ため、base 宛 tombstone
+            # のみ適用する (Codex P2: scope 保持)
+            hidden = self._hidden_pairs_for_scope(tombstones_by_tag.get(row["tag_id"], set()), "base")
+            translations_obj = updated.get("translations")
+            if hidden and isinstance(translations_obj, dict):
+                filtered: dict[str, list[str]] = {}
+                for language, values in cast("dict[str, list[str]]", translations_obj).items():
+                    kept = [value for value in values or [] if (language, value) not in hidden]
+                    if kept:
+                        filtered[language] = kept
+                updated["translations"] = filtered
 
             for usage in usage_by_tag.get(row["tag_id"], []):
                 fmt_name = self._format_name_for_id(usage.format_id)
@@ -1795,6 +1884,26 @@ class MergedTagReader:
         if max_usage is not None and row["usage_count"] > max_usage:
             return False
         return True
+
+    def _row_still_matches_keyword(self, row: TagSearchRow, keyword: str) -> bool:
+        """tombstone (#121) フィルタ後も keyword に一致しているかを再判定する。
+
+        bulk 経路は base 検索が翻訳一致で keyword→row を対応付けた後に
+        `_apply_user_patches_to_search_rows` の tombstone 除外が走るため、
+        唯一の一致訳が消えた row を結果から落とす必要がある (Codex P2)。
+        """
+        return self._search_row_matches_filters(
+            row,
+            keyword,
+            partial=False,
+            type_name=None,
+            type_names=None,
+            language=None,
+            min_usage=None,
+            max_usage=None,
+            alias=None,
+            deprecated=None,
+        )
 
     def _base_rows_for_user_translation_matches(
         self,
@@ -2025,6 +2134,10 @@ class MergedTagReader:
                 continue
             for tag_id, translations in getter(tag_ids).items():
                 result.setdefault(tag_id, {}).update(translations)
+        # tombstone (#121) された翻訳を指す preference の除外は、行の target_scope が
+        # 分かる OverlayTagReader.get_preferred_translations_batch 側で scope-aware に
+        # 行う (マージ出力は scope 帰属を失うため、ここで適用すると base 宛 tombstone が
+        # 同 id の user-scope preference まで隠す。Codex P2)
         return result
 
     def list_tag_statuses(self, tag_id: int | None = None) -> list[TagStatus]:
@@ -2207,6 +2320,22 @@ class MergedTagReader:
             )
             patched_by_tag_id = {row["tag_id"]: row for row in patched}
             merged = {keyword: patched_by_tag_id.get(row["tag_id"], row) for keyword, row in merged.items()}
+            # tombstone で選ばれた行の一致訳が消えた keyword は、次候補を per-keyword
+            # search で引き直す (別 tag が同じ訳で一致し得るため、単に落とすと
+            # search_tags / search_tags_bulk_all と結果が食い違う。#121 Codex P2)
+            dropped = [
+                keyword
+                for keyword, row in merged.items()
+                if not self._row_still_matches_keyword(row, keyword)
+            ]
+            for keyword in dropped:
+                fallback_rows = self.search_tags(
+                    keyword, partial=False, format_name=format_name, resolve_preferred=False
+                )
+                if fallback_rows:
+                    merged[keyword] = fallback_rows[0]
+                else:
+                    del merged[keyword]
         if not resolve_preferred:
             return merged
         merged = {keyword: self._resolve_cross_scope_preferred([row])[0] for keyword, row in merged.items()}
@@ -2279,6 +2408,12 @@ class MergedTagReader:
                 keyword: [patched_by_tag_id.get(row["tag_id"], row) for row in rows]
                 for keyword, rows in merged.items()
             }
+            # tombstone で唯一の一致訳が消えた row を落とし、空になった keyword は除く (#121 Codex P2)
+            merged = {
+                keyword: kept
+                for keyword, rows in merged.items()
+                if (kept := [row for row in rows if self._row_still_matches_keyword(row, keyword)])
+            }
 
         if resolve_preferred:
             merged = {
@@ -2298,11 +2433,68 @@ class MergedTagReader:
     # ------------------------------------------------------------------
 
     def get_translations(self, tag_id: int) -> list[TagTranslation]:
-        return self._accumulate_unique(
-            "get_translations",
-            lambda tr: (tr.language, tr.translation),
-            tag_id,
-        )
+        # get_translations_batch と同じ収集順・除外規則で 1 tag ぶんを返す。
+        # (batch 版へ委譲すると get_translations しか持たない duck-typed reader を壊す)
+        hidden = self._translation_tombstones_batch([tag_id]).get(tag_id, set())
+        base_hidden = self._hidden_pairs_for_scope(hidden, "base")
+        user_hidden = self._hidden_pairs_for_scope(hidden, "user")
+        seen: set[tuple[str | None, str | None]] = set()
+        result: list[TagTranslation] = []
+        for repo in self._iter_base_repos_low_to_high():
+            self_filtering = getattr(repo, "get_translation_tombstones_batch", None) is not None
+            for tr in repo.get_translations(tag_id):
+                if not self_filtering and (tr.language, tr.translation) in base_hidden:
+                    continue
+                key = (tr.language, tr.translation)
+                if key not in seen:
+                    seen.add(key)
+                    result.append(tr)
+        if self._has_user():
+            assert self.user_repo is not None
+            self_filtering = getattr(self.user_repo, "get_translation_tombstones_batch", None) is not None
+            for tr in self.user_repo.get_translations(tag_id):
+                if not self_filtering and (tr.language, tr.translation) in user_hidden:
+                    continue
+                key = (tr.language, tr.translation)
+                if key not in seen:
+                    seen.add(key)
+                    result.append(tr)
+        return result
+
+    def _translation_tombstones_batch(
+        self, tag_ids: list[int]
+    ) -> dict[int, set[tuple[str, str, str]]]:
+        """user overlay の翻訳 tombstone (#121) を取得する。
+
+        tombstone を提供できる repo (base repos + user_repo) から集めて union する。
+        どの repo も提供しない (legacy TagReader のみ等) 場合は空 dict を返す。
+
+        Returns:
+            ``{tag_id: {(target_scope, language, translation), ...}}``。scope を保持するのは
+            legacy 低 id の user タグが base タグと数値 id を共有し得るため (Codex P2)。
+        """
+        # get_user_tag_reader() は OverlayTagReader を base_repo として単独ラップする
+        # (user_repo=None) ため、user_repo だけを見ると user-only 読みで tombstone が
+        # 空になる (Codex P2)。preference (#122) と同じく、tombstone を提供できる repo を
+        # 優先度 低→高 の順に集めて union する。
+        result: dict[int, set[tuple[str, str, str]]] = {}
+        providers = [*self._iter_base_repos_low_to_high()]
+        if self.user_repo is not None:
+            providers.append(self.user_repo)
+        for repo in providers:
+            getter = getattr(repo, "get_translation_tombstones_batch", None)
+            if getter is None:
+                continue
+            for tag_id, hidden in getter(tag_ids).items():
+                result.setdefault(tag_id, set()).update(hidden)
+        return result
+
+    @staticmethod
+    def _hidden_pairs_for_scope(
+        hidden: set[tuple[str, str, str]], scope: str
+    ) -> set[tuple[str, str]]:
+        """指定 scope 宛の tombstone を (language, translation) 集合に射影する。"""
+        return {(language, translation) for s, language, translation in hidden if s == scope}
 
     def get_translations_batch(self, tag_ids: list[int]) -> dict[int, list[TagTranslation]]:
         """複数タグIDの翻訳を全リポジトリからバッチ取得してマージする。
@@ -2310,6 +2502,7 @@ class MergedTagReader:
         全リポジトリから一括取得し、(tag_id, language, translation) タプルで重複排除する。
         重複時は先着順（低優先度→高優先度→user_repo）で保持する。
         get_translations と同一のセマンティクスを保つ。
+        tombstone (#121) 済みの (language, translation) は base 由来でも除外する。
 
         Args:
             tag_ids: 翻訳を取得するタグIDのリスト。空リストの場合は空辞書を返す。
@@ -2319,19 +2512,30 @@ class MergedTagReader:
         """
         if not tag_ids:
             return {}
+        tombstoned = self._translation_tombstones_batch(tag_ids)
         seen: set[tuple[int, str | None, str | None]] = set()
         result: dict[int, list[TagTranslation]] = {}
         for repo in self._iter_base_repos_low_to_high():
+            # 自前で scope-aware に除外する reader (OverlayTagReader) は素通しし、
+            # 素の base reader の行だけ base 宛 tombstone で除外する (Codex P2: scope 保持)
+            self_filtering = getattr(repo, "get_translation_tombstones_batch", None) is not None
             for tag_id, trs in repo.get_translations_batch(tag_ids).items():
+                base_hidden = self._hidden_pairs_for_scope(tombstoned.get(tag_id, set()), "base")
                 for tr in trs:
+                    if not self_filtering and (tr.language, tr.translation) in base_hidden:
+                        continue
                     key = (tr.tag_id, tr.language, tr.translation)
                     if key not in seen:
                         seen.add(key)
                         result.setdefault(tag_id, []).append(tr)
         if self._has_user():
             assert self.user_repo is not None
+            self_filtering = getattr(self.user_repo, "get_translation_tombstones_batch", None) is not None
             for tag_id, trs in self.user_repo.get_translations_batch(tag_ids).items():
+                user_hidden = self._hidden_pairs_for_scope(tombstoned.get(tag_id, set()), "user")
                 for tr in trs:
+                    if not self_filtering and (tr.language, tr.translation) in user_hidden:
+                        continue
                     key = (tr.tag_id, tr.language, tr.translation)
                     if key not in seen:
                         seen.add(key)
@@ -2364,10 +2568,34 @@ class MergedTagReader:
         return result
 
     def list_translations(self) -> list[TagTranslation]:
-        return self._accumulate_unique(
-            "list_translations",
-            lambda tr: (tr.tag_id, tr.language, tr.translation),
-        )
+        # 列挙経路にも get_translations* と同じ tombstone 除外規則を適用する (#121 Codex P2)。
+        # 自前で scope-aware に除外する reader (OverlayTagReader) は素通しし、素の base
+        # reader の行だけ base 宛 tombstone で除外する。
+        repo_entries: list[tuple[Any, str]] = [
+            (repo, "base") for repo in self._iter_base_repos_low_to_high()
+        ]
+        if self._has_user():
+            assert self.user_repo is not None
+            repo_entries.append((self.user_repo, "user"))
+        seen: set[tuple[int | None, str | None, str | None]] = set()
+        result: list[TagTranslation] = []
+        for repo, scope in repo_entries:
+            rows = repo.list_translations()
+            self_filtering = getattr(repo, "get_translation_tombstones_batch", None) is not None
+            hidden_map: dict[int, set[tuple[str, str, str]]] = {}
+            if not self_filtering and rows:
+                tag_ids = sorted({tr.tag_id for tr in rows if tr.tag_id is not None})
+                hidden_map = self._translation_tombstones_batch(tag_ids)
+            for tr in rows:
+                if not self_filtering:
+                    hidden = self._hidden_pairs_for_scope(hidden_map.get(tr.tag_id, set()), scope)
+                    if (tr.language, tr.translation) in hidden:
+                        continue
+                key = (tr.tag_id, tr.language, tr.translation)
+                if key not in seen:
+                    seen.add(key)
+                    result.append(tr)
+        return result
 
     # ------------------------------------------------------------------
     # Pattern D: Union/aggregate (固有ロジックのため明示的に実装)

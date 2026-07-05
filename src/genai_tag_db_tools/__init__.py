@@ -25,6 +25,7 @@ from .core_api import (
     build_downloaded_at_utc,
     clear_preferred_translation,
     convert_tags,
+    delete_user_translation,
     ensure_databases,
     get_all_type_names,
     get_format_type_names,
@@ -42,6 +43,8 @@ from .core_api import (
     search_tags_batch,
     set_preferred_translation,
     update_tags_type_batch,
+    suppress_translation,
+    unsuppress_translation,
     write_user_translation,
 )
 from .models import (
@@ -87,6 +90,7 @@ __all__ = [
     "build_downloaded_at_utc",
     "clear_preferred_translation",
     "convert_tags",
+    "delete_user_translation",
     "create_tag_register_service",
     "ensure_databases",
     "get_all_type_names",
@@ -112,6 +116,8 @@ __all__ = [
     "search_tags_batch",
     "set_preferred_translation",
     "update_tags_type_batch",
+    "suppress_translation",
+    "unsuppress_translation",
     "write_user_translation",
 ]
 
