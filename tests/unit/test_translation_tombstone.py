@@ -231,3 +231,76 @@ class TestLanguageReassignment:
 
         batch = merged.get_translations_batch([10])
         assert [(t.language, t.translation) for t in batch[10]] == [("zh", "错误")]
+
+
+# --- Codex P2 回帰: user-only reader / bulk 検索 ---
+
+
+class TestUserOnlyReaderSuppression:
+    def test_preferred_suppression_works_when_overlay_is_base_repo(
+        self, user_repo, overlay_reader
+    ) -> None:
+        """get_user_tag_reader() 相当 (OverlayTagReader を base_repo、user_repo=None) でも
+        tombstone が効く (Codex P2)。"""
+        user_repo.write_translation_preference("base", 10, "ja", "隠す主訳")
+        user_repo.write_translation_tombstone("base", 10, "ja", "隠す主訳")
+        merged = MergedTagReader(base_repo=overlay_reader)
+
+        assert merged.get_preferred_translations_batch([10]) == {}
+
+    def test_patch_suppression_works_when_overlay_is_base_repo(self, user_repo, overlay_reader) -> None:
+        user_repo.write_translation_patch("base", 10, "ja", "誤った訳")
+        user_repo.write_translation_tombstone("base", 10, "ja", "誤った訳")
+        merged = MergedTagReader(base_repo=overlay_reader)
+
+        assert merged.get_translations_batch([10]) == {}
+
+
+class TestBulkSearchSuppression:
+    @pytest.fixture()
+    def base_search_fixture(self, user_session_factory):
+        """検索可能な base タグ (翻訳 'bad' のみが keyword 一致源) を作る。"""
+        from genai_tag_db_tools.db.schema import TagFormat, TagStatus, TagTypeFormatMapping, TagTypeName
+
+        with user_session_factory() as session:
+            session.add(TagFormat(format_id=1, format_name="danbooru"))
+            session.add(TagTypeName(type_name_id=1, type_name="general"))
+            session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=1))
+            session.add(Tag(tag_id=10, source_tag="tag ten", tag="tag ten"))
+            session.add(
+                TagStatus(tag_id=10, format_id=1, type_id=0, alias=False, preferred_tag_id=10)
+            )
+            session.add(TagTranslation(tag_id=10, language="ja", translation="bad"))
+            session.commit()
+
+    def test_bulk_drops_keyword_when_only_matching_translation_is_tombstoned(
+        self, base_search_fixture, user_repo, merged
+    ) -> None:
+        """suppress 後、翻訳のみで一致していた keyword は bulk 結果から消える (Codex P2)。"""
+        before = merged.search_tags_bulk(["bad"])
+        assert "bad" in before
+
+        user_repo.write_translation_tombstone("base", 10, "ja", "bad")
+
+        assert merged.search_tags_bulk(["bad"]) == {}
+
+    def test_bulk_all_drops_keyword_when_only_matching_translation_is_tombstoned(
+        self, base_search_fixture, user_repo, merged
+    ) -> None:
+        before = merged.search_tags_bulk_all(["bad"])
+        assert before.get("bad")
+
+        user_repo.write_translation_tombstone("base", 10, "ja", "bad")
+
+        assert merged.search_tags_bulk_all(["bad"]) == {}
+
+    def test_bulk_keeps_keyword_matching_by_tag_name(
+        self, base_search_fixture, user_repo, merged
+    ) -> None:
+        """タグ名で一致する keyword は tombstone に影響されない。"""
+        user_repo.write_translation_tombstone("base", 10, "ja", "bad")
+
+        result = merged.search_tags_bulk(["tag ten"])
+
+        assert "tag ten" in result
+        assert result["tag ten"]["tag_id"] == 10

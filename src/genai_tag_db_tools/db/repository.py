@@ -1882,6 +1882,26 @@ class MergedTagReader:
             return False
         return True
 
+    def _row_still_matches_keyword(self, row: TagSearchRow, keyword: str) -> bool:
+        """tombstone (#121) フィルタ後も keyword に一致しているかを再判定する。
+
+        bulk 経路は base 検索が翻訳一致で keyword→row を対応付けた後に
+        `_apply_user_patches_to_search_rows` の tombstone 除外が走るため、
+        唯一の一致訳が消えた row を結果から落とす必要がある (Codex P2)。
+        """
+        return self._search_row_matches_filters(
+            row,
+            keyword,
+            partial=False,
+            type_name=None,
+            type_names=None,
+            language=None,
+            min_usage=None,
+            max_usage=None,
+            alias=None,
+            deprecated=None,
+        )
+
     def _base_rows_for_user_translation_matches(
         self,
         keyword: str,
@@ -2303,6 +2323,12 @@ class MergedTagReader:
             )
             patched_by_tag_id = {row["tag_id"]: row for row in patched}
             merged = {keyword: patched_by_tag_id.get(row["tag_id"], row) for keyword, row in merged.items()}
+            # tombstone で唯一の一致訳が消えた keyword は bulk 結果から落とす (#121 Codex P2)
+            merged = {
+                keyword: row
+                for keyword, row in merged.items()
+                if self._row_still_matches_keyword(row, keyword)
+            }
         if not resolve_preferred:
             return merged
         merged = {keyword: self._resolve_cross_scope_preferred([row])[0] for keyword, row in merged.items()}
@@ -2375,6 +2401,12 @@ class MergedTagReader:
                 keyword: [patched_by_tag_id.get(row["tag_id"], row) for row in rows]
                 for keyword, rows in merged.items()
             }
+            # tombstone で唯一の一致訳が消えた row を落とし、空になった keyword は除く (#121 Codex P2)
+            merged = {
+                keyword: kept
+                for keyword, rows in merged.items()
+                if (kept := [row for row in rows if self._row_still_matches_keyword(row, keyword)])
+            }
 
         if resolve_preferred:
             merged = {
@@ -2409,18 +2441,27 @@ class MergedTagReader:
     def _translation_tombstones_batch(self, tag_ids: list[int]) -> dict[int, set[tuple[str, str]]]:
         """user overlay の翻訳 tombstone (#121) を取得する。
 
-        user_repo 未設定、または tombstone を提供しない reader (legacy TagReader 等)
-        の場合は空 dict を返す。
+        tombstone を提供できる repo (base repos + user_repo) から集めて union する。
+        どの repo も提供しない (legacy TagReader のみ等) 場合は空 dict を返す。
 
         Returns:
             ``{tag_id: {(language, translation), ...}}``。
         """
-        if not self._has_user():
-            return {}
-        getter = getattr(self.user_repo, "get_translation_tombstones_batch", None)
-        if getter is None:
-            return {}
-        return cast("dict[int, set[tuple[str, str]]]", getter(tag_ids))
+        # get_user_tag_reader() は OverlayTagReader を base_repo として単独ラップする
+        # (user_repo=None) ため、user_repo だけを見ると user-only 読みで tombstone が
+        # 空になる (Codex P2)。preference (#122) と同じく、tombstone を提供できる repo を
+        # 優先度 低→高 の順に集めて union する。
+        result: dict[int, set[tuple[str, str]]] = {}
+        providers = [*self._iter_base_repos_low_to_high()]
+        if self.user_repo is not None:
+            providers.append(self.user_repo)
+        for repo in providers:
+            getter = getattr(repo, "get_translation_tombstones_batch", None)
+            if getter is None:
+                continue
+            for tag_id, hidden in getter(tag_ids).items():
+                result.setdefault(tag_id, set()).update(hidden)
+        return result
 
     def get_translations_batch(self, tag_ids: list[int]) -> dict[int, list[TagTranslation]]:
         """複数タグIDの翻訳を全リポジトリからバッチ取得してマージする。
