@@ -399,3 +399,33 @@ class TestTombstoneScopeIsolation:
 
         assert [(t.language, t.translation) for t in batch[10]] == [("en", "user only")]
         assert [(t.language, t.translation) for t in single] == [("en", "user only")]
+
+
+class TestPreferenceTombstoneScope:
+    """preference の tombstone 除外は行の target_scope で照合する (Codex P2 round4)。"""
+
+    def test_base_tombstone_does_not_hide_user_scope_preference(
+        self, user_repo, overlay_reader, merged
+    ) -> None:
+        user_repo.write_translation_preference("user", 10, "ja", "同名の主訳")
+        user_repo.write_translation_tombstone("base", 10, "ja", "同名の主訳")
+
+        assert overlay_reader.get_preferred_translations_batch([10]) == {10: {"ja": "同名の主訳"}}
+        assert merged.get_preferred_translations_batch([10]) == {10: {"ja": "同名の主訳"}}
+
+    def test_scope_matched_tombstone_hides_preference(self, user_repo, overlay_reader, merged) -> None:
+        user_repo.write_translation_preference("base", 10, "ja", "隠す主訳")
+        user_repo.write_translation_tombstone("base", 10, "ja", "隠す主訳")
+
+        assert overlay_reader.get_preferred_translations_batch([10]) == {}
+        assert merged.get_preferred_translations_batch([10]) == {}
+
+    def test_user_wins_merge_after_base_preference_suppressed(
+        self, user_repo, overlay_reader
+    ) -> None:
+        """base 側主訳だけ suppress した場合、user 側主訳がそのまま残る。"""
+        user_repo.write_translation_preference("base", 10, "ja", "base主訳")
+        user_repo.write_translation_preference("user", 10, "ja", "user主訳")
+        user_repo.write_translation_tombstone("base", 10, "ja", "base主訳")
+
+        assert overlay_reader.get_preferred_translations_batch([10]) == {10: {"ja": "user主訳"}}

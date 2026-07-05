@@ -2134,20 +2134,10 @@ class MergedTagReader:
                 continue
             for tag_id, translations in getter(tag_ids).items():
                 result.setdefault(tag_id, {}).update(translations)
-        # tombstone (#121) された翻訳を指す preference は表示しない。
-        # preference のマージ出力は scope 帰属を持たない (user が base を後勝ちで
-        # 上書きした結果のみ残る) ため、ここでは全 scope の tombstone を適用する
-        tombstoned = self._translation_tombstones_batch(tag_ids)
-        for tag_id, translations in list(result.items()):
-            hidden = {
-                (language, text) for _scope, language, text in tombstoned.get(tag_id, set())
-            }
-            if not hidden:
-                continue
-            for language in [lang for lang, text in translations.items() if (lang, text) in hidden]:
-                del translations[language]
-            if not translations:
-                del result[tag_id]
+        # tombstone (#121) された翻訳を指す preference の除外は、行の target_scope が
+        # 分かる OverlayTagReader.get_preferred_translations_batch 側で scope-aware に
+        # 行う (マージ出力は scope 帰属を失うため、ここで適用すると base 宛 tombstone が
+        # 同 id の user-scope preference まで隠す。Codex P2)
         return result
 
     def list_tag_statuses(self, tag_id: int | None = None) -> list[TagStatus]:

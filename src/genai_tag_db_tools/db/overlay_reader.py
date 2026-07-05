@@ -143,6 +143,10 @@ class OverlayTagReader:
             return {}
         result: dict[int, dict[str, str]] = {}
         with self.session_factory() as session:
+            # tombstone (#121) された翻訳を指す preference は行自身の target_scope で
+            # 照合して除外する (scope を落とすと base 宛 tombstone が同 id の
+            # user-scope preference まで隠す。Codex P2)
+            tombstoned = self._load_translation_tombstones(session, set(tag_ids))
             for start in range(0, len(tag_ids), TAG_ID_IN_CHUNK):
                 chunk = list(tag_ids[start : start + TAG_ID_IN_CHUNK])
                 rows = (
@@ -154,6 +158,9 @@ class OverlayTagReader:
                 # 併存しうる (Codex P2)。呼び出し側はマージ視点 (user が base を shadow)
                 # の tag_id で引くため、base を先に処理し user 行で決定的に上書きする。
                 for row in sorted(rows, key=lambda r: r.target_scope == "user"):
+                    hidden = tombstoned.get(row.target_tag_id, set())
+                    if (row.target_scope, row.language, row.translation) in hidden:
+                        continue
                     result.setdefault(row.target_tag_id, {})[row.language] = row.translation
         return result
 
