@@ -160,9 +160,15 @@ class OverlayTagReader:
                 for row in sorted(rows, key=lambda r: r.target_scope == "user"):
                     hidden = tombstoned.get(row.target_tag_id, set())
                     if (row.target_scope, row.language, row.translation) in hidden:
+                        # 後勝ち側 (user) の行が tombstone された場合、先に積んだ
+                        # 影 (base) 値を残すと shadow の主訳が漏れるため language ごと
+                        # 取り下げる (Codex P2)
+                        if row.target_scope == "user":
+                            result.get(row.target_tag_id, {}).pop(row.language, None)
                         continue
                     result.setdefault(row.target_tag_id, {})[row.language] = row.translation
-        return result
+        # 取り下げで空になった tag_id は「設定なし」として返さない
+        return {tag_id: prefs for tag_id, prefs in result.items() if prefs}
 
     def get_all_tag_ids(self) -> list[int]:
         """USER_TAGS の全 tag_id を返す。"""
@@ -658,8 +664,12 @@ class OverlayTagReader:
             ]
 
     def list_translations(self) -> list[TagTranslation]:
+        """USER_TAG_TRANSLATION_PATCH 全件を返す (tombstone 済み行は除外、#121)。"""
         with self.session_factory() as session:
             rows = session.query(UserTagTranslationPatch).all()
+            tombstoned = self._load_translation_tombstones(
+                session, {r.target_tag_id for r in rows}
+            )
             return [
                 TagTranslation(
                     translation_id=r.patch_id,
@@ -668,6 +678,8 @@ class OverlayTagReader:
                     translation=r.translation,
                 )
                 for r in rows
+                if (r.target_scope, r.language, r.translation)
+                not in tombstoned.get(r.target_tag_id, set())
             ]
 
     def get_translations_batch(self, tag_ids: list[int]) -> dict[int, list[TagTranslation]]:

@@ -429,3 +429,44 @@ class TestPreferenceTombstoneScope:
         user_repo.write_translation_tombstone("base", 10, "ja", "base主訳")
 
         assert overlay_reader.get_preferred_translations_batch([10]) == {10: {"ja": "user主訳"}}
+
+
+class TestListTranslationsAndShadowedPreference:
+    """列挙経路 + shadow 主訳の tombstone 適用 (Codex P2 round5)。"""
+
+    def test_overlay_list_translations_excludes_tombstoned(self, user_repo, overlay_reader) -> None:
+        user_repo.write_translation_patch("base", 10, "ja", "隠す訳")
+        user_repo.write_translation_patch("base", 10, "en", "keep")
+        user_repo.write_translation_tombstone("base", 10, "ja", "隠す訳")
+
+        rows = overlay_reader.list_translations()
+
+        assert [(t.tag_id, t.language, t.translation) for t in rows] == [(10, "en", "keep")]
+
+    def test_merged_list_translations_excludes_base_tombstoned(
+        self, user_session_factory, user_repo, merged
+    ) -> None:
+        _add_base_translation(user_session_factory, 10, "ja", "隠す訳")
+        _add_base_translation(user_session_factory, 10, "en", "keep")
+        user_repo.write_translation_tombstone("base", 10, "ja", "隠す訳")
+
+        rows = merged.list_translations()
+
+        assert [(t.tag_id, t.language, t.translation) for t in rows] == [(10, "en", "keep")]
+
+    def test_merged_list_translations_keeps_user_scope_rows(self, user_repo, merged) -> None:
+        """base 宛 tombstone は同 id の user-scope patch を列挙からも隠さない。"""
+        user_repo.write_translation_patch("user", 10, "ja", "同名の訳")
+        user_repo.write_translation_tombstone("base", 10, "ja", "同名の訳")
+
+        rows = merged.list_translations()
+
+        assert [(t.tag_id, t.language, t.translation) for t in rows] == [(10, "ja", "同名の訳")]
+
+    def test_user_tombstone_clears_shadowed_base_preference(self, user_repo, overlay_reader) -> None:
+        """user 主訳を suppress したとき、影の base 主訳が漏れて返らない (Codex P2)。"""
+        user_repo.write_translation_preference("base", 10, "ja", "base主訳")
+        user_repo.write_translation_preference("user", 10, "ja", "user主訳")
+        user_repo.write_translation_tombstone("user", 10, "ja", "user主訳")
+
+        assert overlay_reader.get_preferred_translations_batch([10]) == {}

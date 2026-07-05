@@ -2568,10 +2568,34 @@ class MergedTagReader:
         return result
 
     def list_translations(self) -> list[TagTranslation]:
-        return self._accumulate_unique(
-            "list_translations",
-            lambda tr: (tr.tag_id, tr.language, tr.translation),
-        )
+        # 列挙経路にも get_translations* と同じ tombstone 除外規則を適用する (#121 Codex P2)。
+        # 自前で scope-aware に除外する reader (OverlayTagReader) は素通しし、素の base
+        # reader の行だけ base 宛 tombstone で除外する。
+        repo_entries: list[tuple[Any, str]] = [
+            (repo, "base") for repo in self._iter_base_repos_low_to_high()
+        ]
+        if self._has_user():
+            assert self.user_repo is not None
+            repo_entries.append((self.user_repo, "user"))
+        seen: set[tuple[int | None, str | None, str | None]] = set()
+        result: list[TagTranslation] = []
+        for repo, scope in repo_entries:
+            rows = repo.list_translations()
+            self_filtering = getattr(repo, "get_translation_tombstones_batch", None) is not None
+            hidden_map: dict[int, set[tuple[str, str, str]]] = {}
+            if not self_filtering and rows:
+                tag_ids = sorted({tr.tag_id for tr in rows if tr.tag_id is not None})
+                hidden_map = self._translation_tombstones_batch(tag_ids)
+            for tr in rows:
+                if not self_filtering:
+                    hidden = self._hidden_pairs_for_scope(hidden_map.get(tr.tag_id, set()), scope)
+                    if (tr.language, tr.translation) in hidden:
+                        continue
+                key = (tr.tag_id, tr.language, tr.translation)
+                if key not in seen:
+                    seen.add(key)
+                    result.append(tr)
+        return result
 
     # ------------------------------------------------------------------
     # Pattern D: Union/aggregate (固有ロジックのため明示的に実装)
