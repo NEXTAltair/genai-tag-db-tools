@@ -16,6 +16,7 @@ from genai_tag_db_tools.db.schema import (
     UserTagStatusPatch,
     UserTagTranslationPatch,
     UserTagTranslationPreference,
+    UserTagTranslationTombstone,
     UserTagUsagePatch,
 )
 
@@ -215,6 +216,96 @@ class UserTagRepository:
                 )
             )
             session.commit()
+
+    def delete_translation_patch(
+        self, target_scope: str, target_tag_id: int, language: str, translation: str
+    ) -> bool:
+        """USER_TAG_TRANSLATION_PATCH から翻訳行を削除する (#121)。
+
+        user 由来の誤登録の取り消しに使う。base DB の行は対象外
+        (base 由来の翻訳を隠すには :meth:`write_translation_tombstone`)。
+
+        Args:
+            target_scope: パッチ対象スコープ ("base" or "user")。
+            target_tag_id: パッチ対象タグID。
+            language: 言語コード（例: ja）。
+            translation: 削除する翻訳文字列。
+
+        Returns:
+            行を削除した場合 True、該当行が無かった場合 False。
+        """
+        with self._session_factory() as session:
+            deleted = (
+                session.query(UserTagTranslationPatch)
+                .filter(
+                    UserTagTranslationPatch.target_scope == target_scope,
+                    UserTagTranslationPatch.target_tag_id == target_tag_id,
+                    UserTagTranslationPatch.language == language,
+                    UserTagTranslationPatch.translation == translation,
+                )
+                .delete()
+            )
+            session.commit()
+        return deleted > 0
+
+    def write_translation_tombstone(
+        self, target_scope: str, target_tag_id: int, language: str, translation: str
+    ) -> None:
+        """USER_TAG_TRANSLATION_TOMBSTONE に「表示しない」記録を追加する (#121、重複は無視)。
+
+        base DB は書き換えずに、merged 表示から該当の (tag_id, language, translation)
+        を隠す。言語付け替えは「旧言語行の tombstone + 新言語での patch 追加」で表現する。
+
+        Args:
+            target_scope: 対象スコープ ("base" or "user")。
+            target_tag_id: 対象タグID。
+            language: 隠す翻訳の言語コード。
+            translation: 隠す翻訳文字列。
+        """
+        with self._session_factory() as session:
+            existing = (
+                session.query(UserTagTranslationTombstone)
+                .filter(
+                    UserTagTranslationTombstone.target_scope == target_scope,
+                    UserTagTranslationTombstone.target_tag_id == target_tag_id,
+                    UserTagTranslationTombstone.language == language,
+                    UserTagTranslationTombstone.translation == translation,
+                )
+                .one_or_none()
+            )
+            if existing is not None:
+                return
+            session.add(
+                UserTagTranslationTombstone(
+                    target_scope=target_scope,
+                    target_tag_id=target_tag_id,
+                    language=language,
+                    translation=translation,
+                )
+            )
+            session.commit()
+
+    def delete_translation_tombstone(
+        self, target_scope: str, target_tag_id: int, language: str, translation: str
+    ) -> bool:
+        """USER_TAG_TRANSLATION_TOMBSTONE から抑制記録を取り消す (#121)。
+
+        Returns:
+            行を削除した場合 True、該当行が無かった場合 False。
+        """
+        with self._session_factory() as session:
+            deleted = (
+                session.query(UserTagTranslationTombstone)
+                .filter(
+                    UserTagTranslationTombstone.target_scope == target_scope,
+                    UserTagTranslationTombstone.target_tag_id == target_tag_id,
+                    UserTagTranslationTombstone.language == language,
+                    UserTagTranslationTombstone.translation == translation,
+                )
+                .delete()
+            )
+            session.commit()
+        return deleted > 0
 
     def write_usage_patch(self, target_scope: str, target_tag_id: int, format_id: int, count: int) -> None:
         """USER_TAG_USAGE_PATCH に usage count を INSERT or UPDATE する。

@@ -300,6 +300,34 @@ class UserTagTranslationPatch(UserOverlayBase):
     )
 
 
+class UserTagTranslationTombstone(UserOverlayBase):
+    """merged 表示から特定の翻訳を隠す tombstone (#121)。
+
+    base DB は書き換えない方針のまま「この (tag_id, language, translation) は
+    表示しない」を user overlay に記録する。base 由来の誤訳の抑制と、言語付け替え
+    (旧言語行の tombstone + 新言語での追加) に使う。専用テーブルにしているのは
+    既存 user DB への列追加 migration を避けるため (init_user_db の create_all で
+    自動作成される)。
+    """
+
+    __tablename__ = "USER_TAG_TRANSLATION_TOMBSTONE"
+
+    tombstone_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    target_scope: Mapped[str] = mapped_column()
+    target_tag_id: Mapped[int] = mapped_column()
+    language: Mapped[str] = mapped_column()
+    translation: Mapped[str] = mapped_column()
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "target_scope", "target_tag_id", "language", "translation", name="uix_trans_tombstone"
+        ),
+        CheckConstraint("target_scope IN ('base', 'user')", name="ck_trans_tombstone_scope"),
+        Index("ix_trans_tombstone_target", "target_scope", "target_tag_id"),
+    )
+
+
 class UserTagTranslationPreference(UserOverlayBase):
     """タグ x 言語ごとの優先翻訳 (主訳) (#122)。
 

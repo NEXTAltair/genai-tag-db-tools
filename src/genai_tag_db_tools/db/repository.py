@@ -1462,6 +1462,80 @@ class TagRepository:
             language=language,
         )
 
+    def delete_user_translation(self, tag_id: int, language: str, translation: str) -> bool:
+        """user DB overlay の翻訳 patch 行を削除する (#121)。
+
+        user 由来の誤登録の取り消しに使う。base DB 由来の翻訳行は削除できない
+        (隠すには :meth:`suppress_translation`)。
+
+        Args:
+            tag_id: 対象タグの tag_id (base / user どちらでも可)。
+            language: 言語コード (例: ``ja``)。
+            translation: 削除する翻訳文字列。
+
+        Returns:
+            patch 行を削除したら True、元々無ければ False。
+
+        Raises:
+            ValueError: reader 注入時に tag_id がどの scope にも存在しない場合。
+        """
+        from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
+
+        target_scope = self._resolve_patch_scope(tag_id, operation="delete_user_translation")
+        user_repo = UserTagRepository(self.session_factory)
+        return user_repo.delete_translation_patch(
+            target_scope=target_scope,
+            target_tag_id=tag_id,
+            language=language,
+            translation=translation,
+        )
+
+    def suppress_translation(self, tag_id: int, language: str, translation: str) -> None:
+        """(tag_id, language, translation) を merged 表示から隠す tombstone を書く (#121)。
+
+        base DB は書き換えない。base 由来の誤訳の抑制と、言語付け替え
+        (旧言語行の suppress + 新言語での write_user_translation) に使う。
+        重複は無視される。
+
+        Args:
+            tag_id: 対象タグの tag_id (base / user どちらでも可)。
+            language: 隠す翻訳の言語コード。
+            translation: 隠す翻訳文字列。
+
+        Raises:
+            ValueError: reader 注入時に tag_id がどの scope にも存在しない場合。
+        """
+        from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
+
+        target_scope = self._resolve_patch_scope(tag_id, operation="suppress_translation")
+        user_repo = UserTagRepository(self.session_factory)
+        user_repo.write_translation_tombstone(
+            target_scope=target_scope,
+            target_tag_id=tag_id,
+            language=language,
+            translation=translation,
+        )
+
+    def unsuppress_translation(self, tag_id: int, language: str, translation: str) -> bool:
+        """suppress_translation の tombstone を取り消す (#121)。
+
+        Returns:
+            tombstone を削除したら True、元々無ければ False。
+
+        Raises:
+            ValueError: reader 注入時に tag_id がどの scope にも存在しない場合。
+        """
+        from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
+
+        target_scope = self._resolve_patch_scope(tag_id, operation="unsuppress_translation")
+        user_repo = UserTagRepository(self.session_factory)
+        return user_repo.delete_translation_tombstone(
+            target_scope=target_scope,
+            target_tag_id=tag_id,
+            language=language,
+            translation=translation,
+        )
+
 
 class MergedTagReader:
     """Read-only view merging base/user repositories."""
@@ -1682,6 +1756,8 @@ class MergedTagReader:
         patched_by_tag: dict[int, list[Any]] = {}
         usage_by_tag: dict[int, list[TagUsageCounts]] = {}
         translations_by_tag = self.user_repo.get_translations_batch(list(tag_ids))
+        # tombstone (#121): base 検索行に載ってきた翻訳もマージ時に除外する
+        tombstones_by_tag = self._translation_tombstones_batch(list(tag_ids))
         for tag_id in tag_ids:
             patched_by_tag[tag_id] = self.user_repo.list_tag_statuses(tag_id)
             usage_by_tag[tag_id] = self.user_repo.list_usage_counts(tag_id=tag_id)
@@ -1690,6 +1766,16 @@ class MergedTagReader:
         for row in rows:
             updated = dict(row)
             format_statuses = dict(row.get("format_statuses") or {})
+
+            hidden = tombstones_by_tag.get(row["tag_id"], set())
+            translations_obj = updated.get("translations")
+            if hidden and isinstance(translations_obj, dict):
+                filtered: dict[str, list[str]] = {}
+                for language, values in cast("dict[str, list[str]]", translations_obj).items():
+                    kept = [value for value in values or [] if (language, value) not in hidden]
+                    if kept:
+                        filtered[language] = kept
+                updated["translations"] = filtered
 
             for usage in usage_by_tag.get(row["tag_id"], []):
                 fmt_name = self._format_name_for_id(usage.format_id)
@@ -2025,6 +2111,16 @@ class MergedTagReader:
                 continue
             for tag_id, translations in getter(tag_ids).items():
                 result.setdefault(tag_id, {}).update(translations)
+        # tombstone (#121) された翻訳を指す preference は表示しない
+        tombstoned = self._translation_tombstones_batch(tag_ids)
+        for tag_id, translations in list(result.items()):
+            hidden = tombstoned.get(tag_id)
+            if not hidden:
+                continue
+            for language in [lang for lang, text in translations.items() if (lang, text) in hidden]:
+                del translations[language]
+            if not translations:
+                del result[tag_id]
         return result
 
     def list_tag_statuses(self, tag_id: int | None = None) -> list[TagStatus]:
@@ -2298,11 +2394,33 @@ class MergedTagReader:
     # ------------------------------------------------------------------
 
     def get_translations(self, tag_id: int) -> list[TagTranslation]:
-        return self._accumulate_unique(
+        # batch 版へ委譲すると get_translations しか持たない duck-typed reader を壊すため、
+        # 従来の accumulate に tombstone (#121) フィルタを重ねる
+        merged = self._accumulate_unique(
             "get_translations",
             lambda tr: (tr.language, tr.translation),
             tag_id,
         )
+        hidden = self._translation_tombstones_batch([tag_id]).get(tag_id, set())
+        if not hidden:
+            return merged
+        return [tr for tr in merged if (tr.language, tr.translation) not in hidden]
+
+    def _translation_tombstones_batch(self, tag_ids: list[int]) -> dict[int, set[tuple[str, str]]]:
+        """user overlay の翻訳 tombstone (#121) を取得する。
+
+        user_repo 未設定、または tombstone を提供しない reader (legacy TagReader 等)
+        の場合は空 dict を返す。
+
+        Returns:
+            ``{tag_id: {(language, translation), ...}}``。
+        """
+        if not self._has_user():
+            return {}
+        getter = getattr(self.user_repo, "get_translation_tombstones_batch", None)
+        if getter is None:
+            return {}
+        return cast("dict[int, set[tuple[str, str]]]", getter(tag_ids))
 
     def get_translations_batch(self, tag_ids: list[int]) -> dict[int, list[TagTranslation]]:
         """複数タグIDの翻訳を全リポジトリからバッチ取得してマージする。
@@ -2310,6 +2428,7 @@ class MergedTagReader:
         全リポジトリから一括取得し、(tag_id, language, translation) タプルで重複排除する。
         重複時は先着順（低優先度→高優先度→user_repo）で保持する。
         get_translations と同一のセマンティクスを保つ。
+        tombstone (#121) 済みの (language, translation) は base 由来でも除外する。
 
         Args:
             tag_ids: 翻訳を取得するタグIDのリスト。空リストの場合は空辞書を返す。
@@ -2319,11 +2438,14 @@ class MergedTagReader:
         """
         if not tag_ids:
             return {}
+        tombstoned = self._translation_tombstones_batch(tag_ids)
         seen: set[tuple[int, str | None, str | None]] = set()
         result: dict[int, list[TagTranslation]] = {}
         for repo in self._iter_base_repos_low_to_high():
             for tag_id, trs in repo.get_translations_batch(tag_ids).items():
                 for tr in trs:
+                    if (tr.language, tr.translation) in tombstoned.get(tag_id, set()):
+                        continue
                     key = (tr.tag_id, tr.language, tr.translation)
                     if key not in seen:
                         seen.add(key)
@@ -2332,6 +2454,8 @@ class MergedTagReader:
             assert self.user_repo is not None
             for tag_id, trs in self.user_repo.get_translations_batch(tag_ids).items():
                 for tr in trs:
+                    if (tr.language, tr.translation) in tombstoned.get(tag_id, set()):
+                        continue
                     key = (tr.tag_id, tr.language, tr.translation)
                     if key not in seen:
                         seen.add(key)
