@@ -63,10 +63,15 @@ _LATIN_ALPHA_PATTERN = re.compile(r"[A-Za-z]")
 # Japanese writing. Presence of any of these in an otherwise Han-only string is a
 # strong, low-maintenance signal that the text is Chinese rather than Japanese.
 # This is intentionally a *gating/fallback* signal, not an exhaustive dictionary.
+# Precision first (#120): only characters whose simplified form differs from the
+# Japanese shinjitai/joyo form may enter this set (e.g. 连↔連, 兽↔獣, 黑↔黒,
+# 丝↔糸). Never add glyphs shared with Japanese (e.g. 体, 学, 国, 双, 灯).
 CHINESE_SPECIFIC_CHARS = frozenset(
     "们这为么发头见观蓝绿红龙马门风鸟鱼脸长单师网让边过还进车东应电话语说译"
     "图团园课实间问难题颜爱乐习时觉现样资质贝贵费钟银错镜组级纪约纳纸线练经给"
     "绍续维罗妈爸哥姐弟妹钱铁钢银货买卖东应义乡书将专丧丰临举"
+    # #120: lingua が ambiguous を返す短い漢字語の取りこぼし対策で拡充した分
+    "连兽黑丝达汉鸡兰丽两页严亚华变动处备层带岛简谁纯绝继齐"
 )
 
 # Below this top-vs-second confidence margin a non-CJK detection is treated as

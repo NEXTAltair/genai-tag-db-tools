@@ -153,5 +153,25 @@ class TestLinguaDetectorWithFakeBackend:
 def test_module_exposes_chinese_specific_chars() -> None:
     assert "蓝" in language_detection.CHINESE_SPECIFIC_CHARS
     # Characters shared with Japanese must not be in the gate set.
-    for shared in "猫黄色青和服国学体":
+    for shared in "猫黄色青和服国学体双灯":
         assert shared not in language_detection.CHINESE_SPECIFIC_CHARS
+
+
+class TestSimplifiedOnlyCharGate120:
+    """#120: lingua が ambiguous を返す簡体字語を決定的に CHINESE 判定する。"""
+
+    def test_issue_samples_are_asserted_chinese(self) -> None:
+        # lingua 実測で JAPANESE (ambiguous) となり素通りしていたサンプル (#120)
+        detector = ScriptHeuristicLanguageDetector()
+        for sample in ("连衣裙", "兽耳", "黑丝"):
+            result = detector.detect(sample)
+            assert result.language is DetectedLanguage.CHINESE, sample
+            assert result.is_ambiguous is False, sample
+
+    def test_shared_glyph_words_stay_ambiguous_japanese(self) -> None:
+        # 日中で字形が同じ語は判別不能のため保守判定のまま (偽陽性防止を優先)
+        detector = ScriptHeuristicLanguageDetector()
+        for sample in ("猫耳", "校服", "泳装", "黄色", "和服"):
+            result = detector.detect(sample)
+            assert result.language is DetectedLanguage.JAPANESE, sample
+            assert result.is_ambiguous is True, sample
