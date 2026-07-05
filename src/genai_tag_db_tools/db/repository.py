@@ -2323,12 +2323,22 @@ class MergedTagReader:
             )
             patched_by_tag_id = {row["tag_id"]: row for row in patched}
             merged = {keyword: patched_by_tag_id.get(row["tag_id"], row) for keyword, row in merged.items()}
-            # tombstone で唯一の一致訳が消えた keyword は bulk 結果から落とす (#121 Codex P2)
-            merged = {
-                keyword: row
+            # tombstone で選ばれた行の一致訳が消えた keyword は、次候補を per-keyword
+            # search で引き直す (別 tag が同じ訳で一致し得るため、単に落とすと
+            # search_tags / search_tags_bulk_all と結果が食い違う。#121 Codex P2)
+            dropped = [
+                keyword
                 for keyword, row in merged.items()
-                if self._row_still_matches_keyword(row, keyword)
-            }
+                if not self._row_still_matches_keyword(row, keyword)
+            ]
+            for keyword in dropped:
+                fallback_rows = self.search_tags(
+                    keyword, partial=False, format_name=format_name, resolve_preferred=False
+                )
+                if fallback_rows:
+                    merged[keyword] = fallback_rows[0]
+                else:
+                    del merged[keyword]
         if not resolve_preferred:
             return merged
         merged = {keyword: self._resolve_cross_scope_preferred([row])[0] for keyword, row in merged.items()}

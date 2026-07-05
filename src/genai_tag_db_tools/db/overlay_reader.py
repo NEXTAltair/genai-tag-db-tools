@@ -430,14 +430,23 @@ class OverlayTagReader:
         """
         if not tag_ids:
             return {}
+        ordered_ids = list(tag_ids)
+        rows: list[UserTagTranslationTombstone] = []
         try:
-            rows = (
-                session.query(UserTagTranslationTombstone)
-                .filter(UserTagTranslationTombstone.target_tag_id.in_(tag_ids))
-                .all()
-            )
-        except OperationalError:
-            return {}
+            # SQLite の bind 変数上限を超えないよう他の batch lookup と同じく chunk する (Codex P2)
+            for start in range(0, len(ordered_ids), TAG_ID_IN_CHUNK):
+                chunk = ordered_ids[start : start + TAG_ID_IN_CHUNK]
+                rows.extend(
+                    session.query(UserTagTranslationTombstone)
+                    .filter(UserTagTranslationTombstone.target_tag_id.in_(chunk))
+                    .all()
+                )
+        except OperationalError as exc:
+            # 旧 user DB (init_user_db 前) にはテーブルが無い。それ以外の
+            # OperationalError まで握りつぶすと抑制漏れが silent になるため再送出する
+            if "no such table" in str(exc).lower():
+                return {}
+            raise
         result: dict[int, set[tuple[str, str]]] = {}
         for r in rows:
             result.setdefault(r.target_tag_id, set()).add((r.language, r.translation))

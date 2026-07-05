@@ -304,3 +304,64 @@ class TestBulkSearchSuppression:
 
         assert "tag ten" in result
         assert result["tag ten"]["tag_id"] == 10
+
+
+class TestBulkFallbackAndChunking:
+    def test_bulk_returns_next_candidate_when_chosen_row_is_tombstoned(
+        self, user_session_factory, user_repo, merged
+    ) -> None:
+        """同じ訳で複数タグが一致する場合、先頭行の suppress 後は次候補を返す (Codex P2)。"""
+        from genai_tag_db_tools.db.schema import TagFormat, TagStatus, TagTypeFormatMapping, TagTypeName
+
+        with user_session_factory() as session:
+            session.add(TagFormat(format_id=1, format_name="danbooru"))
+            session.add(TagTypeName(type_name_id=1, type_name="general"))
+            session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=1))
+            for tag_id in (10, 20):
+                session.add(Tag(tag_id=tag_id, source_tag=f"tag {tag_id}", tag=f"tag {tag_id}"))
+                session.add(
+                    TagStatus(tag_id=tag_id, format_id=1, type_id=0, alias=False, preferred_tag_id=tag_id)
+                )
+                session.add(TagTranslation(tag_id=tag_id, language="ja", translation="bad"))
+            session.commit()
+
+        user_repo.write_translation_tombstone("base", 10, "ja", "bad")
+
+        result = merged.search_tags_bulk(["bad"])
+
+        assert "bad" in result
+        assert result["bad"]["tag_id"] == 20
+
+    def test_tombstone_lookup_chunks_large_tag_id_sets(self, user_repo, overlay_reader) -> None:
+        """SQLite bind 変数上限超の tag_ids でも tombstone lookup が落ちない (Codex P2)。"""
+        user_repo.write_translation_tombstone("base", 10, "ja", "隠す訳")
+        tag_ids = list(range(1, 1202))  # TAG_ID_IN_CHUNK (900) を跨ぐ
+
+        result = overlay_reader.get_translation_tombstones_batch(tag_ids)
+
+        assert result == {10: {("ja", "隠す訳")}}
+
+    def test_tombstone_lookup_reraises_non_missing_table_errors(
+        self, overlay_reader, monkeypatch
+    ) -> None:
+        """missing-table 以外の OperationalError は握りつぶさず再送出する (Codex P2)。"""
+        from sqlalchemy.exc import OperationalError
+
+        class _BrokenQuery:
+            def filter(self, *args, **kwargs):
+                raise OperationalError("SELECT ...", {}, Exception("too many SQL variables"))
+
+        class _BrokenSession:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def query(self, *args, **kwargs):
+                return _BrokenQuery()
+
+        monkeypatch.setattr(overlay_reader, "session_factory", lambda: _BrokenSession())
+
+        with pytest.raises(OperationalError):
+            overlay_reader.get_translation_tombstones_batch([1, 2, 3])
