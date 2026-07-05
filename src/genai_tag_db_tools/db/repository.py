@@ -604,16 +604,28 @@ class TagRepository:
         if existing_id is not None:
             return existing_id
 
-        new_tag_data = {"source_tag": source_tag, "tag": tag}
-        df = pl.DataFrame(new_tag_data)
-        self.bulk_insert_tags(df)
-
-        tag_id = self._reader.get_tag_id_by_name(tag, partial=False)
-        if tag_id is None:
-            msg = ErrorMessages.TAG_ID_NOT_FOUND_AFTER_INSERT
-            self.logger.error(msg)
-            raise ValueError(msg)
-        return tag_id
+        # #124: bulk_insert → reader 読み戻しの 2 段構えは、writer と reader の間に
+        # 正規化・可視性のドリフトがあると「挿入は成功したのに id を返せない」
+        # (TAG_ID_NOT_FOUND_AFTER_INSERT) 失敗を作る。挿入と id 取得を同一 session で
+        # 完結させ、読み戻しに依存しない。
+        with self.session_factory() as session:
+            existing = session.query(Tag).filter(Tag.tag == tag).one_or_none()
+            if existing is not None:
+                return existing.tag_id
+            new_tag = Tag(source_tag=source_tag, tag=tag)
+            session.add(new_tag)
+            try:
+                session.commit()
+            except IntegrityError as e:
+                session.rollback()
+                # 並行登録に負けた場合は勝者の id を返す
+                winner = session.query(Tag).filter(Tag.tag == tag).one_or_none()
+                if winner is not None:
+                    return winner.tag_id
+                msg = ErrorMessages.DB_OPERATION_FAILED.format(error_msg=str(e))
+                self.logger.error(msg)
+                raise ValueError(msg) from e
+            return new_tag.tag_id
 
     def update_tag(self, tag_id: int, *, source_tag: str | None = None, tag: str | None = None) -> None:
         with self.session_factory() as session:
