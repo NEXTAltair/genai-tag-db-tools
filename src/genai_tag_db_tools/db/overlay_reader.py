@@ -411,20 +411,22 @@ class OverlayTagReader:
             .filter(UserTagTranslationPatch.target_tag_id.in_(tag_ids))
             .all()
         )
-        # tombstone (#121) された (tag_id, language, translation) は patch 由来でも表示しない
+        # tombstone (#121) された (scope, language, translation) は patch 由来でも表示しない
         tombstoned = self._load_translation_tombstones(session, tag_ids)
         result: dict[int, list[UserTagTranslationPatch]] = {}
         for r in rows:
-            if (r.language, r.translation) in tombstoned.get(r.target_tag_id, set()):
+            if (r.target_scope, r.language, r.translation) in tombstoned.get(r.target_tag_id, set()):
                 continue
             result.setdefault(r.target_tag_id, []).append(r)
         return result
 
     def _load_translation_tombstones(
         self, session: Session, tag_ids: set[int]
-    ) -> dict[int, set[tuple[str, str]]]:
-        """tag_id ごとの tombstone 済み (language, translation) 集合を返す (#121)。
+    ) -> dict[int, set[tuple[str, str, str]]]:
+        """tag_id ごとの tombstone 済み (target_scope, language, translation) 集合を返す (#121)。
 
+        legacy 低 id の user タグは base タグと数値 id を共有し得るため、scope を落とすと
+        base 宛 tombstone が無関係な user-scope 翻訳まで隠してしまう (Codex P2)。
         USER_TAG_TRANSLATION_TOMBSTONE テーブルは旧 user DB に無いことがある
         (init_user_db 前の接続等) ため、欠損は空として扱う。
         """
@@ -447,13 +449,15 @@ class OverlayTagReader:
             if "no such table" in str(exc).lower():
                 return {}
             raise
-        result: dict[int, set[tuple[str, str]]] = {}
+        result: dict[int, set[tuple[str, str, str]]] = {}
         for r in rows:
-            result.setdefault(r.target_tag_id, set()).add((r.language, r.translation))
+            result.setdefault(r.target_tag_id, set()).add((r.target_scope, r.language, r.translation))
         return result
 
-    def get_translation_tombstones_batch(self, tag_ids: list[int]) -> dict[int, set[tuple[str, str]]]:
-        """複数 tag_id の tombstone 済み (language, translation) 集合を返す (#121)。
+    def get_translation_tombstones_batch(
+        self, tag_ids: list[int]
+    ) -> dict[int, set[tuple[str, str, str]]]:
+        """複数 tag_id の tombstone 済み (target_scope, language, translation) 集合を返す (#121)。
 
         MergedTagReader が base 由来の翻訳をマージ時に除外するために参照する。
         """
@@ -643,7 +647,7 @@ class OverlayTagReader:
                     translation=r.translation,
                 )
                 for r in rows
-                if (r.language, r.translation) not in tombstoned
+                if (r.target_scope, r.language, r.translation) not in tombstoned
             ]
 
     def list_translations(self) -> list[TagTranslation]:
@@ -677,7 +681,7 @@ class OverlayTagReader:
             tombstoned = self._load_translation_tombstones(session, set(tag_ids))
         result: dict[int, list[TagTranslation]] = {}
         for r in rows:
-            if (r.language, r.translation) in tombstoned.get(r.target_tag_id, set()):
+            if (r.target_scope, r.language, r.translation) in tombstoned.get(r.target_tag_id, set()):
                 continue
             result.setdefault(r.target_tag_id, []).append(
                 TagTranslation(

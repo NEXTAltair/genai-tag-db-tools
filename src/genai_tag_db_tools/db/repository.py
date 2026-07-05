@@ -1767,7 +1767,10 @@ class MergedTagReader:
             updated = dict(row)
             format_statuses = dict(row.get("format_statuses") or {})
 
-            hidden = tombstones_by_tag.get(row["tag_id"], set())
+            # 検索行の translations は base 由来値が主 (user patch は overlay 側で
+            # scope-aware に除外済みの値が後段でマージされる) ため、base 宛 tombstone
+            # のみ適用する (Codex P2: scope 保持)
+            hidden = self._hidden_pairs_for_scope(tombstones_by_tag.get(row["tag_id"], set()), "base")
             translations_obj = updated.get("translations")
             if hidden and isinstance(translations_obj, dict):
                 filtered: dict[str, list[str]] = {}
@@ -2131,10 +2134,14 @@ class MergedTagReader:
                 continue
             for tag_id, translations in getter(tag_ids).items():
                 result.setdefault(tag_id, {}).update(translations)
-        # tombstone (#121) された翻訳を指す preference は表示しない
+        # tombstone (#121) された翻訳を指す preference は表示しない。
+        # preference のマージ出力は scope 帰属を持たない (user が base を後勝ちで
+        # 上書きした結果のみ残る) ため、ここでは全 scope の tombstone を適用する
         tombstoned = self._translation_tombstones_batch(tag_ids)
         for tag_id, translations in list(result.items()):
-            hidden = tombstoned.get(tag_id)
+            hidden = {
+                (language, text) for _scope, language, text in tombstoned.get(tag_id, set())
+            }
             if not hidden:
                 continue
             for language in [lang for lang, text in translations.items() if (lang, text) in hidden]:
@@ -2436,32 +2443,51 @@ class MergedTagReader:
     # ------------------------------------------------------------------
 
     def get_translations(self, tag_id: int) -> list[TagTranslation]:
-        # batch 版へ委譲すると get_translations しか持たない duck-typed reader を壊すため、
-        # 従来の accumulate に tombstone (#121) フィルタを重ねる
-        merged = self._accumulate_unique(
-            "get_translations",
-            lambda tr: (tr.language, tr.translation),
-            tag_id,
-        )
+        # get_translations_batch と同じ収集順・除外規則で 1 tag ぶんを返す。
+        # (batch 版へ委譲すると get_translations しか持たない duck-typed reader を壊す)
         hidden = self._translation_tombstones_batch([tag_id]).get(tag_id, set())
-        if not hidden:
-            return merged
-        return [tr for tr in merged if (tr.language, tr.translation) not in hidden]
+        base_hidden = self._hidden_pairs_for_scope(hidden, "base")
+        user_hidden = self._hidden_pairs_for_scope(hidden, "user")
+        seen: set[tuple[str | None, str | None]] = set()
+        result: list[TagTranslation] = []
+        for repo in self._iter_base_repos_low_to_high():
+            self_filtering = getattr(repo, "get_translation_tombstones_batch", None) is not None
+            for tr in repo.get_translations(tag_id):
+                if not self_filtering and (tr.language, tr.translation) in base_hidden:
+                    continue
+                key = (tr.language, tr.translation)
+                if key not in seen:
+                    seen.add(key)
+                    result.append(tr)
+        if self._has_user():
+            assert self.user_repo is not None
+            self_filtering = getattr(self.user_repo, "get_translation_tombstones_batch", None) is not None
+            for tr in self.user_repo.get_translations(tag_id):
+                if not self_filtering and (tr.language, tr.translation) in user_hidden:
+                    continue
+                key = (tr.language, tr.translation)
+                if key not in seen:
+                    seen.add(key)
+                    result.append(tr)
+        return result
 
-    def _translation_tombstones_batch(self, tag_ids: list[int]) -> dict[int, set[tuple[str, str]]]:
+    def _translation_tombstones_batch(
+        self, tag_ids: list[int]
+    ) -> dict[int, set[tuple[str, str, str]]]:
         """user overlay の翻訳 tombstone (#121) を取得する。
 
         tombstone を提供できる repo (base repos + user_repo) から集めて union する。
         どの repo も提供しない (legacy TagReader のみ等) 場合は空 dict を返す。
 
         Returns:
-            ``{tag_id: {(language, translation), ...}}``。
+            ``{tag_id: {(target_scope, language, translation), ...}}``。scope を保持するのは
+            legacy 低 id の user タグが base タグと数値 id を共有し得るため (Codex P2)。
         """
         # get_user_tag_reader() は OverlayTagReader を base_repo として単独ラップする
         # (user_repo=None) ため、user_repo だけを見ると user-only 読みで tombstone が
         # 空になる (Codex P2)。preference (#122) と同じく、tombstone を提供できる repo を
         # 優先度 低→高 の順に集めて union する。
-        result: dict[int, set[tuple[str, str]]] = {}
+        result: dict[int, set[tuple[str, str, str]]] = {}
         providers = [*self._iter_base_repos_low_to_high()]
         if self.user_repo is not None:
             providers.append(self.user_repo)
@@ -2472,6 +2498,13 @@ class MergedTagReader:
             for tag_id, hidden in getter(tag_ids).items():
                 result.setdefault(tag_id, set()).update(hidden)
         return result
+
+    @staticmethod
+    def _hidden_pairs_for_scope(
+        hidden: set[tuple[str, str, str]], scope: str
+    ) -> set[tuple[str, str]]:
+        """指定 scope 宛の tombstone を (language, translation) 集合に射影する。"""
+        return {(language, translation) for s, language, translation in hidden if s == scope}
 
     def get_translations_batch(self, tag_ids: list[int]) -> dict[int, list[TagTranslation]]:
         """複数タグIDの翻訳を全リポジトリからバッチ取得してマージする。
@@ -2493,9 +2526,13 @@ class MergedTagReader:
         seen: set[tuple[int, str | None, str | None]] = set()
         result: dict[int, list[TagTranslation]] = {}
         for repo in self._iter_base_repos_low_to_high():
+            # 自前で scope-aware に除外する reader (OverlayTagReader) は素通しし、
+            # 素の base reader の行だけ base 宛 tombstone で除外する (Codex P2: scope 保持)
+            self_filtering = getattr(repo, "get_translation_tombstones_batch", None) is not None
             for tag_id, trs in repo.get_translations_batch(tag_ids).items():
+                base_hidden = self._hidden_pairs_for_scope(tombstoned.get(tag_id, set()), "base")
                 for tr in trs:
-                    if (tr.language, tr.translation) in tombstoned.get(tag_id, set()):
+                    if not self_filtering and (tr.language, tr.translation) in base_hidden:
                         continue
                     key = (tr.tag_id, tr.language, tr.translation)
                     if key not in seen:
@@ -2503,9 +2540,11 @@ class MergedTagReader:
                         result.setdefault(tag_id, []).append(tr)
         if self._has_user():
             assert self.user_repo is not None
+            self_filtering = getattr(self.user_repo, "get_translation_tombstones_batch", None) is not None
             for tag_id, trs in self.user_repo.get_translations_batch(tag_ids).items():
+                user_hidden = self._hidden_pairs_for_scope(tombstoned.get(tag_id, set()), "user")
                 for tr in trs:
-                    if (tr.language, tr.translation) in tombstoned.get(tag_id, set()):
+                    if not self_filtering and (tr.language, tr.translation) in user_hidden:
                         continue
                     key = (tr.tag_id, tr.language, tr.translation)
                     if key not in seen:

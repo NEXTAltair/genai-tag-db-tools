@@ -139,7 +139,7 @@ class TestOverlayReaderTombstoneExclusion:
 
         result = overlay_reader.get_translation_tombstones_batch([10, 20, 30])
 
-        assert result == {10: {("ja", "隠す訳")}, 20: {("en", "hidden")}}
+        assert result == {10: {("base", "ja", "隠す訳")}, 20: {("base", "en", "hidden")}}
         assert overlay_reader.get_translation_tombstones_batch([]) == {}
 
 
@@ -339,7 +339,7 @@ class TestBulkFallbackAndChunking:
 
         result = overlay_reader.get_translation_tombstones_batch(tag_ids)
 
-        assert result == {10: {("ja", "隠す訳")}}
+        assert result == {10: {("base", "ja", "隠す訳")}}
 
     def test_tombstone_lookup_reraises_non_missing_table_errors(
         self, overlay_reader, monkeypatch
@@ -365,3 +365,37 @@ class TestBulkFallbackAndChunking:
 
         with pytest.raises(OperationalError):
             overlay_reader.get_translation_tombstones_batch([1, 2, 3])
+
+
+class TestTombstoneScopeIsolation:
+    """legacy 低 id 衝突: base 宛 tombstone が同 id の user-scope 翻訳を隠さない (Codex P2)。"""
+
+    def test_base_tombstone_does_not_hide_user_scope_patch(self, user_repo, overlay_reader) -> None:
+        user_repo.write_translation_patch("user", 10, "ja", "同名の訳")
+        user_repo.write_translation_tombstone("base", 10, "ja", "同名の訳")
+
+        batch = overlay_reader.get_translations_batch([10])
+        single = overlay_reader.get_translations(10)
+
+        assert [(t.language, t.translation) for t in batch[10]] == [("ja", "同名の訳")]
+        assert [(t.language, t.translation) for t in single] == [("ja", "同名の訳")]
+
+    def test_user_tombstone_hides_user_scope_patch(self, user_repo, overlay_reader) -> None:
+        user_repo.write_translation_patch("user", 10, "ja", "同名の訳")
+        user_repo.write_translation_tombstone("user", 10, "ja", "同名の訳")
+
+        assert overlay_reader.get_translations_batch([10]) == {}
+
+    def test_merged_base_tombstone_keeps_user_patch_visible(
+        self, user_session_factory, user_repo, merged
+    ) -> None:
+        """base 行は隠しつつ、同 id の user-scope patch はマージ結果に残る。"""
+        _add_base_translation(user_session_factory, 10, "ja", "同名の訳")
+        user_repo.write_translation_patch("user", 10, "en", "user only")
+        user_repo.write_translation_tombstone("base", 10, "ja", "同名の訳")
+
+        batch = merged.get_translations_batch([10])
+        single = merged.get_translations(10)
+
+        assert [(t.language, t.translation) for t in batch[10]] == [("en", "user only")]
+        assert [(t.language, t.translation) for t in single] == [("en", "user only")]
