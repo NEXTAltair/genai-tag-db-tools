@@ -11,12 +11,15 @@ from genai_tag_db_tools.db.query_utils import (
     TagSearchPreloader,
     TagSearchQueryBuilder,
     TagSearchResultBuilder,
+    invalidate_case_exception_cache,
+    sqlite_ascii_lower,
 )
 from genai_tag_db_tools.db.schema import (
     Base,
     Tag,
     TagFormat,
     TagStatus,
+    TagTranslation,
     TagTypeFormatMapping,
     TagTypeName,
     TagUsageCounts,
@@ -86,6 +89,63 @@ def test_initial_tag_ids_for_keywords_is_case_insensitive(
         result = builder.initial_tag_ids_for_keywords(["Blue Hair"])
 
     assert result == {"Blue Hair": {1}}
+
+
+def test_exact_match_finds_uppercase_stored_rows_via_exception_path(
+    session_factory: Callable[[], Session],
+) -> None:
+    """DB 側に大文字混じりで格納された行も index 迂回の例外行経路で照合できる。"""
+    with session_factory() as session:
+        session.add(Tag(tag_id=1, source_tag="Blue_Hair", tag="Blue Hair"))
+        session.add(Tag(tag_id=2, source_tag="blue_hair", tag="blue hair"))
+        session.commit()
+        builder = TagSearchQueryBuilder(session)
+        result = builder.initial_tag_ids_for_keywords(["blue hair"])
+        single = builder.initial_tag_ids("blue hair", use_like=False)
+
+    assert result == {"blue hair": {1, 2}}
+    assert single == {1, 2}
+
+
+def test_exact_match_matches_uppercase_translations(
+    session_factory: Callable[[], Session],
+) -> None:
+    """大文字混じり翻訳行も narrow スキャン経路で case-insensitive に一致する。"""
+    with session_factory() as session:
+        session.add(Tag(tag_id=1, source_tag="cat", tag="cat"))
+        session.add(TagTranslation(translation_id=1, tag_id=1, language="en", translation="Cat Ears"))
+        session.add(TagTranslation(translation_id=2, tag_id=1, language="ja", translation="猫耳"))
+        session.commit()
+        builder = TagSearchQueryBuilder(session)
+        result = builder.initial_tag_ids_for_keywords(["cat ears", "猫耳"])
+
+    assert result == {"cat ears": {1}, "猫耳": {1}}
+
+
+def test_case_exception_cache_is_refreshed_after_invalidate(
+    session_factory: Callable[[], Session],
+) -> None:
+    """例外行キャッシュは invalidate 後に再構築され、後から入った大文字行を拾える。"""
+    with session_factory() as session:
+        session.add(Tag(tag_id=1, source_tag="cat", tag="cat"))
+        session.commit()
+        builder = TagSearchQueryBuilder(session)
+        assert builder.initial_tag_ids_for_keywords(["mixed case"]) == {}
+
+        # キャッシュ構築後に大文字混じり行を直接追加 (通常は TagRepository が invalidate する)
+        session.add(Tag(tag_id=2, source_tag="Mixed_Case", tag="Mixed Case"))
+        session.commit()
+        invalidate_case_exception_cache(session.get_bind())
+        result = builder.initial_tag_ids_for_keywords(["mixed case"])
+
+    assert result == {"mixed case": {2}}
+
+
+def test_sqlite_ascii_lower_folds_ascii_only() -> None:
+    """SQLite lower()/NOCASE と同じく ASCII のみ折り畳み、非 ASCII は保持する。"""
+    assert sqlite_ascii_lower("Blue Hair") == "blue hair"
+    assert sqlite_ascii_lower("CAFÉ") == "cafÉ"
+    assert sqlite_ascii_lower("猫耳") == "猫耳"
 
 
 def test_filtered_tag_ids_applies_filters_before_limit(

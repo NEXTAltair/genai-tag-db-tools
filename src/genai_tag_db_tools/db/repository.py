@@ -17,6 +17,7 @@ from genai_tag_db_tools.db.query_utils import (
     TagSearchQueryBuilder,
     TagSearchResultBuilder,
     contains_like_pattern,
+    invalidate_case_exception_cache,
     normalize_search_keyword,
 )
 from genai_tag_db_tools.db.schema import (
@@ -625,6 +626,7 @@ class TagRepository:
                 msg = ErrorMessages.DB_OPERATION_FAILED.format(error_msg=str(e))
                 self.logger.error(msg)
                 raise ValueError(msg) from e
+            invalidate_case_exception_cache(session.get_bind())
             return new_tag.tag_id
 
     def update_tag(self, tag_id: int, *, source_tag: str | None = None, tag: str | None = None) -> None:
@@ -637,6 +639,7 @@ class TagRepository:
             if tag is not None:
                 tag_obj.tag = tag
             session.commit()
+            invalidate_case_exception_cache(session.get_bind())
 
     def delete_tag(self, tag_id: int) -> None:
         with self.session_factory() as session:
@@ -647,6 +650,7 @@ class TagRepository:
                 raise ValueError(msg)
             session.delete(tag_obj)
             session.commit()
+            invalidate_case_exception_cache(session.get_bind())
 
     def bulk_insert_tags(self, df: pl.DataFrame) -> None:
         required_cols = {"source_tag", "tag"}
@@ -671,6 +675,7 @@ class TagRepository:
                 session.rollback()
                 msg = ErrorMessages.DB_OPERATION_FAILED.format(error_msg=str(e))
                 raise ValueError(msg) from e
+            invalidate_case_exception_cache(session.get_bind())
 
     def create_tag_with_id(self, tag_id: int, source_tag: str, tag: str) -> int:
         if not tag or not source_tag:
@@ -694,6 +699,7 @@ class TagRepository:
             try:
                 session.add(Tag(tag_id=tag_id, source_tag=source_tag, tag=tag))
                 session.commit()
+                invalidate_case_exception_cache(session.get_bind())
                 return tag_id
             except IntegrityError as e:
                 session.rollback()
@@ -2461,9 +2467,7 @@ class MergedTagReader:
                     result.append(tr)
         return result
 
-    def _translation_tombstones_batch(
-        self, tag_ids: list[int]
-    ) -> dict[int, set[tuple[str, str, str]]]:
+    def _translation_tombstones_batch(self, tag_ids: list[int]) -> dict[int, set[tuple[str, str, str]]]:
         """user overlay の翻訳 tombstone (#121) を取得する。
 
         tombstone を提供できる repo (base repos + user_repo) から集めて union する。
@@ -2490,9 +2494,7 @@ class MergedTagReader:
         return result
 
     @staticmethod
-    def _hidden_pairs_for_scope(
-        hidden: set[tuple[str, str, str]], scope: str
-    ) -> set[tuple[str, str]]:
+    def _hidden_pairs_for_scope(hidden: set[tuple[str, str, str]], scope: str) -> set[tuple[str, str]]:
         """指定 scope 宛の tombstone を (language, translation) 集合に射影する。"""
         return {(language, translation) for s, language, translation in hidden if s == scope}
 
