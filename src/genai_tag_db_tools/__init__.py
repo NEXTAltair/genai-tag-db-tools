@@ -42,11 +42,12 @@ from .core_api import (
     search_tags,
     search_tags_batch,
     set_preferred_translation,
-    update_tags_type_batch,
     suppress_translation,
     unsuppress_translation,
+    update_tags_type_batch,
     write_user_translation,
 )
+from .db.runtime import set_query_abort_check
 from .models import (
     ApprovedDbFeedback,
     DbFeedbackProposal,
@@ -90,8 +91,8 @@ __all__ = [
     "build_downloaded_at_utc",
     "clear_preferred_translation",
     "convert_tags",
-    "delete_user_translation",
     "create_tag_register_service",
+    "delete_user_translation",
     "ensure_databases",
     "get_all_type_names",
     "get_default_reader",
@@ -115,9 +116,10 @@ __all__ = [
     "search_tags",
     "search_tags_batch",
     "set_preferred_translation",
-    "update_tags_type_batch",
+    "set_query_abort_check",
     "suppress_translation",
     "unsuppress_translation",
+    "update_tags_type_batch",
     "write_user_translation",
 ]
 

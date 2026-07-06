@@ -61,9 +61,13 @@ def test_concurrent_sessions_do_not_raise_interface_error(tmp_path: Path) -> Non
         try:
             for _ in range(ITERATIONS_PER_THREAD):
                 with session_factory() as session:
-                    result = session.execute(
-                        select(TagFormat.format_id).where(TagFormat.format_name.in_(["danbooru"]))
-                    ).scalars().all()
+                    result = (
+                        session.execute(
+                            select(TagFormat.format_id).where(TagFormat.format_name.in_(["danbooru"]))
+                        )
+                        .scalars()
+                        .all()
+                    )
                     assert result == [1]
         except BaseException as exc:  # スレッド内例外を親スレッドで検知するため意図的に広く捕捉
             with errors_lock:
@@ -80,3 +84,56 @@ def test_concurrent_sessions_do_not_raise_interface_error(tmp_path: Path) -> Non
     assert not any(thread.is_alive() for thread in threads), "スレッドがタイムアウトしました"
     if errors:
         pytest.fail(f"並行アクセス中に例外が発生しました: {errors!r}")
+
+
+def test_query_abort_check_interrupts_running_query(tmp_path: Path) -> None:
+    """set_query_abort_check 登録中は実行中クエリが OperationalError で中断される (LoRAIro #1206)。"""
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+
+    from genai_tag_db_tools.db.runtime import set_query_abort_check
+
+    db_path = tmp_path / "abort_check.sqlite"
+    engine = _create_engine(db_path)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    # progress handler が確実に呼ばれる長さの再帰クエリ (数百万 VM 命令)
+    long_query = text(
+        "WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 3000000) "
+        "SELECT count(*) FROM seq"
+    )
+
+    set_query_abort_check(lambda: True)
+    try:
+        with factory() as session:
+            with pytest.raises(OperationalError):
+                session.execute(long_query).scalar()
+    finally:
+        set_query_abort_check(None)
+        engine.dispose()
+
+
+def test_query_abort_check_noop_when_unregistered(tmp_path: Path) -> None:
+    """判定関数未登録 (None) ならクエリは通常どおり完走する。"""
+    from sqlalchemy import text
+
+    from genai_tag_db_tools.db.runtime import set_query_abort_check
+
+    db_path = tmp_path / "abort_noop.sqlite"
+    engine = _create_engine(db_path)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    set_query_abort_check(None)
+    try:
+        with factory() as session:
+            result = session.execute(
+                text(
+                    "WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 10000) "
+                    "SELECT count(*) FROM seq"
+                )
+            ).scalar()
+        assert result == 10000
+    finally:
+        engine.dispose()

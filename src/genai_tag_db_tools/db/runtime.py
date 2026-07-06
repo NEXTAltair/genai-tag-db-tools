@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,40 @@ _SessionLocal = None
 _user_db_path: Path | None = None
 _user_engine = None
 _UserSessionLocal = None
+
+# 実行中 SQL を中断させる判定関数 (ホストアプリが set_query_abort_check で登録)
+_query_abort_check: Callable[[], bool] | None = None
+
+# progress handler の呼び出し間隔 (SQLite VM 命令数)。小さいほど応答が速いが
+# オーバーヘッドが増える。長時間クエリの協調キャンセル用途なので粗くてよい。
+_PROGRESS_HANDLER_INTERVAL = 4000
+
+
+def set_query_abort_check(check: Callable[[], bool] | None) -> None:
+    """実行中 SQL を中断させる判定関数を登録する (LoRAIro #1206)。
+
+    登録した関数は SQLite の progress handler として一定 VM 命令ごとに
+    **クエリを実行しているスレッド上で** 呼ばれ、True を返すとそのクエリは
+    `OperationalError` ("interrupted") で中断される。長時間クエリを協調キャンセルで
+    打ち切りたいホストアプリが、スレッドローカルなキャンセル状態を見る関数を渡す想定。
+
+    Args:
+        check: 中断すべきなら True を返す関数。None で解除。
+    """
+    global _query_abort_check
+    _query_abort_check = check
+
+
+def _progress_handler() -> int:
+    """SQLite progress handler 本体。非 0 を返すと実行中クエリを中断する。"""
+    check = _query_abort_check
+    if check is not None and check():
+        return 1
+    return 0
+
+
+def _install_progress_handler(dbapi_connection: Any, connection_record: Any) -> None:
+    dbapi_connection.set_progress_handler(_progress_handler, _PROGRESS_HANDLER_INTERVAL)
 
 
 def set_database_path(path: Path) -> None:
@@ -54,6 +89,9 @@ def _create_engine(db_path: Path) -> Engine:
         echo=False,
     )
     event.listen(engine, "connect", enable_foreign_keys)
+    # 協調キャンセルで実行中 SQL を中断できるようにする (set_query_abort_check)。
+    # 判定関数未登録時は None チェックのみで実質オーバーヘッドなし。
+    event.listen(engine, "connect", _install_progress_handler)
     return engine
 
 

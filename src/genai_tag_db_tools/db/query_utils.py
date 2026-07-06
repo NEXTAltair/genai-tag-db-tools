@@ -1,3 +1,6 @@
+import re
+import string
+import weakref
 from logging import Logger
 from typing import Any, TypedDict
 
@@ -30,6 +33,44 @@ class StatusInfo(TypedDict):
 
 # tag_id IN (...) クエリのチャンクサイズ (SQLite の bind 変数上限より十分小さく取る)
 TAG_ID_IN_CHUNK = 900
+
+# SQLite の lower() / COLLATE NOCASE は ASCII A-Z のみ折り畳む。Python 側で
+# 同じ照合を再現するための変換テーブル (str.lower は Unicode 全体を畳むため不一致)。
+_ASCII_LOWER_TABLE = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
+
+# ASCII 小文字を含むか (大文字混じり行の lower() 済み値と一致し得るか) の判定
+_HAS_ASCII_LOWER_RE = re.compile(r"[a-z]")
+
+# TAGS の「ASCII 小文字化で不変でない」例外行のキャッシュ (engine 単位)。
+# base DB (数百万行) は runtime 中は不変で、例外行は全体の 0.01% 未満なので、
+# 一度のスキャン結果を保持すれば以降の完全一致照合は index だけで済む。
+# TAGS を書き換える経路 (TagRepository) は invalidate_case_exception_cache() を呼ぶこと。
+_case_exception_cache: "weakref.WeakKeyDictionary[Any, list[tuple[int, str | None, str | None]]]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def sqlite_ascii_lower(value: str) -> str:
+    """SQLite の lower() / COLLATE NOCASE と同じ ASCII 限定の小文字化を行う。"""
+    return value.translate(_ASCII_LOWER_TABLE)
+
+
+def invalidate_case_exception_cache(bind: Any | None = None) -> None:
+    """TAGS の大小文字例外行キャッシュを無効化する。
+
+    Args:
+        bind: 無効化対象の engine。None なら全 engine 分を破棄する。
+    """
+    if bind is None:
+        _case_exception_cache.clear()
+    else:
+        _case_exception_cache.pop(bind, None)
+
+
+def _chunked_in(column: Any, values: list[int]) -> Any:
+    """IN (...) を bind 変数上限に収まるチャンクの OR に分割した条件を返す。"""
+    chunks = [values[i : i + TAG_ID_IN_CHUNK] for i in range(0, len(values), TAG_ID_IN_CHUNK)]
+    return or_(*[column.in_(chunk) for chunk in chunks])
 
 
 def contains_like_pattern(substring: str) -> str:
@@ -77,17 +118,21 @@ class TagSearchQueryBuilder:
         limit: int | None = None,
         offset: int = 0,
     ) -> set[int]:
-        # 完全一致 (use_like=False) は大文字小文字を無視して照合する (COLLATE NOCASE)。
+        # 完全一致 (use_like=False) は COLLATE NOCASE 相当の照合を index 活用経路で行う
+        # (LoRAIro #1203/#1206: NOCASE 比較は index を使えず数百万行の全表スキャンになる)。
         # LIKE は SQLite 既定で ASCII 大文字小文字を無視するため挙動は変えない。
-        tag_conditions = or_(
-            Tag.tag.like(keyword) if use_like else Tag.tag.collate("NOCASE") == keyword,
-            Tag.source_tag.like(keyword) if use_like else Tag.source_tag.collate("NOCASE") == keyword,
-        )
-        translation_condition = (
-            TagTranslation.translation.like(keyword)
-            if use_like
-            else TagTranslation.translation.collate("NOCASE") == keyword
-        )
+        if not use_like:
+            ids = sorted(self._exact_match_tag_ids({sqlite_ascii_lower(keyword)}))
+            # ページングを決定的にするため tag_id 昇順で offset/limit を適用する (従来の
+            # UNION + order_by と同じ意味論)。
+            if offset:
+                ids = ids[offset:]
+            if limit is not None:
+                ids = ids[:limit]
+            return set(ids)
+
+        tag_conditions = or_(Tag.tag.like(keyword), Tag.source_tag.like(keyword))
+        translation_condition = TagTranslation.translation.like(keyword)
 
         tag_query = self.session.query(Tag.tag_id.label("tag_id")).filter(tag_conditions)
         translation_query = self.session.query(TagTranslation.tag_id.label("tag_id")).filter(
@@ -105,6 +150,89 @@ class TagSearchQueryBuilder:
             union_query = union_query.limit(limit)
 
         return {row[0] for row in union_query.all()}
+
+    def _exact_match_tag_rows(self, match_keys: set[str]) -> list[tuple[int, str | None, str | None]]:
+        """ASCII 小文字化済みキーに case-insensitive 完全一致する TAGS 行を返す。
+
+        `lower(col) IN (...)` / `COLLATE NOCASE ==` は index を使えず TAGS 全表スキャン
+        (数百万行、1 回あたり秒〜十秒台) になる (LoRAIro #1203/#1206)。行の大多数は既に
+        小文字なので、(1) index が効く完全一致 IN と (2) 小文字化で不変でない例外行
+        (engine 単位で 1 回だけスキャンしキャッシュ) の Python 照合に分割し、照合結果を
+        変えずに index を活用する。
+
+        Args:
+            match_keys: `sqlite_ascii_lower` 済みの照合キー集合。
+
+        Returns:
+            (tag_id, tag, source_tag) のリスト。例外行経由の重複を含み得る
+            (呼び出し側は set に畳むため実害なし)。
+        """
+        if not match_keys:
+            return []
+        keys = list(match_keys)
+        rows: list[tuple[int, str | None, str | None]] = list(
+            self.session.query(Tag.tag_id, Tag.tag, Tag.source_tag)
+            .filter(or_(Tag.tag.in_(keys), Tag.source_tag.in_(keys)))
+            .all()
+        )
+        for tag_id, tag, source_tag in self._case_exceptional_tag_rows():
+            if (tag is not None and sqlite_ascii_lower(tag) in match_keys) or (
+                source_tag is not None and sqlite_ascii_lower(source_tag) in match_keys
+            ):
+                rows.append((tag_id, tag, source_tag))
+        return rows
+
+    def _exact_match_tag_ids(self, match_keys: set[str]) -> set[int]:
+        """`_exact_match_tag_rows` + 翻訳一致の tag_id 集合版 (単一 keyword の完全一致用)。"""
+        ids = {row[0] for row in self._exact_match_tag_rows(match_keys)}
+        ids.update(row[0] for row in self._exact_match_translation_rows(match_keys))
+        return ids
+
+    def _case_exceptional_tag_rows(self) -> list[tuple[int, str | None, str | None]]:
+        """ASCII 小文字化で不変でない TAGS 行を engine 単位のキャッシュ付きで返す。"""
+        bind = self.session.get_bind()
+        cached = _case_exception_cache.get(bind)
+        if cached is None:
+            cached = list(
+                self.session.query(Tag.tag_id, Tag.tag, Tag.source_tag)
+                .filter(
+                    or_(
+                        Tag.tag != func.lower(Tag.tag),
+                        Tag.source_tag != func.lower(Tag.source_tag),
+                    )
+                )
+                .all()
+            )
+            _case_exception_cache[bind] = cached
+        return cached
+
+    def _exact_match_translation_rows(self, match_keys: set[str]) -> list[tuple[int, str | None]]:
+        """ASCII 小文字化済みキーに case-insensitive 完全一致する翻訳行を返す。
+
+        index が効く完全一致 IN で小文字行を取り、大文字混じり行は
+        `translation <> lower(translation)` で絞った narrow スキャンで補完する
+        (TAG_TRANSLATIONS は TAGS より十分小さく、このスキャンは実測 0.1 秒台)。
+        キーが ASCII 小文字を 1 つも含まない場合 (CJK のみ等)、大文字混じり行の
+        lower() 済み値と一致し得ないため narrow スキャンを省略する。
+        """
+        if not match_keys:
+            return []
+        keys = list(match_keys)
+        rows: list[tuple[int, str | None]] = list(
+            self.session.query(TagTranslation.tag_id, TagTranslation.translation)
+            .filter(TagTranslation.translation.in_(keys))
+            .all()
+        )
+        if any(_HAS_ASCII_LOWER_RE.search(key) for key in keys):
+            rows.extend(
+                self.session.query(TagTranslation.tag_id, TagTranslation.translation)
+                .filter(
+                    TagTranslation.translation != func.lower(TagTranslation.translation),
+                    func.lower(TagTranslation.translation).in_(keys),
+                )
+                .all()
+            )
+        return rows
 
     def filtered_tag_ids(
         self,
@@ -138,11 +266,21 @@ class TagSearchQueryBuilder:
         if concrete_type_names and not type_name_ids:
             return set(), None
 
-        candidate = self._keyword_candidate_query(keyword, use_like).subquery()
-        query = self.session.query(candidate.c.tag_id)
+        resolved_format_id = format_ids[0] if len(format_ids) == 1 else None
+        if use_like:
+            candidate = self._keyword_candidate_query(keyword, use_like).subquery()
+            tag_id_column: Any = candidate.c.tag_id
+            query = self.session.query(tag_id_column)
+        else:
+            # 完全一致は index 活用経路で候補 tag_id を先に確定する (LoRAIro #1203/#1206)。
+            candidate_ids = sorted(self._exact_match_tag_ids({sqlite_ascii_lower(keyword)}))
+            if not candidate_ids:
+                return set(), resolved_format_id
+            tag_id_column = Tag.tag_id
+            query = self.session.query(Tag.tag_id).filter(_chunked_in(Tag.tag_id, candidate_ids))
         query = self._apply_status_exists_filters(
             query,
-            candidate.c.tag_id,
+            tag_id_column,
             format_ids=format_ids,
             type_name_ids=type_name_ids,
             alias=alias,
@@ -150,32 +288,27 @@ class TagSearchQueryBuilder:
         )
         query = self._apply_usage_exists_filter(
             query,
-            candidate.c.tag_id,
+            tag_id_column,
             format_ids=format_ids,
             min_usage=min_usage,
             max_usage=max_usage,
         )
-        query = self._apply_language_exists_filter(query, candidate.c.tag_id, language)
-        query = query.order_by(candidate.c.tag_id)
+        query = self._apply_language_exists_filter(query, tag_id_column, language)
+        query = query.order_by(tag_id_column)
         if offset:
             query = query.offset(offset)
         if limit is not None:
             query = query.limit(limit)
 
-        format_id = format_ids[0] if len(format_ids) == 1 else None
-        return {row[0] for row in query.all()}, format_id
+        return {row[0] for row in query.all()}, resolved_format_id
 
     def _keyword_candidate_query(self, keyword: str, use_like: bool) -> Any:
-        # 完全一致 (use_like=False) は COLLATE NOCASE で大文字小文字を無視する。
-        tag_conditions = or_(
-            Tag.tag.like(keyword) if use_like else Tag.tag.collate("NOCASE") == keyword,
-            Tag.source_tag.like(keyword) if use_like else Tag.source_tag.collate("NOCASE") == keyword,
-        )
-        translation_condition = (
-            TagTranslation.translation.like(keyword)
-            if use_like
-            else TagTranslation.translation.collate("NOCASE") == keyword
-        )
+        # LIKE (部分一致) 用の候補クエリ。完全一致は `_exact_match_tag_ids` の
+        # index 活用経路を使うため、ここには来ない (LoRAIro #1203/#1206)。
+        if not use_like:
+            raise ValueError("exact match must use _exact_match_tag_ids (index-backed path)")
+        tag_conditions = or_(Tag.tag.like(keyword), Tag.source_tag.like(keyword))
+        translation_condition = TagTranslation.translation.like(keyword)
 
         tag_query = self.session.query(Tag.tag_id.label("tag_id")).filter(tag_conditions)
         translation_query = self.session.query(TagTranslation.tag_id.label("tag_id")).filter(
@@ -298,23 +431,12 @@ class TagSearchQueryBuilder:
         keywords_by_lower: dict[str, set[str]] = {}
         for keyword in keyword_set:
             keywords_by_lower.setdefault(keyword.lower(), set()).add(keyword)
-        lower_keys = list(keywords_by_lower.keys())
+        lower_keys = set(keywords_by_lower.keys())
 
-        tag_rows = (
-            self.session.query(Tag.tag_id, Tag.tag, Tag.source_tag)
-            .filter(
-                or_(
-                    func.lower(Tag.tag).in_(lower_keys),
-                    func.lower(Tag.source_tag).in_(lower_keys),
-                )
-            )
-            .all()
-        )
-        trans_rows = (
-            self.session.query(TagTranslation.tag_id, TagTranslation.translation)
-            .filter(func.lower(TagTranslation.translation).in_(lower_keys))
-            .all()
-        )
+        # index 活用の完全一致照合 (LoRAIro #1203/#1206: 従来の lower(col) IN (...) は
+        # index を使えず keyword 数に関係なく毎回 TAGS/TAG_TRANSLATIONS の全表スキャンだった)
+        tag_rows = self._exact_match_tag_rows(lower_keys)
+        trans_rows = self._exact_match_translation_rows(lower_keys)
 
         tag_ids_by_keyword: dict[str, set[int]] = {keyword: set() for keyword in keyword_set}
         for tag_id, tag, source_tag in tag_rows:
