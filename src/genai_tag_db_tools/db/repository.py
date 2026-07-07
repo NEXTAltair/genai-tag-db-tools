@@ -1898,7 +1898,8 @@ class MergedTagReader:
         if existing is None or not candidate_is_user:
             return False
         return (
-            existing["tag"] == candidate["tag"]
+            existing["tag_id"] == candidate["tag_id"]
+            and existing["tag"] == candidate["tag"]
             and existing.get("source_tag") == candidate.get("source_tag")
         )
 

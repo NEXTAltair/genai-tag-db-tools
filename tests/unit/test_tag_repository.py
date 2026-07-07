@@ -893,6 +893,47 @@ def test_merged_reader_search_tags_higher_priority_base_row_wins(
     assert result[0]["translations"] == {"japanese": ["猫A"]}
 
 
+def test_merged_reader_search_tags_bulk_keeps_distinct_user_tag_with_same_name(
+    session_factory: Callable[[], Session],
+) -> None:
+    """同じ tag/source_tag でも別 tag_id の user tag は materialized parent 扱いしない。"""
+    user_factory = _memory_session_factory()
+    base_reader = TagReader(session_factory)
+    user_reader = TagReader(user_factory)
+
+    with session_factory() as session:
+        session.add(TagFormat(format_id=1, format_name="test"))
+        session.add(TagTypeName(type_name_id=1, type_name="general"))
+        session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=1))
+        session.add(Tag(tag_id=1, tag="cat", source_tag="cat"))
+        session.add(TagStatus(tag_id=1, format_id=1, type_id=0, alias=False, preferred_tag_id=1))
+        session.add(TagTranslation(tag_id=1, language="japanese", translation="猫base"))
+        session.commit()
+
+    with user_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=1, type_name="general"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+        session.add(Tag(tag_id=1_000_000_001, tag="cat", source_tag="cat"))
+        session.add(
+            TagStatus(
+                tag_id=1_000_000_001,
+                format_id=1000,
+                type_id=0,
+                alias=False,
+                preferred_tag_id=1_000_000_001,
+            )
+        )
+        session.add(TagTranslation(tag_id=1_000_000_001, language="japanese", translation="猫user"))
+        session.commit()
+
+    merged = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+    result = merged.search_tags_bulk(["cat"])
+
+    assert result["cat"]["tag_id"] == 1_000_000_001
+    assert result["cat"]["translations"] == {"japanese": ["猫user"]}
+
+
 def _seed_bulk_all_rows(session: Session) -> None:
     """1 keyword が複数 tag_id にマッチする状況を作る (tag 直接一致 + 翻訳経由一致)。"""
     session.add(TagFormat(format_id=1, format_name="test"))
