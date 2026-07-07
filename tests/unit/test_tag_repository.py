@@ -1026,6 +1026,82 @@ def test_register_tag_with_status_reuses_existing_tag_id(
         assert status.preferred_tag_id == existing_id
 
 
+def test_register_tag_with_status_ignores_user_scope_existing_tag_id(
+    session_factory: Callable[[], Session],
+) -> None:
+    """#1265: base TAGS に存在しない existing_tag_id (user scope 由来の 1e9+ id 等) を渡されても、
+    その id を信頼せず tag 文字列で再解決/新規作成する。
+
+    MergedTagReader は user scope 優先で解決するため、base 登録経路に user scope の tag_id が
+    渡ることがある。その値を base TAGS 実在チェック無しに TAG_STATUS へ INSERT すると
+    ``FOREIGN KEY constraint failed`` になっていた (#1265)。
+    """
+    _seed_format_and_mapping(session_factory)
+    reader = TagReader(session_factory)
+    repo = TagRepository(session_factory, reader=MergedTagReader(base_repo=reader))
+
+    user_scope_id = 1_000_009_635  # base TAGS には存在しない user scope の tag_id
+
+    returned_id = repo.register_tag_with_status(
+        source_tag="dataset_tag",
+        tag="dataset_tag",
+        existing_tag_id=user_scope_id,
+        format_id=1,
+        type_id=0,
+        alias=False,
+        preferred_tag_id=None,
+    )
+
+    # user scope id をそのまま使わず base に採番された新 id を返す
+    assert returned_id != user_scope_id
+    with session_factory() as session:
+        tag_row = session.query(Tag).filter(Tag.tag == "dataset_tag").one()
+        assert tag_row.tag_id == returned_id
+        # status は base の新 tag_id で挿入され FK 違反にならない
+        status = (
+            session.query(TagStatus)
+            .filter(TagStatus.tag_id == returned_id, TagStatus.format_id == 1)
+            .one()
+        )
+        assert status.preferred_tag_id == returned_id
+        # user scope id の孤児 status 行が残らないこと
+        assert session.query(TagStatus).filter(TagStatus.tag_id == user_scope_id).count() == 0
+
+
+def test_register_tag_with_status_reresolves_by_tag_when_existing_id_missing(
+    session_factory: Callable[[], Session],
+) -> None:
+    """#1265: existing_tag_id が base TAGS に存在せず、同名 tag が既に base TAGS にある場合は
+    その既存 base 行を再利用し、重複 TAGS 行を作らない。"""
+    _seed_format_and_mapping(session_factory)
+    reader = TagReader(session_factory)
+    repo = TagRepository(session_factory, reader=MergedTagReader(base_repo=reader))
+
+    base_id = repo.create_tag("shared", "shared")
+    bogus_id = 1_000_042_000  # base TAGS に存在しない (user scope 由来を模した値)
+
+    returned_id = repo.register_tag_with_status(
+        source_tag="shared",
+        tag="shared",
+        existing_tag_id=bogus_id,
+        format_id=1,
+        type_id=0,
+        alias=False,
+        preferred_tag_id=None,
+    )
+
+    assert returned_id == base_id
+    with session_factory() as session:
+        # 重複 TAGS 行を作らず既存 base 行を再利用する
+        assert session.query(Tag).filter(Tag.tag == "shared").count() == 1
+        status = (
+            session.query(TagStatus)
+            .filter(TagStatus.tag_id == base_id, TagStatus.format_id == 1)
+            .one()
+        )
+        assert status.preferred_tag_id == base_id
+
+
 def test_register_tag_with_status_type_id_none_defaults_and_preserves(
     session_factory: Callable[[], Session],
 ) -> None:

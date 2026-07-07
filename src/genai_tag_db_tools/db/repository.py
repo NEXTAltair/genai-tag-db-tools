@@ -644,8 +644,16 @@ class TagRepository:
         Returns:
             既存または新規作成した tag_id（新規時は flush 済みで id 割当済み）。
         """
+        # existing_tag_id を無条件に信頼しない (LoRAIro #1265)。呼び出し元の reader が
+        # MergedTagReader だと user scope 優先で解決するため、user scope の tag_id
+        # (USER_TAG_ID_OFFSET=1e9 以上) が渡ることがある。その値は base TAGS には実在せず、
+        # そのまま TAG_STATUS へ INSERT すると FOREIGN KEY constraint failed になる。
+        # この session (= base TagRepository の session) の TAGS に実在するか検証し、
+        # 無ければ tag 文字列で再解決 → 新規作成にフォールバックする。
         if existing_tag_id is not None:
-            return existing_tag_id
+            existing_by_id = session.get(Tag, existing_tag_id)
+            if existing_by_id is not None:
+                return existing_by_id.tag_id
         existing = session.query(Tag).filter(Tag.tag == tag).one_or_none()
         if existing is not None:
             return existing.tag_id
