@@ -2305,35 +2305,60 @@ class MergedTagReader:
             rows = self._dedup_case_variant_user_rows(rows)
         return rows
 
-    def _base_has_case_variant(self, tag: str) -> bool:
-        """いずれかの base repo に ``tag`` と casefold 一致する canonical タグが存在するか。
+    def _base_has_case_variant(self, tag: str, *, exclude_tag_id: int) -> bool:
+        """いずれかの base repo に ``tag`` と casefold 一致する別 tag_id の canonical タグがあるか。
 
         base の完全一致検索は case-insensitive のため、``tag`` にマッチした base 行のうち
         ``tag`` 文字列 (canonical) が casefold 一致するものだけを重複とみなす。翻訳や
         source_tag だけがマッチした行 (canonical が別文字列) は重複扱いしない。
+        ``exclude_tag_id`` と同じ tag_id の行は「自分自身」なので除外する (legacy 数値衝突で
+        base タグ自身が誤って重複判定されるのを防ぐ、Codex P2)。
 
         Args:
-            tag: user 行の canonical タグ文字列。
+            tag: 判定対象行の canonical タグ文字列。
+            exclude_tag_id: 判定対象行の tag_id。この tag_id の base 行は自己一致として無視する。
 
         Returns:
-            base に case-variant の canonical タグがあれば ``True``。
+            別 tag_id の base に case-variant の canonical タグがあれば ``True``。
         """
         needle = tag.casefold()
         for repo in self._iter_base_repos():
             for base_row in repo.search_tags(tag, partial=False):
-                if base_row["tag"].casefold() == needle:
+                if base_row["tag_id"] != exclude_tag_id and base_row["tag"].casefold() == needle:
                     return True
         return False
+
+    def _is_overlay_origin_row(self, row: TagSearchRow) -> bool:
+        """行が user overlay 由来かを、数値 ID scope 推定に依らず実体で判定する (Codex P2)。
+
+        legacy 低 ID の user タグは base タグと tag_id を共有し得るため、``get_tag_scope`` の
+        scope 推定 (衝突時 user 優先) では base 由来行を user と誤判定する。overlay が同一の
+        ``(tag_id, tag)`` を実際に保持しているかで由来を判定することで、ID 衝突に依存しない。
+
+        Args:
+            row: 判定対象の TagSearchRow。
+
+        Returns:
+            overlay が同一 tag_id で同一 canonical タグ文字列を保持していれば ``True``。
+        """
+        if not self._has_user():
+            return False
+        assert self.user_repo is not None
+        user_tag = self.user_repo.get_tag_by_id(row["tag_id"])
+        return user_tag is not None and user_tag.tag == row["tag"]
 
     def _dedup_case_variant_user_rows(self, rows: list[TagSearchRow]) -> list[TagSearchRow]:
         """user overlay タグが base タグの大文字小文字違い重複なら結果から落とす (#1223)。
 
         user が独自登録した case-variant 重複 (例: base ``anime`` に対する user ``Anime``) は
         merge 時に base canonical を覆い隠し、手動タグ追加 (``resolve_preferred=True``) の
-        exact 検索が既存 base タグへ解決できず重複を再生産する。casefold 一致する base タグが
-        存在する user-scope 行を落とし、呼び出し側 (LoRAIro の 3 段フォールバック等) が
-        base canonical を解決できるようにする。
+        exact 検索が既存 base タグへ解決できず重複を再生産する。別 tag_id の base に casefold
+        一致する canonical タグがある overlay 由来行を落とし、呼び出し側 (LoRAIro の 3 段
+        フォールバック等) が base canonical を解決できるようにする。
 
+        - 由来判定は数値 ID scope 推定でなく overlay の実体 (``_is_overlay_origin_row``) で行う
+          ため、legacy 低 ID の user タグと base タグの ID 衝突で base 行を誤って落とさない
+          (Codex P2)。
         - 別文字列の user alias (typo 補正 #1183) は casefold が一致しないため触れない。
         - base タグの deprecated 有無は判定に用いない (#1212: deprecated と case 重複は別軸)。
         - ``resolve_preferred=True`` の解決経路でのみ呼ばれる (ブラウズ検索は user 行をそのまま
@@ -2343,13 +2368,15 @@ class MergedTagReader:
             rows: cross-scope preferred 解決済みの TagSearchRow リスト。
 
         Returns:
-            case-variant な user 重複を除いた TagSearchRow リスト。
+            case-variant な overlay 重複を除いた TagSearchRow リスト。
         """
         if not self._has_user() or not rows:
             return rows
         kept: list[TagSearchRow] = []
         for row in rows:
-            if self.get_tag_scope(row["tag_id"]) == "user" and self._base_has_case_variant(row["tag"]):
+            if self._is_overlay_origin_row(row) and self._base_has_case_variant(
+                row["tag"], exclude_tag_id=row["tag_id"]
+            ):
                 continue
             kept.append(row)
         return kept

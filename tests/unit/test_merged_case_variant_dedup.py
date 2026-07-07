@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from sqlalchemy import StaticPool, create_engine
+from sqlalchemy import StaticPool, create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from genai_tag_db_tools.db.overlay_reader import OverlayTagReader
@@ -185,3 +185,69 @@ class TestUserAliasNotDeduped:
         assert len(rows) == 1
         assert rows[0]["tag_id"] == _BASE_ANIME_ID
         assert rows[0]["tag"] == "anime"
+
+
+class TestLegacyIdCollisionNotDropped:
+    """legacy 低 ID の user タグと base タグが tag_id 衝突しても base 行を落とさない (Codex P2)。"""
+
+    _COLLIDING_ID = 500  # base と user で数値 ID を共有する legacy ケース
+
+    @pytest.fixture
+    def merged_collision(self, base_session_factory, user_session_factory):
+        # base: 非 deprecated タグ ``sunglasses`` (tag_id=500)。
+        with base_session_factory() as session:
+            session.add(TagFormat(format_id=_DANBOORU_FORMAT_ID, format_name="danbooru"))
+            session.add(TagTypeName(type_name_id=1, type_name="general"))
+            session.add(TagTypeFormatMapping(format_id=_DANBOORU_FORMAT_ID, type_id=0, type_name_id=1))
+            session.add(Tag(tag_id=self._COLLIDING_ID, source_tag="sunglasses", tag="sunglasses"))
+            session.flush()
+            session.add(
+                TagStatus(
+                    tag_id=self._COLLIDING_ID,
+                    format_id=_DANBOORU_FORMAT_ID,
+                    type_id=0,
+                    alias=False,
+                    preferred_tag_id=self._COLLIDING_ID,
+                    deprecated=False,
+                )
+            )
+            session.commit()
+        # user: base と同じ tag_id=500 だが別文字列 ``myfav`` (legacy 数値衝突)。
+        # ck_user_tag_id_offset (USER_TAG_ID_OFFSET 以上) は現行スキーマの制約だが、
+        # legacy DB には低 ID 行が残り得る。CHECK 強制を切って legacy 行を再現する。
+        with user_session_factory() as session:
+            session.execute(text("PRAGMA ignore_check_constraints = ON"))
+            session.add(UserTag(tag_id=self._COLLIDING_ID, source_tag="myfav", tag="myfav"))
+            session.flush()
+            session.add(
+                UserTagStatusPatch(
+                    target_scope="user",
+                    target_tag_id=self._COLLIDING_ID,
+                    format_id=_LORAIRO_FORMAT_ID,
+                    type_id=0,
+                    alias=False,
+                    preferred_scope="user",
+                    preferred_tag_id=self._COLLIDING_ID,
+                    deprecated=False,
+                )
+            )
+            session.commit()
+        base_repo = TagReader(session_factory=base_session_factory)
+        user_repo = OverlayTagReader(session_factory=user_session_factory)
+        return MergedTagReader(base_repo=base_repo, user_repo=user_repo)
+
+    def test_base_tag_not_self_dropped_on_id_collision(self, merged_collision):
+        """base ``sunglasses`` (tag_id=500) は user と ID 衝突しても drop されず解決される。
+
+        get_tag_scope(500) は衝突時 "user" を返すため、由来を ID scope で推定すると
+        base 行が自分自身を case-variant とみなして落ちてしまう (Codex P2 回帰)。
+        """
+        rows = merged_collision.search_tags(
+            "sunglasses",
+            format_names=["danbooru"],
+            deprecated=False,
+            resolve_preferred=True,
+        )
+        assert len(rows) == 1
+        assert rows[0]["tag_id"] == self._COLLIDING_ID
+        assert rows[0]["tag"] == "sunglasses"
