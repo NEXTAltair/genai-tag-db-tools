@@ -90,21 +90,24 @@ class GuiTagRegisterService(GuiServiceBase):
             # format固有のtype_idを正しく解決する
             type_id = self._reader.get_type_id_for_format(type_name, fmt_id) if type_name else None
 
-            tag_id = self._repo.create_tag(source_tag, normalized_tag)
+            # TAGS 行・TAG_STATUS 行・翻訳を単一トランザクションで束ねる (LoRAIro #1249)。
+            # create_tag → 別 session で update_tag_status に分けると、並行アクセス下で
+            # child(TAG_STATUS) が直前の parent(TAGS) を可視化できず FK 制約失敗になりうる。
+            # usage_count は TAGS 行の commit 後に別途更新する (FK 上 tag 存在が前提)。
+            fallback_translations = [(language, translation)] if language and translation else None
+            tag_id = self._repo.register_tag_with_status(
+                source_tag=source_tag,
+                tag=normalized_tag,
+                existing_tag_id=None,
+                format_id=fmt_id,
+                type_id=type_id,
+                alias=False,
+                preferred_tag_id=None,
+                translations=fallback_translations,
+            )
 
             if usage_count > 0:
                 self._repo.update_usage_count(tag_id, fmt_id, usage_count)
-
-            if language and translation:
-                self._repo.add_or_update_translation(tag_id, language, translation)
-
-            self._repo.update_tag_status(
-                tag_id=tag_id,
-                format_id=fmt_id,
-                alias=False,
-                preferred_tag_id=tag_id,
-                type_id=type_id,
-            )
 
             return tag_id
 

@@ -104,10 +104,16 @@ class TagRegister:
                 if not dep_tag:
                     continue
 
-                alias_tag_id = self._repo.create_tag(dep_tag, dep_tag)
-                self._repo.update_tag_status(
-                    tag_id=alias_tag_id,
+                # TAGS 行と TAG_STATUS 行を単一トランザクションで束ねる (LoRAIro #1249)。
+                # create_tag → 別 session で update_tag_status に分けると、並行アクセス下で
+                # child(TAG_STATUS) が直前の parent(TAGS) を可視化できず FK 制約失敗になりうる。
+                # type_id=None で既存 status の値を保持し、新規なら 0 を使う従来挙動を維持する。
+                self._repo.register_tag_with_status(
+                    source_tag=dep_tag,
+                    tag=dep_tag,
+                    existing_tag_id=None,
                     format_id=format_id,
+                    type_id=None,
                     alias=True,
                     preferred_tag_id=tag_id,
                 )
@@ -448,13 +454,16 @@ class TagRegisterService:
             )
 
         # 5. 実際に作成
-        new_alias_tag_id = self._repo.create_tag(entry.alias, entry.alias)
-        self._repo.update_tag_status(
-            tag_id=new_alias_tag_id,
+        # TAGS 行と TAG_STATUS 行を単一トランザクションで束ねる (LoRAIro #1249)。
+        # existing_tag_id には reader で解決済みの alias_tag_id (未存在なら None) を渡す。
+        new_alias_tag_id = self._repo.register_tag_with_status(
+            source_tag=entry.alias,
+            tag=entry.alias,
+            existing_tag_id=alias_tag_id,
             format_id=fmt_id,
+            type_id=type_id,
             alias=True,
             preferred_tag_id=preferred_tag_id,
-            type_id=type_id,
         )
         return AliasRegisterItemResult(
             alias=entry.alias,

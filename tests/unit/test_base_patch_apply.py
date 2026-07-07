@@ -103,6 +103,51 @@ def test_apply_alias_addition(service: BasePatchApplyService, session_factory) -
         assert status.preferred_tag_id == 1
 
 
+def test_apply_alias_addition_uses_atomic_register(session_factory, monkeypatch) -> None:
+    """#1249: 新規 alias タグの作成と TAG_STATUS 書き込みを register_tag_with_status で
+    単一トランザクションに束ねる。create_tag(_ensure_tag)→別 session の update_tag_status
+    という非 atomic な分離をやめ、低並行下の FK 制約失敗を塞ぐ。
+    """
+    reader = MergedTagReader(base_repo=TagReader(session_factory))
+    repo = TagRepository(session_factory, reader=reader)
+    calls = {"atomic": 0, "update_status": 0}
+    real_register = repo.register_tag_with_status
+    real_update = repo.update_tag_status
+
+    def spy_register(**kwargs):
+        calls["atomic"] += 1
+        return real_register(**kwargs)
+
+    def spy_update(*args, **kwargs):
+        calls["update_status"] += 1
+        return real_update(*args, **kwargs)
+
+    monkeypatch.setattr(repo, "register_tag_with_status", spy_register)
+    monkeypatch.setattr(repo, "update_tag_status", spy_update)
+    service = BasePatchApplyService(repo, reader)
+
+    patch = _patch(
+        "alias_addition",
+        {"target_type": "alias", "tag": "blakc hair", "format_name": "danbooru"},
+        {"alias": True, "preferred_tag": "black hair"},
+    )
+    row = service.apply_patch(patch)
+
+    assert row.status == "applied"
+    # alias の parent(TAGS) + child(TAG_STATUS) は atomic 経路のみで書く
+    assert calls["atomic"] == 1
+    assert calls["update_status"] == 0
+    with session_factory() as session:
+        alias_tag = session.query(Tag).filter(Tag.tag == "blakc hair").one()
+        status = (
+            session.query(TagStatus)
+            .filter(TagStatus.tag_id == alias_tag.tag_id, TagStatus.format_id == 1)
+            .one()
+        )
+        assert status.alias is True
+        assert status.preferred_tag_id == 1
+
+
 def test_apply_translation(service: BasePatchApplyService, session_factory) -> None:
     patch = _patch(
         "translation_correction",
