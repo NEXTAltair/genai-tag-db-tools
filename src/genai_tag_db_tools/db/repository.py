@@ -1465,6 +1465,7 @@ class TagRepository:
             raise ValueError(f"tag='{source.tag}' already exists with tag_id={existing_by_tag.tag_id}")
 
         session.add(Tag(tag_id=tag_id, source_tag=source.source_tag, tag=source.tag))
+        session.flush()
 
     def update_tags_type_batch(
         self,
@@ -1838,7 +1839,8 @@ class MergedTagReader:
         if limit is None:
             for repo in repos:
                 for row in repo.search_tags(keyword, limit=None, offset=0, **kwargs):
-                    merged[row["tag_id"]] = row
+                    if not self._preserve_existing_search_row(merged.get(row["tag_id"]), row):
+                        merged[row["tag_id"]] = row
             rows = [merged[tag_id] for tag_id in sorted(merged)]
             return rows[offset:] if offset else rows
 
@@ -1869,12 +1871,25 @@ class MergedTagReader:
                 if len(rows) < chunk_size:
                     exhausted.add(index)
                 for row in rows:
-                    merged[row["tag_id"]] = row
+                    if not self._preserve_existing_search_row(merged.get(row["tag_id"]), row):
+                        merged[row["tag_id"]] = row
             if not made_progress:
                 break
 
         rows = [merged[tag_id] for tag_id in sorted(merged)]
         return rows[offset:target]
+
+    @staticmethod
+    def _preserve_existing_search_row(
+        existing: TagSearchRow | None,
+        candidate: TagSearchRow,
+    ) -> bool:
+        if existing is None:
+            return False
+        return (
+            existing["tag"] == candidate["tag"]
+            and existing.get("source_tag") == candidate.get("source_tag")
+        )
 
     def _requested_format_id(
         self,

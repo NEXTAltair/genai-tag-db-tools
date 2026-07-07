@@ -57,14 +57,25 @@ def test_update_tags_type_batch_materializes_base_tag_parent_in_user_db() -> Non
 
     base_tag_id = 197273
     with base_factory() as session:
+        session.add(TagFormat(format_id=1, format_name="danbooru"))
+        session.add(TagTypeName(type_name_id=1, type_name="general"))
+        session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=1))
         session.add(Tag(tag_id=base_tag_id, tag="base_only_tag", source_tag="Base Only Tag"))
+        session.add(TagStatus(tag_id=base_tag_id, format_id=1, type_id=0, alias=False, preferred_tag_id=base_tag_id))
+        session.add(TagTranslation(tag_id=base_tag_id, language="ja", translation="ベースのみ"))
         session.commit()
 
     with user_factory() as session:
         session.add(TagFormat(format_id=1000, format_name="Lorairo"))
         session.commit()
 
-    repo.update_tags_type_batch([TagTypeUpdate(tag_id=base_tag_id, type_name="general")], format_id=1000)
+    repo.update_tags_type_batch(
+        [
+            TagTypeUpdate(tag_id=base_tag_id, type_name="general"),
+            TagTypeUpdate(tag_id=base_tag_id, type_name="general"),
+        ],
+        format_id=1000,
+    )
 
     with user_factory() as session:
         tag = session.query(Tag).filter(Tag.tag_id == base_tag_id).one()
@@ -81,6 +92,14 @@ def test_update_tags_type_batch_materializes_base_tag_parent_in_user_db() -> Non
     assert status.format_id == 1000
     assert status.preferred_tag_id == base_tag_id
     assert type_name == "general"
+
+    rows = merged_reader.search_tags("base_only_tag")
+
+    assert len(rows) == 1
+    assert rows[0]["tag_id"] == base_tag_id
+    assert rows[0]["translations"] == {"ja": ["ベースのみ"]}
+    assert "danbooru" in rows[0]["format_statuses"]
+    assert "Lorairo" in rows[0]["format_statuses"]
 
 
 def test_create_tag_returns_existing_id(session_factory: Callable[[], Session]) -> None:
