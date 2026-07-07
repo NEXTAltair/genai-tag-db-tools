@@ -1024,3 +1024,59 @@ def test_register_tag_with_status_reuses_existing_tag_id(
             .one()
         )
         assert status.preferred_tag_id == existing_id
+
+
+def test_register_tag_with_status_type_id_none_defaults_and_preserves(
+    session_factory: Callable[[], Session],
+) -> None:
+    """#1249: type_id=None は新規 status では 0、既存 status では現在値を保持する。
+
+    update_deprecated_tags / GUI fallback は type_id を渡さない従来挙動を持つため、
+    register_tag_with_status が type_id=None を「既存値保持 / 新規は 0」として扱えることを
+    保証する。
+    """
+    _seed_format_and_mapping(session_factory)
+    # 非 0 の type mapping (format_id=1, type_id=2) も seed する
+    with session_factory() as session:
+        session.add(TagTypeName(type_name_id=2, type_name="character"))
+        session.add(TagTypeFormatMapping(format_id=1, type_id=2, type_name_id=2))
+        session.commit()
+    reader = TagReader(session_factory)
+    repo = TagRepository(session_factory, reader=MergedTagReader(base_repo=reader))
+
+    # 新規 status: type_id=None -> 0
+    new_id = repo.register_tag_with_status(
+        source_tag="newdep",
+        tag="newdep",
+        existing_tag_id=None,
+        format_id=1,
+        type_id=None,
+        alias=False,
+        preferred_tag_id=None,
+    )
+    with session_factory() as session:
+        status = (
+            session.query(TagStatus)
+            .filter(TagStatus.tag_id == new_id, TagStatus.format_id == 1)
+            .one()
+        )
+        assert status.type_id == 0
+
+    # 既存 status を type_id=2 で作り直してから type_id=None で更新 -> 2 を保持
+    repo.update_tag_status(tag_id=new_id, format_id=1, alias=False, preferred_tag_id=new_id, type_id=2)
+    repo.register_tag_with_status(
+        source_tag="newdep",
+        tag="newdep",
+        existing_tag_id=new_id,
+        format_id=1,
+        type_id=None,
+        alias=False,
+        preferred_tag_id=None,
+    )
+    with session_factory() as session:
+        status = (
+            session.query(TagStatus)
+            .filter(TagStatus.tag_id == new_id, TagStatus.format_id == 1)
+            .one()
+        )
+        assert status.type_id == 2

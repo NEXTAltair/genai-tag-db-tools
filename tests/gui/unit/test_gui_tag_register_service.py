@@ -18,6 +18,7 @@ class DummyRepo:
         self.status_updates: list[tuple[int, int, bool, int, int | None]] = []
         self.translations: list[tuple[int, str, str]] = []
         self.usage_updates: list[tuple[int, int, int]] = []
+        self.atomic_calls: list[dict] = []
         self._tag_ids: dict[str, int] = {}
 
     def create_tag(self, source_tag: str, tag: str) -> int:
@@ -56,6 +57,18 @@ class DummyRepo:
         既存アサーション (created_tags / status_updates / translations) を保つため
         同じ記録配列に書き込む。
         """
+        self.atomic_calls.append(
+            {
+                "source_tag": source_tag,
+                "tag": tag,
+                "existing_tag_id": existing_tag_id,
+                "format_id": format_id,
+                "type_id": type_id,
+                "alias": alias,
+                "preferred_tag_id": preferred_tag_id,
+                "translations": list(translations) if translations else None,
+            }
+        )
         if existing_tag_id is not None:
             tag_id = existing_tag_id
         else:
@@ -296,6 +309,43 @@ class TestGuiTagRegisterService:
         # Verify tag creation through legacy path
         assert tag_id == 10
         assert service._repo.created_tags == [("legacy_tag", "legacy_tag")]
+
+    def test_register_or_update_tag_fallback_bundles_translation_and_status_atomically(
+        self, service: GuiTagRegisterService, qtbot
+    ):
+        """#1249: format/type 未指定の fallback 経路でも、create_tag→別 session の
+        update_tag_status / add_or_update_translation という非 atomic な分離ではなく、
+        register_tag_with_status で TAGS 行・TAG_STATUS 行・翻訳を単一トランザクションに
+        束ねる。低並行下で child(TAG_STATUS) が直前の parent(TAGS) を可視化できず
+        FK 制約失敗になる潜在バグを塞ぐ。
+        """
+        tag_info = {
+            "normalized_tag": "fallback_tag",
+            "source_tag": "fallback_src",
+            "format_name": "danbooru",
+            "type_name": "",  # type 未指定 → fallback 経路
+            "use_count": 30,
+            "language": "ja",
+            "translation": "フォールバック",
+        }
+
+        tag_id = service.register_or_update_tag(tag_info)
+
+        assert tag_id == 10
+        repo = service._repo
+        # 単一の atomic 呼び出しに翻訳が束ねられる
+        assert len(repo.atomic_calls) == 1
+        call = repo.atomic_calls[0]
+        assert call["source_tag"] == "fallback_src"
+        assert call["tag"] == "fallback_tag"
+        assert call["alias"] is False
+        assert call["preferred_tag_id"] is None
+        assert call["type_id"] is None
+        assert call["translations"] == [("ja", "フォールバック")]
+        # 翻訳を別 session (add_or_update_translation) で二重書きしていない (atomic 内の1件のみ)
+        assert repo.translations == [(10, "ja", "フォールバック")]
+        # usage_count は TAGS 行の commit 後に別途更新される
+        assert repo.usage_updates == [(10, 1, 30)]
 
     def test_register_or_update_tag_with_usage_count(self, service: GuiTagRegisterService, qtbot):
         """register_or_update_tag updates usage count when provided"""

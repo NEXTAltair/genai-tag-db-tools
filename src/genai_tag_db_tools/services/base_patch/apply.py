@@ -148,24 +148,32 @@ class BasePatchApplyService:
         format_id = self._resolve_or_create_format(patch.format_name)
 
         preferred_id = self._ensure_tag(preferred_tag)
-        alias_id = self._ensure_tag(alias_tag)
-        if alias_id == preferred_id:
+        # alias タグは新規作成する場合があるため、ここでは解決のみに留める。新規作成は
+        # 下の register_tag_with_status で TAG_STATUS と単一トランザクションに束ねる
+        # (LoRAIro #1249)。create_tag → 別 session で update_tag_status に分けると、
+        # 並行アクセス下で child(TAG_STATUS) が直前の parent(TAGS) を可視化できず
+        # FK 制約失敗になりうる。
+        alias_id = self._resolve_tag_id(alias_tag)
+        if alias_id is not None and alias_id == preferred_id:
             raise _ApplyReject("alias tag and preferred tag resolve to the same tag")
 
-        existing = self._tag_status(alias_id, format_id)
+        existing = self._tag_status(alias_id, format_id) if alias_id is not None else None
         if existing is not None and existing.alias and existing.preferred_tag_id == preferred_id:
             return None
         type_id = self._alias_type_id(existing, preferred_id, format_id)
         if self._dry_run:
-            return [f"TAG_STATUS.alias tag_id={alias_id} -> preferred_tag_id={preferred_id}"]
-        self._repo.update_tag_status(
-            tag_id=alias_id,
+            alias_label = alias_id if alias_id is not None else -1
+            return [f"TAG_STATUS.alias tag_id={alias_label} -> preferred_tag_id={preferred_id}"]
+        resolved_alias_id = self._repo.register_tag_with_status(
+            source_tag=alias_tag,
+            tag=alias_tag,
+            existing_tag_id=alias_id,
             format_id=format_id,
+            type_id=type_id,
             alias=True,
             preferred_tag_id=preferred_id,
-            type_id=type_id,
         )
-        return [f"TAG_STATUS.alias tag_id={alias_id} -> preferred_tag_id={preferred_id}"]
+        return [f"TAG_STATUS.alias tag_id={resolved_alias_id} -> preferred_tag_id={preferred_id}"]
 
     def _apply_preferred_correction(self, patch: BaseCorrectionPatch) -> list[str] | None:
         alias_tag = _require(patch.target_tag, "target.tag")

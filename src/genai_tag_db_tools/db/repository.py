@@ -661,7 +661,7 @@ class TagRepository:
         tag: str,
         existing_tag_id: int | None,
         format_id: int,
-        type_id: int,
+        type_id: int | None,
         alias: bool,
         preferred_tag_id: int | None,
         translations: list[tuple[str, str]] | None = None,
@@ -677,7 +677,7 @@ class TagRepository:
             tag: 正規タグ文字列。
             existing_tag_id: 呼び出し元が reader で解決済みの既存 tag_id。None なら新規作成。
             format_id: フォーマットID。
-            type_id: タイプID。
+            type_id: タイプID。None なら既存 status の値を保持し、新規なら 0 を使う。
             alias: エイリアスかどうか。
             preferred_tag_id: alias=True のとき解決済みの推奨タグID。alias=False では無視され、
                 新規/既存 tag 自身の id を使う。
@@ -720,7 +720,15 @@ class TagRepository:
                     preferred_tag_id=preferred_tag_id,
                     translations=translations,
                 )
-                session.commit()
+                try:
+                    session.commit()
+                except IntegrityError as retry_error:
+                    # 稀な double-race や TAG_STATUS 由来の衝突では raw IntegrityError を
+                    # 呼び出し元へ漏らさず ValueError に包んで返す (LoRAIro #1249)。
+                    session.rollback()
+                    msg = ErrorMessages.DB_OPERATION_FAILED.format(error_msg=str(retry_error))
+                    self.logger.error(msg)
+                    raise ValueError(msg) from retry_error
             invalidate_case_exception_cache(session.get_bind())
             return tag_id
 
@@ -730,7 +738,7 @@ class TagRepository:
         *,
         tag_id: int,
         format_id: int,
-        type_id: int,
+        type_id: int | None,
         alias: bool,
         preferred_tag_id: int | None,
         translations: list[tuple[str, str]] | None,

@@ -22,6 +22,7 @@ class DummyRepo:
     def __init__(self) -> None:
         self.created_tags: list[tuple[str, str]] = []
         self.status_updates: list[dict] = []
+        self.atomic_calls: list[dict] = []
         self._tag_ids: dict[str, int] = {}
         self._next_id = 100
 
@@ -46,6 +47,48 @@ class DummyRepo:
 
     def add_or_update_translation(self, tag_id: int, language: str, translation: str) -> None:
         pass
+
+    def register_tag_with_status(
+        self,
+        *,
+        source_tag: str,
+        tag: str,
+        existing_tag_id: int | None,
+        format_id: int,
+        type_id: int | None,
+        alias: bool,
+        preferred_tag_id: int | None,
+        translations: list[tuple[str, str]] | None = None,
+    ) -> int:
+        """#1249: create_tag + update_tag_status を単一トランザクションに束ねる atomic API。
+
+        既存アサーション (status_updates) を保つため、新規作成時は create_tag を通し
+        status を同じ配列に記録する。
+        """
+        self.atomic_calls.append(
+            {
+                "source_tag": source_tag,
+                "tag": tag,
+                "existing_tag_id": existing_tag_id,
+                "type_id": type_id,
+                "alias": alias,
+                "preferred_tag_id": preferred_tag_id,
+            }
+        )
+        if existing_tag_id is not None:
+            tag_id_val = existing_tag_id
+        else:
+            tag_id_val = self.create_tag(source_tag, tag)
+        effective_preferred = preferred_tag_id if alias else tag_id_val
+        self.status_updates.append(
+            {
+                "tag_id": tag_id_val,
+                "format_id": format_id,
+                "alias": alias,
+                "preferred_tag_id": effective_preferred,
+            }
+        )
+        return tag_id_val
 
     def create_format_if_not_exists(
         self, format_name: str, description: str | None = None, reader: object = None
@@ -132,6 +175,48 @@ class TestRegisterAliasEntry:
         assert len(repo.status_updates) == 1
         assert repo.status_updates[0]["alias"] is True
         assert repo.status_updates[0]["preferred_tag_id"] == 99
+
+    def test_apply_uses_atomic_register_with_status(self) -> None:
+        """#1249: create_tag→別 session の update_tag_status ではなく register_tag_with_status で
+        TAGS 行と TAG_STATUS 行を単一トランザクションに束ねて登録する。"""
+        repo = DummyRepo()
+        service = TagRegisterService(repository=repo, reader=DummyReader())
+        entry = AliasRegisterInput(
+            alias="weding dress",
+            preferred="wedding dress",
+            format_name="Lorairo",
+            type_name="unknown",
+        )
+        service.register_alias_entry(entry, dry_run=False)
+
+        assert len(repo.atomic_calls) == 1
+        call = repo.atomic_calls[0]
+        assert call["tag"] == "weding dress"
+        assert call["alias"] is True
+        assert call["preferred_tag_id"] == 99
+        # 新規 alias なので reader 解決結果 (None) を existing_tag_id として渡す
+        assert call["existing_tag_id"] is None
+
+    def test_apply_reuses_existing_tag_id_without_alias_status(self) -> None:
+        """#1249: alias タグが既存 (alias status 無し) なら register_tag_with_status に
+        既存 tag_id を渡し、重複 TAGS 行を作らない。"""
+        reader = DummyReader()
+        reader._tags["weding dress"] = 200  # 既存だが alias status 未設定
+        repo = DummyRepo()
+        service = TagRegisterService(repository=repo, reader=reader)
+        entry = AliasRegisterInput(
+            alias="weding dress",
+            preferred="wedding dress",
+            format_name="Lorairo",
+            type_name="unknown",
+        )
+        result = service.register_alias_entry(entry, dry_run=False)
+
+        assert result.status == "created"
+        assert len(repo.atomic_calls) == 1
+        assert repo.atomic_calls[0]["existing_tag_id"] == 200
+        # 既存 id を再利用するので create_tag は呼ばれない
+        assert repo.created_tags == []
 
     def test_skipped_when_same_preferred_exists(self) -> None:
         reader = DummyReader()

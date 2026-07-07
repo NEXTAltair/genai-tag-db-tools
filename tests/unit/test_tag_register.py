@@ -83,24 +83,50 @@ def test_update_translations_skips_empty_values():
 
 
 @pytest.mark.db_tools
-def test_update_deprecated_tags_registers_aliases():
+def test_update_deprecated_tags_registers_aliases_atomically():
+    """#1249: deprecated alias は create_tag→別 session の update_tag_status という非 atomic な
+    分離ではなく、register_tag_with_status で TAGS 行と TAG_STATUS 行を単一トランザクションに
+    束ねて登録する。低並行下で child(TAG_STATUS) が直前の parent(TAGS) を可視化できず
+    FK 制約失敗になる潜在バグを塞ぐ。
+    """
+
     class DummyRepo:
         def __init__(self):
-            self.created = []
-            self.status_updates = []
+            self.atomic_calls: list[dict] = []
+            self.legacy_create_calls: list[tuple[str, str]] = []
+            self.legacy_status_calls: list[dict] = []
 
-        def create_tag(self, tag: str, source_tag: str) -> int:
-            self.created.append((tag, source_tag))
-            return len(self.created) + 200
-
-        def update_tag_status(
+        def register_tag_with_status(
             self,
-            tag_id: int,
+            *,
+            source_tag: str,
+            tag: str,
+            existing_tag_id: int | None,
             format_id: int,
+            type_id: int | None,
             alias: bool,
-            preferred_tag_id: int,
-        ) -> None:
-            self.status_updates.append((tag_id, format_id, alias, preferred_tag_id))
+            preferred_tag_id: int | None,
+            translations: list[tuple[str, str]] | None = None,
+        ) -> int:
+            self.atomic_calls.append(
+                {
+                    "source_tag": source_tag,
+                    "tag": tag,
+                    "existing_tag_id": existing_tag_id,
+                    "format_id": format_id,
+                    "type_id": type_id,
+                    "alias": alias,
+                    "preferred_tag_id": preferred_tag_id,
+                }
+            )
+            return len(self.atomic_calls) + 200
+
+        def create_tag(self, source_tag: str, tag: str) -> int:  # 旧非 atomic 経路
+            self.legacy_create_calls.append((source_tag, tag))
+            return 999
+
+        def update_tag_status(self, **kwargs) -> None:  # 旧非 atomic 経路
+            self.legacy_status_calls.append(kwargs)
 
     repo = DummyRepo()
     register = TagRegister(repository=repo)
@@ -109,5 +135,17 @@ def test_update_deprecated_tags_registers_aliases():
     register.update_deprecated_tags(df, format_id=3)
 
     cleaned = [TagCleaner.clean_format("old_tag"), TagCleaner.clean_format("old_tag2")]
-    assert repo.created == [(cleaned[0], cleaned[0]), (cleaned[1], cleaned[1])]
-    assert repo.status_updates == [(201, 3, True, 10), (202, 3, True, 10)]
+    # 非 atomic な旧経路 (create_tag + update_tag_status の分離呼び出し) は使わない
+    assert repo.legacy_create_calls == []
+    assert repo.legacy_status_calls == []
+    # 単一トランザクションの atomic 経路のみを使う
+    assert [c["tag"] for c in repo.atomic_calls] == cleaned
+    assert [c["source_tag"] for c in repo.atomic_calls] == cleaned
+    for call in repo.atomic_calls:
+        assert call["alias"] is True
+        assert call["preferred_tag_id"] == 10
+        assert call["format_id"] == 3
+        # type_id=None で既存 status の値を保持し、新規なら 0 を使う従来挙動を維持
+        assert call["type_id"] is None
+        # existing_tag_id=None で session 内解決 (新規/既存の両対応) に委ねる
+        assert call["existing_tag_id"] is None
