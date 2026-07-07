@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import Engine, create_engine, event
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from genai_tag_db_tools.db.schema import Base, UserOverlayBase
@@ -25,6 +26,11 @@ _query_abort_check: Callable[[], bool] | None = None
 # progress handler の呼び出し間隔 (SQLite VM 命令数)。小さいほど応答が速いが
 # オーバーヘッドが増える。長時間クエリの協調キャンセル用途なので粗くてよい。
 _PROGRESS_HANDLER_INTERVAL = 4000
+
+# ロック競合時の待機上限 (ms)。GUI (書き) と CLI/RefinementWorker (読み) が
+# user_tags.sqlite を共有するため、瞬間的な排他ロックを即時失敗させず待機させる
+# (LoRAIro #1239)。LoRAIro 本体 DB (db_core.BUSY_TIMEOUT_MS) と同値。
+_BUSY_TIMEOUT_MS = 30000
 
 
 def set_query_abort_check(check: Callable[[], bool] | None) -> None:
@@ -82,6 +88,44 @@ def enable_foreign_keys(dbapi_connection: Any, connection_record: Any) -> None:
     cursor.close()
 
 
+def set_busy_timeout(dbapi_connection: Any, connection_record: Any) -> None:
+    """接続ごとに busy_timeout を設定する (LoRAIro #1239)。
+
+    busy_timeout はロック待機の設定であり WAL への切り替え (#1165 でクラッシュした
+    per-connection ``PRAGMA journal_mode=WAL``) のような排他取得は伴わないため、
+    接続ごとに設定して安全。foreign_keys とは独立に単独 cursor で設定する。
+    """
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
+    finally:
+        cursor.close()
+
+
+def _ensure_wal_journal_mode(engine: Engine) -> None:
+    """file-backed DB に WAL journal mode を DB 準備時 1 回だけ永続化する (LoRAIro #1165)。
+
+    journal_mode=WAL は DB ヘッダに永続化されるため接続ごとに設定する必要はない。
+    毎接続で ``PRAGMA journal_mode=WAL`` を実行すると、GUI/CLI 併用 (9p bind mount) 時に
+    その一瞬の排他取得が busy_timeout の効かないまま ``database is locked`` /
+    ``disk I/O error`` になり接続セットアップがクラッシュする。そこで準備時に一度だけ
+    設定し、既に WAL の場合は書き換え (ロック取得) を避けて読み取りだけで済ませる。
+
+    Args:
+        engine: 対象の SQLAlchemy エンジン。``:memory:`` DB では何もしない。
+    """
+    if ":memory:" in str(engine.url):
+        return
+    try:
+        with engine.connect() as connection:
+            current = connection.exec_driver_sql("PRAGMA journal_mode").scalar()
+            if current is not None and str(current).lower() == "wal":
+                return
+            connection.exec_driver_sql("PRAGMA journal_mode=WAL")
+    except SQLAlchemyError:
+        logger.warning("Failed to set WAL journal mode at DB preparation", exc_info=True)
+
+
 def _create_engine(db_path: Path) -> Engine:
     engine = create_engine(
         f"sqlite:///{db_path.absolute()}",
@@ -89,6 +133,8 @@ def _create_engine(db_path: Path) -> Engine:
         echo=False,
     )
     event.listen(engine, "connect", enable_foreign_keys)
+    # ロック競合時に即時失敗させず待機する (GUI/CLI 併用、LoRAIro #1239)。
+    event.listen(engine, "connect", set_busy_timeout)
     # 協調キャンセルで実行中 SQL を中断できるようにする (set_query_abort_check)。
     # 判定関数未登録時は None チェックのみで実質オーバーヘッドなし。
     event.listen(engine, "connect", _install_progress_handler)
@@ -151,6 +197,11 @@ def init_user_db(user_db_dir: Path | None = None, *, format_name: str | None = N
 
     _user_db_path = user_db_path
     _user_engine = _create_engine(user_db_path)
+
+    # user_tags.sqlite は GUI (書き) と CLI/RefinementWorker (読み) が共有する唯一の
+    # 書き込み先。WAL は writer/reader 同時アクセスの並行性を上げ、単独巨大ロックを
+    # 避ける。per-connection ではなく DB 準備時に 1 回だけ設定する (#1165/#1239)。
+    _ensure_wal_journal_mode(_user_engine)
 
     # overlay テーブルを先に作成してから legacy 移行を実行する。
     # 移行関数が USER_TAGS / USER_TAG_STATUS_PATCH 等への INSERT を行うため、

@@ -912,3 +912,115 @@ def _seed_search_rows(session: Session, tag_ids: range) -> None:
             )
         )
     session.commit()
+
+
+# ==============================================================================
+# register_tag_with_status: parent(TAGS) + child(TAG_STATUS) の atomicity (#1239)
+# ==============================================================================
+
+
+def _seed_format_and_mapping(session_factory: Callable[[], Session]) -> None:
+    """format_id=1 / type_id=0(unknown) の mapping を seed する。"""
+    with session_factory() as session:
+        session.add(TagFormat(format_id=1, format_name="danbooru"))
+        session.add(TagTypeName(type_name_id=0, type_name="unknown"))
+        session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=0))
+        session.commit()
+
+
+def test_register_tag_with_status_writes_parent_and_child_atomically(
+    session_factory: Callable[[], Session],
+) -> None:
+    """#1239: TAGS 行・TAG_STATUS 行・翻訳を単一トランザクションで束ねて書く。"""
+    _seed_format_and_mapping(session_factory)
+    reader = TagReader(session_factory)
+    repo = TagRepository(session_factory, reader=MergedTagReader(base_repo=reader))
+
+    tag_id = repo.register_tag_with_status(
+        source_tag="newtag",
+        tag="newtag",
+        existing_tag_id=None,
+        format_id=1,
+        type_id=0,
+        alias=False,
+        preferred_tag_id=None,
+        translations=[("ja", "新タグ")],
+    )
+
+    with session_factory() as session:
+        tag_row = session.query(Tag).filter(Tag.tag == "newtag").one()
+        assert tag_row.tag_id == tag_id
+        status = (
+            session.query(TagStatus)
+            .filter(TagStatus.tag_id == tag_id, TagStatus.format_id == 1)
+            .one()
+        )
+        assert status.alias is False
+        # alias=False では preferred_tag_id は自身の id に一致する
+        assert status.preferred_tag_id == tag_id
+        assert status.type_id == 0
+        translation = session.query(TagTranslation).filter(TagTranslation.tag_id == tag_id).one()
+        assert translation.translation == "新タグ"
+
+
+def test_register_tag_with_status_rolls_back_parent_when_status_fails(
+    session_factory: Callable[[], Session],
+) -> None:
+    """#1239: child(TAG_STATUS) 書き込みが失敗したら parent(TAGS) も rollback される。
+
+    非 atomic な旧実装では create_tag が単独 commit するため、後続の status 失敗時に
+    TAGS 行だけが孤児として残っていた。atomic 化後は type_id マッピング不整合で
+    status 書き込みが失敗すると、直前に flush した TAGS 行も一緒に rollback される。
+    """
+    _seed_format_and_mapping(session_factory)
+    reader = TagReader(session_factory)
+    repo = TagRepository(session_factory, reader=MergedTagReader(base_repo=reader))
+
+    # type_id=5 は mapping が無いため _validate_type_mapping が commit 前に ValueError を送出
+    with pytest.raises(ValueError):
+        repo.register_tag_with_status(
+            source_tag="orphan",
+            tag="orphan",
+            existing_tag_id=None,
+            format_id=1,
+            type_id=5,
+            alias=False,
+            preferred_tag_id=None,
+        )
+
+    with session_factory() as session:
+        # parent TAGS 行が孤児として残っていないこと
+        assert session.query(Tag).filter(Tag.tag == "orphan").one_or_none() is None
+        assert session.query(TagStatus).count() == 0
+
+
+def test_register_tag_with_status_reuses_existing_tag_id(
+    session_factory: Callable[[], Session],
+) -> None:
+    """#1239: existing_tag_id 指定時は新規 TAGS 行を作らず既存 id に status を張る。"""
+    _seed_format_and_mapping(session_factory)
+    reader = TagReader(session_factory)
+    repo = TagRepository(session_factory, reader=MergedTagReader(base_repo=reader))
+
+    existing_id = repo.create_tag("existing", "existing")
+
+    returned_id = repo.register_tag_with_status(
+        source_tag="existing",
+        tag="existing",
+        existing_tag_id=existing_id,
+        format_id=1,
+        type_id=0,
+        alias=False,
+        preferred_tag_id=None,
+    )
+
+    assert returned_id == existing_id
+    with session_factory() as session:
+        # 重複 TAGS 行を作っていないこと
+        assert session.query(Tag).filter(Tag.tag == "existing").count() == 1
+        status = (
+            session.query(TagStatus)
+            .filter(TagStatus.tag_id == existing_id, TagStatus.format_id == 1)
+            .one()
+        )
+        assert status.preferred_tag_id == existing_id

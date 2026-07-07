@@ -10,9 +10,9 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
-from genai_tag_db_tools.db.runtime import _create_engine
 from genai_tag_db_tools.core_api import write_user_translation
 from genai_tag_db_tools.db.repository import TagRepository
+from genai_tag_db_tools.db.runtime import _create_engine
 from genai_tag_db_tools.db.schema import (
     USER_TAG_ID_OFFSET,
     Base,
@@ -358,6 +358,30 @@ class _DummyRepo:
 
     def add_or_update_translation(self, tag_id: int, language: str, translation: str) -> None:
         pass
+
+    def register_tag_with_status(
+        self,
+        *,
+        source_tag: str,
+        tag: str,
+        existing_tag_id: int | None,
+        format_id: int,
+        type_id: int,
+        alias: bool,
+        preferred_tag_id: int | None,
+        translations: list[tuple[str, str]] | None = None,
+    ) -> int:
+        """create_tag + status を単一トランザクションで束ねる新 API (#1239)。
+
+        既存アサーション (created_tags / status_updates) を保つため同じ記録配列に書く。
+        """
+        if existing_tag_id is not None:
+            tag_id = existing_tag_id
+        else:
+            tag_id = self.create_tag(source_tag, tag)
+        effective_preferred = preferred_tag_id if alias else tag_id
+        self.status_updates.append((tag_id, format_id, alias, effective_preferred, type_id))
+        return tag_id
 
     def create_type_name_if_not_exists(self, type_name: str, description: str | None = None) -> int:
         return {"unknown": 0, "general": 1, "character": 2}.get(type_name, 0)

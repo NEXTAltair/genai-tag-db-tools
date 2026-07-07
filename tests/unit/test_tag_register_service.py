@@ -45,6 +45,34 @@ class DummyRepo:
     def add_or_update_translation(self, tag_id: int, language: str, translation: str) -> None:
         self.translations.append((tag_id, language, translation))
 
+    def register_tag_with_status(
+        self,
+        *,
+        source_tag: str,
+        tag: str,
+        existing_tag_id: int | None,
+        format_id: int,
+        type_id: int,
+        alias: bool,
+        preferred_tag_id: int | None,
+        translations: list[tuple[str, str]] | None = None,
+    ) -> int:
+        """create_tag + status + translations を単一トランザクションで束ねる新 API (#1239)。
+
+        既存アサーションを保つため、create_tag/update_tag_status/add_or_update_translation
+        と同じ記録配列に書き込む。
+        """
+        if existing_tag_id is not None:
+            tag_id = existing_tag_id
+        else:
+            tag_id = self.create_tag(source_tag, tag)
+        effective_preferred = preferred_tag_id if alias else tag_id
+        self.status_updates.append((tag_id, format_id, alias, effective_preferred, type_id))
+        if translations:
+            for language, translation in translations:
+                self.translations.append((tag_id, language, translation))
+        return tag_id
+
     def update_usage_count(self, tag_id: int, format_id: int, count: int) -> None:
         self.usage_updates.append((tag_id, format_id, count))
 

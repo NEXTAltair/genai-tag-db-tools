@@ -629,6 +629,129 @@ class TagRepository:
             invalidate_case_exception_cache(session.get_bind())
             return new_tag.tag_id
 
+    @staticmethod
+    def _resolve_or_create_tag_in_session(
+        session: "Session", source_tag: str, tag: str, existing_tag_id: int | None
+    ) -> int:
+        """同一 session 内で TAGS 行を取得または新規作成し tag_id を返す（commit なし）。
+
+        Args:
+            session: SQLAlchemyセッション（commit しない）。
+            source_tag: ソースタグ文字列。
+            tag: 正規タグ文字列。
+            existing_tag_id: 呼び出し元が reader で解決済みの既存 tag_id。None なら新規作成。
+
+        Returns:
+            既存または新規作成した tag_id（新規時は flush 済みで id 割当済み）。
+        """
+        if existing_tag_id is not None:
+            return existing_tag_id
+        existing = session.query(Tag).filter(Tag.tag == tag).one_or_none()
+        if existing is not None:
+            return existing.tag_id
+        new_tag = Tag(source_tag=source_tag, tag=tag)
+        session.add(new_tag)
+        session.flush()
+        return new_tag.tag_id
+
+    def register_tag_with_status(
+        self,
+        *,
+        source_tag: str,
+        tag: str,
+        existing_tag_id: int | None,
+        format_id: int,
+        type_id: int,
+        alias: bool,
+        preferred_tag_id: int | None,
+        translations: list[tuple[str, str]] | None = None,
+    ) -> int:
+        """TAGS 行・TAG_STATUS 行・任意の翻訳を単一トランザクションで束ねて登録する。
+
+        parent (TAGS) と child (TAG_STATUS / TAG_TRANSLATIONS) を1コミットで束ねること
+        で、child insert が直前の parent を可視化できない並行アクセス下の
+        ``FOREIGN KEY constraint failed`` を防ぐ (LoRAIro #1239)。
+
+        Args:
+            source_tag: ソースタグ文字列。
+            tag: 正規タグ文字列。
+            existing_tag_id: 呼び出し元が reader で解決済みの既存 tag_id。None なら新規作成。
+            format_id: フォーマットID。
+            type_id: タイプID。
+            alias: エイリアスかどうか。
+            preferred_tag_id: alias=True のとき解決済みの推奨タグID。alias=False では無視され、
+                新規/既存 tag 自身の id を使う。
+            translations: (language, translation) タプルのリスト。
+
+        Returns:
+            登録された tag の tag_id。
+
+        Raises:
+            ValueError: 型マッピング不整合・バリデーション失敗・DB 操作失敗時。
+        """
+        with self.session_factory() as session:
+            tag_id = self._resolve_or_create_tag_in_session(session, source_tag, tag, existing_tag_id)
+            self._write_status_and_translations_in_session(
+                session,
+                tag_id=tag_id,
+                format_id=format_id,
+                type_id=type_id,
+                alias=alias,
+                preferred_tag_id=preferred_tag_id,
+                translations=translations,
+            )
+            try:
+                session.commit()
+            except IntegrityError as e:
+                session.rollback()
+                # 並行登録に負けた場合は勝者 id を引いて status/translations を張り直す。
+                winner = session.query(Tag).filter(Tag.tag == tag).one_or_none()
+                if winner is None:
+                    msg = ErrorMessages.DB_OPERATION_FAILED.format(error_msg=str(e))
+                    self.logger.error(msg)
+                    raise ValueError(msg) from e
+                tag_id = winner.tag_id
+                self._write_status_and_translations_in_session(
+                    session,
+                    tag_id=tag_id,
+                    format_id=format_id,
+                    type_id=type_id,
+                    alias=alias,
+                    preferred_tag_id=preferred_tag_id,
+                    translations=translations,
+                )
+                session.commit()
+            invalidate_case_exception_cache(session.get_bind())
+            return tag_id
+
+    def _write_status_and_translations_in_session(
+        self,
+        session: "Session",
+        *,
+        tag_id: int,
+        format_id: int,
+        type_id: int,
+        alias: bool,
+        preferred_tag_id: int | None,
+        translations: list[tuple[str, str]] | None,
+    ) -> None:
+        """TAG_STATUS と翻訳を同一 session 内で書き込む（commit は呼び出し元）。"""
+        effective_preferred = preferred_tag_id if alias else tag_id
+        if effective_preferred is None:
+            raise ValueError("preferred_tag_id が未設定です")
+        self._validate_tag_status_params(alias, effective_preferred, tag_id)
+        self._write_tag_status_in_session(
+            session,
+            tag_id=tag_id,
+            format_id=format_id,
+            alias=alias,
+            preferred_tag_id=effective_preferred,
+            type_id=type_id,
+        )
+        if translations:
+            for language, translation in translations:
+                self._add_translation_in_session(session, tag_id, language, translation)
+
     def update_tag(self, tag_id: int, *, source_tag: str | None = None, tag: str | None = None) -> None:
         with self.session_factory() as session:
             tag_obj = session.get(Tag, tag_id)
@@ -752,34 +875,24 @@ class TagRepository:
         self._validate_tag_status_params(alias, preferred_tag_id, tag_id)
 
         with self.session_factory() as session:
-            if type_id is not None:
-                self._validate_type_mapping(session, format_id, type_id)
-
-            status_obj = (
-                session.query(TagStatus)
-                .filter(TagStatus.tag_id == tag_id, TagStatus.format_id == format_id)
-                .one_or_none()
+            self._write_tag_status_in_session(
+                session,
+                tag_id=tag_id,
+                format_id=format_id,
+                alias=alias,
+                preferred_tag_id=preferred_tag_id,
+                type_id=type_id,
+                deprecated=deprecated,
+                deprecated_at=deprecated_at,
+                source_created_at=source_created_at,
+                updated_at=updated_at,
             )
-
-            effective_type_id = (
-                type_id if type_id is not None else (status_obj.type_id if status_obj else 0)
-            )
-
-            optional_fields = {
-                "deprecated": deprecated,
-                "deprecated_at": deprecated_at,
-                "source_created_at": source_created_at,
-                "updated_at": updated_at,
-            }
-
-            if status_obj:
-                self._apply_status_update(
-                    session, status_obj, effective_type_id, alias, preferred_tag_id, optional_fields
-                )
-            else:
-                self._create_new_status(
-                    session, tag_id, format_id, effective_type_id, alias, preferred_tag_id, optional_fields
-                )
+            try:
+                session.commit()
+            except IntegrityError as e:
+                session.rollback()
+                msg = ErrorMessages.DB_OPERATION_FAILED.format(error_msg=str(e))
+                raise ValueError(msg) from e
 
     @staticmethod
     def _validate_tag_status_params(alias: bool, preferred_tag_id: int, tag_id: int) -> None:
@@ -826,73 +939,76 @@ class TagRepository:
             raise ValueError(msg)
 
     @staticmethod
-    def _apply_status_update(
+    def _write_tag_status_in_session(
         session: "Session",
-        status_obj: TagStatus,
-        effective_type_id: int,
-        alias: bool,
-        preferred_tag_id: int,
-        optional_fields: dict[str, Any],
-    ) -> None:
-        """既存のTagStatusレコードを更新する。
-
-        Args:
-            session: SQLAlchemyセッション。
-            status_obj: 更新対象のTagStatusオブジェクト。
-            effective_type_id: 適用するタイプID。
-            alias: エイリアスフラグ。
-            preferred_tag_id: 優先タグID。
-            optional_fields: オプションフィールド（deprecated, deprecated_at等）。
-        """
-        status_obj.type_id = effective_type_id
-        status_obj.alias = alias
-        status_obj.preferred_tag_id = preferred_tag_id
-        for field_name, value in optional_fields.items():
-            if value is not None:
-                setattr(status_obj, field_name, value)
-        session.commit()
-
-    @staticmethod
-    def _create_new_status(
-        session: "Session",
+        *,
         tag_id: int,
         format_id: int,
-        effective_type_id: int,
         alias: bool,
         preferred_tag_id: int,
-        optional_fields: dict[str, Any],
+        type_id: int | None = None,
+        deprecated: bool | None = None,
+        deprecated_at: datetime | None = None,
+        source_created_at: datetime | None = None,
+        updated_at: datetime | None = None,
     ) -> None:
-        """新規TagStatusレコードを作成する。
+        """TAG_STATUS を同一 session 内で upsert する（commit は呼び出し元）。
+
+        parent (TAGS) と child (TAG_STATUS) を単一トランザクションで束ねられるよう、
+        commit を持たない session ボディを提供する。これにより並行アクセス下で child が
+        直前に作られた parent を可視化できずに ``FOREIGN KEY constraint failed`` になる
+        欠陥を防ぐ (LoRAIro #1239)。
 
         Args:
-            session: SQLAlchemyセッション。
-            tag_id: タグID。
+            session: SQLAlchemyセッション（commit しない）。
+            tag_id: 対象タグID。
             format_id: フォーマットID。
-            effective_type_id: タイプID。
-            alias: エイリアスフラグ。
+            alias: エイリアスかどうか。
             preferred_tag_id: 優先タグID。
-            optional_fields: オプションフィールド。
-
-        Raises:
-            ValueError: IntegrityErrorが発生した場合。
+            type_id: タイプID（Noneなら既存値または0を使用）。
+            deprecated: 非推奨フラグ。
+            deprecated_at: 非推奨になった日時。
+            source_created_at: ソース作成日時。
+            updated_at: 更新日時。
         """
-        try:
-            status_obj = TagStatus(
-                tag_id=tag_id,
-                format_id=format_id,
-                type_id=effective_type_id,
-                alias=alias,
-                preferred_tag_id=preferred_tag_id,
-                deprecated=optional_fields.get("deprecated", False) or False,
-                deprecated_at=optional_fields.get("deprecated_at"),
-                source_created_at=optional_fields.get("source_created_at"),
+        if type_id is not None:
+            TagRepository._validate_type_mapping(session, format_id, type_id)
+
+        status_obj = (
+            session.query(TagStatus)
+            .filter(TagStatus.tag_id == tag_id, TagStatus.format_id == format_id)
+            .one_or_none()
+        )
+
+        effective_type_id = type_id if type_id is not None else (status_obj.type_id if status_obj else 0)
+
+        optional_fields = {
+            "deprecated": deprecated,
+            "deprecated_at": deprecated_at,
+            "source_created_at": source_created_at,
+            "updated_at": updated_at,
+        }
+
+        if status_obj:
+            status_obj.type_id = effective_type_id
+            status_obj.alias = alias
+            status_obj.preferred_tag_id = preferred_tag_id
+            for field_name, value in optional_fields.items():
+                if value is not None:
+                    setattr(status_obj, field_name, value)
+        else:
+            session.add(
+                TagStatus(
+                    tag_id=tag_id,
+                    format_id=format_id,
+                    type_id=effective_type_id,
+                    alias=alias,
+                    preferred_tag_id=preferred_tag_id,
+                    deprecated=optional_fields.get("deprecated", False) or False,
+                    deprecated_at=optional_fields.get("deprecated_at"),
+                    source_created_at=optional_fields.get("source_created_at"),
+                )
             )
-            session.add(status_obj)
-            session.commit()
-        except IntegrityError as e:
-            session.rollback()
-            msg = ErrorMessages.DB_OPERATION_FAILED.format(error_msg=str(e))
-            raise ValueError(msg) from e
 
     def delete_tag_status(self, tag_id: int, format_id: int) -> None:
         with self.session_factory() as session:
@@ -933,29 +1049,38 @@ class TagRepository:
 
     def add_or_update_translation(self, tag_id: int, language: str, translation: str) -> None:
         with self.session_factory() as session:
-            tag = session.query(Tag).filter(Tag.tag_id == tag_id).one_or_none()
-            if not tag:
-                raise ValueError(f"Tag ID not found: {tag_id}")
-
-            existing = (
-                session.query(TagTranslation)
-                .filter(
-                    TagTranslation.tag_id == tag_id,
-                    TagTranslation.language == language,
-                    TagTranslation.translation == translation,
-                )
-                .one_or_none()
-            )
-            if existing:
-                return
-
+            self._add_translation_in_session(session, tag_id, language, translation)
             try:
-                translation_obj = TagTranslation(tag_id=tag_id, language=language, translation=translation)
-                session.add(translation_obj)
                 session.commit()
             except IntegrityError as e:
                 session.rollback()
                 raise ValueError(f"DB operation failed: {e}") from e
+
+    @staticmethod
+    def _add_translation_in_session(
+        session: "Session", tag_id: int, language: str, translation: str
+    ) -> None:
+        """TAG_TRANSLATIONS へ翻訳を追加する同一 session ボディ（commit は呼び出し元）。
+
+        parent (TAGS) と同一トランザクションで翻訳を書けるよう commit を持たない
+        (LoRAIro #1239)。既に同一 (tag_id, language, translation) があれば何もしない。
+        """
+        tag = session.query(Tag).filter(Tag.tag_id == tag_id).one_or_none()
+        if not tag:
+            raise ValueError(f"Tag ID not found: {tag_id}")
+
+        existing = (
+            session.query(TagTranslation)
+            .filter(
+                TagTranslation.tag_id == tag_id,
+                TagTranslation.language == language,
+                TagTranslation.translation == translation,
+            )
+            .one_or_none()
+        )
+        if existing:
+            return
+        session.add(TagTranslation(tag_id=tag_id, language=language, translation=translation))
 
     def create_format_if_not_exists(
         self, format_name: str, description: str | None = None, reader: "MergedTagReader | None" = None
