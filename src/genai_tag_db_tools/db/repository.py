@@ -1835,11 +1835,16 @@ class MergedTagReader:
             repos.append(self.user_repo)
 
         merged: dict[int, TagSearchRow] = {}
+        user_repo_index = len(repos) - 1 if self._has_user() else None
 
         if limit is None:
-            for repo in repos:
+            for index, repo in enumerate(repos):
                 for row in repo.search_tags(keyword, limit=None, offset=0, **kwargs):
-                    if not self._preserve_existing_search_row(merged.get(row["tag_id"]), row):
+                    if not self._preserve_existing_search_row(
+                        merged.get(row["tag_id"]),
+                        row,
+                        candidate_is_user=index == user_repo_index,
+                    ):
                         merged[row["tag_id"]] = row
             rows = [merged[tag_id] for tag_id in sorted(merged)]
             return rows[offset:] if offset else rows
@@ -1871,7 +1876,11 @@ class MergedTagReader:
                 if len(rows) < chunk_size:
                     exhausted.add(index)
                 for row in rows:
-                    if not self._preserve_existing_search_row(merged.get(row["tag_id"]), row):
+                    if not self._preserve_existing_search_row(
+                        merged.get(row["tag_id"]),
+                        row,
+                        candidate_is_user=index == user_repo_index,
+                    ):
                         merged[row["tag_id"]] = row
             if not made_progress:
                 break
@@ -1883,8 +1892,10 @@ class MergedTagReader:
     def _preserve_existing_search_row(
         existing: TagSearchRow | None,
         candidate: TagSearchRow,
+        *,
+        candidate_is_user: bool,
     ) -> bool:
-        if existing is None:
+        if existing is None or not candidate_is_user:
             return False
         return (
             existing["tag"] == candidate["tag"]
@@ -2570,13 +2581,26 @@ class MergedTagReader:
         format_name: str | None = None,
         resolve_preferred: bool = False,
     ) -> dict[str, TagSearchRow]:
-        merged: dict[str, TagSearchRow] = self._merge_by_key(
-            "search_tags_bulk",
-            None,
-            keywords,
-            format_name=format_name,
-            resolve_preferred=False,
-        )
+        repos: list[TagReader | OverlayTagReader] = [*self._iter_base_repos_low_to_high()]
+        if self._has_user():
+            assert self.user_repo is not None
+            repos.append(self.user_repo)
+        user_repo_index = len(repos) - 1 if self._has_user() else None
+
+        merged: dict[str, TagSearchRow] = {}
+        for index, repo in enumerate(repos):
+            result = repo.search_tags_bulk(
+                keywords,
+                format_name=format_name,
+                resolve_preferred=False,
+            )
+            for keyword, row in result.items():
+                if not self._preserve_existing_search_row(
+                    merged.get(keyword),
+                    row,
+                    candidate_is_user=index == user_repo_index,
+                ):
+                    merged[keyword] = row
         if merged:
             requested_format_id = self._requested_format_id(format_name)
             patched = self._apply_user_patches_to_search_rows(
@@ -2653,7 +2677,12 @@ class MergedTagReader:
             for keyword, rows in result.items():
                 bucket = merged_by_keyword.setdefault(keyword, {})
                 for row in rows:
-                    bucket[row["tag_id"]] = row
+                    if not self._preserve_existing_search_row(
+                        bucket.get(row["tag_id"]),
+                        row,
+                        candidate_is_user=repo is self.user_repo,
+                    ):
+                        bucket[row["tag_id"]] = row
         # tag_id 昇順で返す (`_merge_search_tags_adaptive` / `TagReader.search_tags_bulk_all` と
         # 同じ決定的順序。batch へ切替えても per-query search と行順が一致する、Codex PR #115 P3)。
         merged: dict[str, list[TagSearchRow]] = {

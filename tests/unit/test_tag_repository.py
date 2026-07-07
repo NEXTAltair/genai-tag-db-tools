@@ -101,6 +101,14 @@ def test_update_tags_type_batch_materializes_base_tag_parent_in_user_db() -> Non
     assert "danbooru" in rows[0]["format_statuses"]
     assert "Lorairo" in rows[0]["format_statuses"]
 
+    bulk_row = merged_reader.search_tags_bulk(["base_only_tag"])["base_only_tag"]
+    bulk_all_row = merged_reader.search_tags_bulk_all(["base_only_tag"])["base_only_tag"][0]
+
+    assert bulk_row["translations"] == {"ja": ["ベースのみ"]}
+    assert "Lorairo" in bulk_row["format_statuses"]
+    assert bulk_all_row["translations"] == {"ja": ["ベースのみ"]}
+    assert "Lorairo" in bulk_all_row["format_statuses"]
+
 
 def test_create_tag_returns_existing_id(session_factory: Callable[[], Session]) -> None:
     reader = TagReader(session_factory)
@@ -844,6 +852,45 @@ def test_merged_reader_search_tags_applies_offset_after_merge(
     result = merged.search_tags("sample", partial=True, limit=2, offset=3)
 
     assert [row["tag_id"] for row in result] == [4, 5]
+
+
+def test_merged_reader_search_tags_higher_priority_base_row_wins(
+    session_factory: Callable[[], Session],
+) -> None:
+    """同一 tag_id/tag/source_tag でも高優先度 base DB の検索行を採用する。"""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    engine_b = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine_b)
+    session_factory_b: Callable[[], Session] = sessionmaker(
+        bind=engine_b, autoflush=False, autocommit=False
+    )
+
+    def _seed_cat(session: Session, translation: str) -> None:
+        session.add(TagFormat(format_id=1, format_name="test"))
+        session.add(TagTypeName(type_name_id=1, type_name="general"))
+        session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=1))
+        session.add(Tag(tag_id=1, tag="cat", source_tag="cat"))
+        session.add(
+            TagStatus(tag_id=1, format_id=1, type_id=0, alias=False, preferred_tag_id=1, deprecated=False)
+        )
+        session.add(TagTranslation(tag_id=1, language="japanese", translation=translation))
+        session.commit()
+
+    reader_a = TagReader(session_factory)
+    reader_b = TagReader(session_factory_b)
+    with session_factory() as session:
+        _seed_cat(session, "猫A")
+    with session_factory_b() as session:
+        _seed_cat(session, "猫B")
+
+    merged = MergedTagReader(base_repo=[reader_a, reader_b])
+    result = merged.search_tags("cat")
+
+    assert len(result) == 1
+    assert result[0]["translations"] == {"japanese": ["猫A"]}
 
 
 def _seed_bulk_all_rows(session: Session) -> None:
