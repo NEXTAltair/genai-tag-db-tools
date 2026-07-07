@@ -2302,7 +2302,57 @@ class MergedTagReader:
             rows = rows[offset:]
         if resolve_preferred:
             rows = self._resolve_cross_scope_preferred(rows)
+            rows = self._dedup_case_variant_user_rows(rows)
         return rows
+
+    def _base_has_case_variant(self, tag: str) -> bool:
+        """いずれかの base repo に ``tag`` と casefold 一致する canonical タグが存在するか。
+
+        base の完全一致検索は case-insensitive のため、``tag`` にマッチした base 行のうち
+        ``tag`` 文字列 (canonical) が casefold 一致するものだけを重複とみなす。翻訳や
+        source_tag だけがマッチした行 (canonical が別文字列) は重複扱いしない。
+
+        Args:
+            tag: user 行の canonical タグ文字列。
+
+        Returns:
+            base に case-variant の canonical タグがあれば ``True``。
+        """
+        needle = tag.casefold()
+        for repo in self._iter_base_repos():
+            for base_row in repo.search_tags(tag, partial=False):
+                if base_row["tag"].casefold() == needle:
+                    return True
+        return False
+
+    def _dedup_case_variant_user_rows(self, rows: list[TagSearchRow]) -> list[TagSearchRow]:
+        """user overlay タグが base タグの大文字小文字違い重複なら結果から落とす (#1223)。
+
+        user が独自登録した case-variant 重複 (例: base ``anime`` に対する user ``Anime``) は
+        merge 時に base canonical を覆い隠し、手動タグ追加 (``resolve_preferred=True``) の
+        exact 検索が既存 base タグへ解決できず重複を再生産する。casefold 一致する base タグが
+        存在する user-scope 行を落とし、呼び出し側 (LoRAIro の 3 段フォールバック等) が
+        base canonical を解決できるようにする。
+
+        - 別文字列の user alias (typo 補正 #1183) は casefold が一致しないため触れない。
+        - base タグの deprecated 有無は判定に用いない (#1212: deprecated と case 重複は別軸)。
+        - ``resolve_preferred=True`` の解決経路でのみ呼ばれる (ブラウズ検索は user 行をそのまま
+          表示する)。
+
+        Args:
+            rows: cross-scope preferred 解決済みの TagSearchRow リスト。
+
+        Returns:
+            case-variant な user 重複を除いた TagSearchRow リスト。
+        """
+        if not self._has_user() or not rows:
+            return rows
+        kept: list[TagSearchRow] = []
+        for row in rows:
+            if self.get_tag_scope(row["tag_id"]) == "user" and self._base_has_case_variant(row["tag"]):
+                continue
+            kept.append(row)
+        return kept
 
     def search_tags_bulk(
         self,
