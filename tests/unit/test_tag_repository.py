@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 import polars as pl
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -23,15 +23,64 @@ from genai_tag_db_tools.db.schema import (
 pytestmark = pytest.mark.db_tools
 
 
-@pytest.fixture()
-def session_factory() -> Callable[[], Session]:
+def _memory_session_factory(*, foreign_keys: bool = False) -> Callable[[], Session]:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    if foreign_keys:
+
+        @event.listens_for(engine, "connect")
+        def _enable_foreign_keys(dbapi_connection, connection_record) -> None:
+            dbapi_connection.execute("PRAGMA foreign_keys=ON")
+
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+
+@pytest.fixture()
+def session_factory() -> Callable[[], Session]:
+    return _memory_session_factory()
+
+
+def test_update_tags_type_batch_materializes_base_tag_parent_in_user_db() -> None:
+    """Base DB 由来タグの type 補正時に user DB 側 TAGS 親行を保証する (#1268)。"""
+    from genai_tag_db_tools.models import TagTypeUpdate
+
+    base_factory = _memory_session_factory()
+    user_factory = _memory_session_factory(foreign_keys=True)
+    base_reader = TagReader(base_factory)
+    user_reader = TagReader(user_factory)
+    merged_reader = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+    repo = TagRepository(user_factory, reader=merged_reader)
+
+    base_tag_id = 197273
+    with base_factory() as session:
+        session.add(Tag(tag_id=base_tag_id, tag="base_only_tag", source_tag="Base Only Tag"))
+        session.commit()
+
+    with user_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.commit()
+
+    repo.update_tags_type_batch([TagTypeUpdate(tag_id=base_tag_id, type_name="general")], format_id=1000)
+
+    with user_factory() as session:
+        tag = session.query(Tag).filter(Tag.tag_id == base_tag_id).one()
+        status = session.query(TagStatus).filter(TagStatus.tag_id == base_tag_id).one()
+        type_name = (
+            session.query(TagTypeName.type_name)
+            .join(TagTypeFormatMapping, TagTypeName.type_name_id == TagTypeFormatMapping.type_name_id)
+            .filter(TagTypeFormatMapping.format_id == 1000, TagTypeFormatMapping.type_id == status.type_id)
+            .scalar()
+        )
+
+    assert tag.tag == "base_only_tag"
+    assert tag.source_tag == "Base Only Tag"
+    assert status.format_id == 1000
+    assert status.preferred_tag_id == base_tag_id
+    assert type_name == "general"
 
 
 def test_create_tag_returns_existing_id(session_factory: Callable[[], Session]) -> None:

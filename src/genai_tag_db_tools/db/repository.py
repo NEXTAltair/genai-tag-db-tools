@@ -1442,6 +1442,30 @@ class TagRepository:
 
         return cache[type_name]
 
+    def _ensure_local_tag_row_for_status_in_session(self, session: "Session", tag_id: int) -> None:
+        """Ensure the local TAGS table can satisfy TAG_STATUS foreign keys.
+
+        Type/status overrides are stored in the user DB TAG_STATUS table. When the
+        target tag only exists in a base DB, the user DB still needs a minimal TAGS
+        parent row with the same tag_id before TAG_STATUS can reference it.
+        """
+        existing_by_id = session.query(Tag).filter(Tag.tag_id == tag_id).one_or_none()
+        if existing_by_id is not None:
+            return
+
+        if self._reader is None:
+            raise ValueError(f"Tag ID not found in local TAGS and no reader is available: {tag_id}")
+
+        source = self._reader.get_tag_by_id(tag_id)
+        if source is None or not source.tag or not source.source_tag:
+            raise ValueError(f"Tag ID not found: {tag_id}")
+
+        existing_by_tag = session.query(Tag).filter(Tag.tag == source.tag).one_or_none()
+        if existing_by_tag is not None and existing_by_tag.tag_id != tag_id:
+            raise ValueError(f"tag='{source.tag}' already exists with tag_id={existing_by_tag.tag_id}")
+
+        session.add(Tag(tag_id=tag_id, source_tag=source.source_tag, tag=source.tag))
+
     def update_tags_type_batch(
         self,
         tag_updates: list,  # list[TagTypeUpdate] - avoid circular import
@@ -1488,7 +1512,9 @@ class TagRepository:
                     )
 
                     # Step 3: Update tag status with new type_id
-                    self.update_tag_status(
+                    self._ensure_local_tag_row_for_status_in_session(session, update.tag_id)
+                    self._write_tag_status_in_session(
+                        session,
                         tag_id=update.tag_id,
                         format_id=format_id,
                         alias=False,
