@@ -284,10 +284,10 @@ class TagRegisterService:
         type_id = self._resolve_type_id(type_name, request.format_name, fmt_id)
 
         existing_id = self._reader.get_tag_id_by_name(tag, partial=False)
-        tag_id = self._repo.create_tag(source_tag, tag)
-        created = existing_id is None
 
-        preferred_tag_id: int | None = tag_id
+        # alias の preferred は書き込み前に解決する。preferred を先に確定しておくと、
+        # 解決失敗時に TAGS 行だけ残る中途半端な状態を作らずに済む。
+        preferred_tag_id: int | None = None
         if request.alias:
             if not request.preferred_tag:
                 raise ValueError("alias=True の場合 preferred_tag が必須です")
@@ -295,22 +295,25 @@ class TagRegisterService:
             if preferred_tag_id is None:
                 raise ValueError(f"推奨タグが見つかりません: {request.preferred_tag}")
 
-        if request.translations:
-            for tr in request.translations:
-                self._repo.add_or_update_translation(tag_id, tr.language, tr.translation)
-
-        if preferred_tag_id is None:
-            raise ValueError("preferred_tag_id が未設定です")
-
-        self._repo.update_tag_status(
-            tag_id=tag_id,
-            format_id=fmt_id,
-            alias=request.alias,
-            preferred_tag_id=preferred_tag_id,
-            type_id=type_id,
+        translations = (
+            [(tr.language, tr.translation) for tr in request.translations] if request.translations else None
         )
 
-        return TagRegisterResult(created=created, tag_id=tag_id)
+        # create_tag + translations + update_tag_status を単一トランザクションで束ねる
+        # (LoRAIro #1239)。parent (TAGS) と child (TAG_STATUS) が別 session で個別 commit
+        # されると、並行アクセス下で child が parent を可視化できず FK 制約失敗になっていた。
+        tag_id = self._repo.register_tag_with_status(
+            source_tag=source_tag,
+            tag=tag,
+            existing_tag_id=existing_id,
+            format_id=fmt_id,
+            type_id=type_id,
+            alias=request.alias,
+            preferred_tag_id=preferred_tag_id,
+            translations=translations,
+        )
+
+        return TagRegisterResult(created=existing_id is None, tag_id=tag_id)
 
     def _register_user_tag(self, request: "TagRegisterRequest") -> "TagRegisterResult":
         """USER_TAGS / USER_TAG_STATUS_PATCH にタグを登録する。

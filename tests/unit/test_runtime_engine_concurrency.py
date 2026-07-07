@@ -137,3 +137,41 @@ def test_query_abort_check_noop_when_unregistered(tmp_path: Path) -> None:
         assert result == 10000
     finally:
         engine.dispose()
+
+
+def test_create_engine_sets_busy_timeout(tmp_path: Path) -> None:
+    """_create_engine() の接続は busy_timeout が設定される (LoRAIro #1239)。
+
+    GUI (書き) と CLI/RefinementWorker (読み) が user_tags.sqlite を共有するため、
+    瞬間的なロック競合を即時失敗させず待機させる必要がある。
+    """
+    from sqlalchemy import text
+
+    from genai_tag_db_tools.db.runtime import _BUSY_TIMEOUT_MS
+
+    db_path = tmp_path / "busy_timeout.sqlite"
+    engine = _create_engine(db_path)
+    try:
+        with engine.connect() as connection:
+            timeout = connection.execute(text("PRAGMA busy_timeout")).scalar()
+        assert timeout == _BUSY_TIMEOUT_MS
+    finally:
+        engine.dispose()
+
+
+def test_ensure_wal_journal_mode_persists_wal(tmp_path: Path) -> None:
+    """_ensure_wal_journal_mode() が file-backed DB を WAL に切り替える (LoRAIro #1165/#1239)。"""
+    from sqlalchemy import text
+
+    from genai_tag_db_tools.db.runtime import _ensure_wal_journal_mode
+
+    db_path = tmp_path / "wal_mode.sqlite"
+    engine = _create_engine(db_path)
+    Base.metadata.create_all(engine)
+    try:
+        _ensure_wal_journal_mode(engine)
+        with engine.connect() as connection:
+            mode = connection.execute(text("PRAGMA journal_mode")).scalar()
+        assert str(mode).lower() == "wal"
+    finally:
+        engine.dispose()
