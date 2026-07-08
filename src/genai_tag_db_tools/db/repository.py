@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 
 import polars as pl
 from sqlalchemy import func, inspect, or_
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from genai_tag_db_tools.db.query_utils import (
@@ -3090,11 +3090,14 @@ class MergedTagReader:
             return list(tag_ids)
 
         assert self.user_repo is not None
-        patched_statuses = {
-            status.tag_id: status
-            for status in self.user_repo.list_tag_statuses()
-            if status.format_id == format_id
-        }
+        try:
+            patched_statuses = {
+                status.tag_id: status
+                for status in self.user_repo.list_tag_statuses()
+                if status.format_id == format_id
+            }
+        except OperationalError:
+            return list(tag_ids)
         user_type_map = {
             type_id: type_name
             for (fmt_id, type_id), type_name in self.user_repo.get_type_mapping_map().items()
