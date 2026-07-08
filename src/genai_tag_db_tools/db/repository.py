@@ -3083,8 +3083,25 @@ class MergedTagReader:
             list[int]: unknownタイプのtag_idリスト。
         """
         tag_ids: set[int] = set()
-        for repo in self._iter_repos():
+        for repo in self._iter_base_repos():
             tag_ids |= set(repo.get_unknown_type_tag_ids(format_id))
+
+        if not self._has_user():
+            return list(tag_ids)
+
+        assert self.user_repo is not None
+        patched_statuses = {
+            status.tag_id: status
+            for status in self.user_repo.list_tag_statuses()
+            if status.format_id == format_id
+        }
+        for tag_id, status in patched_statuses.items():
+            type_name = self.get_type_name_by_format_type_id(format_id, status.type_id)
+            if type_name == "unknown":
+                tag_ids.add(tag_id)
+            else:
+                tag_ids.discard(tag_id)
+
         return list(tag_ids)
 
     # ------------------------------------------------------------------

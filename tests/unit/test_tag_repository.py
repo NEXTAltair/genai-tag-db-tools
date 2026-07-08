@@ -180,6 +180,51 @@ def test_update_tags_type_batch_rolls_back_overlay_patch_when_batch_fails(
         assert session.query(UserTagStatusPatch).all() == []
 
 
+def test_merged_unknown_type_ids_use_overlay_status_as_effective_status() -> None:
+    """user overlay で type 補正済みの base tag は unknown 一覧から除外する。"""
+
+    base_factory = _memory_session_factory()
+    user_factory = _memory_session_factory(overlay=True)
+    base_reader = TagReader(base_factory)
+    user_reader = OverlayTagReader(user_factory)
+    merged_reader = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+
+    tag_id = 197273
+    with base_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=1, type_name="unknown"))
+        session.add(TagTypeName(type_name_id=2, type_name="character"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=1, type_name_id=2))
+        session.add(Tag(tag_id=tag_id, tag="base_unknown_tag", source_tag="Base Unknown Tag"))
+        session.add(TagStatus(tag_id=tag_id, format_id=1000, type_id=0, alias=False, preferred_tag_id=tag_id))
+        session.commit()
+
+    assert merged_reader.get_unknown_type_tag_ids(format_id=1000) == [tag_id]
+
+    with user_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=1, type_name="unknown"))
+        session.add(TagTypeName(type_name_id=2, type_name="character"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=1, type_name_id=2))
+        session.add(
+            UserTagStatusPatch(
+                target_scope="base",
+                target_tag_id=tag_id,
+                format_id=1000,
+                type_id=1,
+                alias=False,
+                preferred_scope="base",
+                preferred_tag_id=tag_id,
+                deprecated=False,
+            )
+        )
+        session.commit()
+
+    assert merged_reader.get_unknown_type_tag_ids(format_id=1000) == []
+
+
 def test_create_tag_returns_existing_id(session_factory: Callable[[], Session]) -> None:
     reader = TagReader(session_factory)
     repo = TagRepository(session_factory, reader=MergedTagReader(base_repo=reader))
