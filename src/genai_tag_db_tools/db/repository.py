@@ -2206,6 +2206,9 @@ class MergedTagReader:
                 fmt_name = self._format_name_for_id(patch.format_id)
                 type_name = self._type_name_for_format_type(patch.format_id, patch.type_id)
                 status = self._format_status_dict(format_statuses.get(fmt_name))
+                status.setdefault("alias", False)
+                status.setdefault("deprecated", False)
+                status.setdefault("preferred_tag_id", row["tag_id"])
                 status["type_id"] = patch.type_id
                 status["type_name"] = type_name
                 patch_usage = next(
@@ -2231,6 +2234,11 @@ class MergedTagReader:
                 )
             active_type_patch = self._select_active_status(type_patches, requested_format_id)
             if active_type_patch is not None:
+                fmt_name = self._format_name_for_id(active_type_patch.format_id)
+                active_type_status = self._format_status_dict(format_statuses.get(fmt_name))
+                if active_patch is None:
+                    updated["alias"] = active_type_status.get("alias", False)
+                    updated["deprecated"] = active_type_status.get("deprecated", False)
                 updated["type_id"] = active_type_patch.type_id
                 updated["type_name"] = self._type_name_for_format_type(
                     active_type_patch.format_id,

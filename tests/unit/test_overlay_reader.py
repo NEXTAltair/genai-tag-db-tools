@@ -219,6 +219,25 @@ class TestOverlayTagReaderStatus:
         statuses = overlay_reader.list_tag_statuses(tag_id=tag_id)
         assert statuses == []
 
+    def test_type_patch_reads_tolerate_missing_type_patch_table(
+        self, overlay_reader, overlay_session_factory
+    ):
+        tag_id = USER_TAG_ID_OFFSET + 240
+        with overlay_session_factory() as session:
+            session.add(UserTag(tag_id=tag_id, source_tag="legacy", tag="legacy_status_tag"))
+            session.add(self._make_patch(tag_id, 1000))
+            UserTagTypePatch.__table__.drop(session.get_bind())
+            session.commit()
+
+        status = overlay_reader.get_tag_status(tag_id, 1000)
+        statuses = overlay_reader.list_tag_statuses(tag_id=tag_id)
+        type_patches = overlay_reader.list_tag_type_patches(tag_id=tag_id)
+
+        assert status is not None
+        assert status.tag_id == tag_id
+        assert [row.tag_id for row in statuses] == [tag_id]
+        assert type_patches == []
+
 
 class TestOverlayTagReaderSearch:
     """search_tags のキーワードヒット動作を検証する。"""

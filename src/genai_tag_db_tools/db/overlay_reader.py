@@ -44,6 +44,10 @@ class OverlayTagReader:
         self.logger = getLogger(__name__)
         self.session_factory = session_factory
 
+    @staticmethod
+    def _is_missing_table_error(exc: OperationalError) -> bool:
+        return "no such table" in str(exc).lower()
+
     # ------------------------------------------------------------------
     # タグ取得 (USER_TAGS)
     # ------------------------------------------------------------------
@@ -208,14 +212,19 @@ class OverlayTagReader:
                 )
                 .one_or_none()
             )
-            type_row = (
-                session.query(UserTagTypePatch)
-                .filter(
-                    UserTagTypePatch.target_tag_id == tag_id,
-                    UserTagTypePatch.format_id == format_id,
+            try:
+                type_row = (
+                    session.query(UserTagTypePatch)
+                    .filter(
+                        UserTagTypePatch.target_tag_id == tag_id,
+                        UserTagTypePatch.format_id == format_id,
+                    )
+                    .one_or_none()
                 )
-                .one_or_none()
-            )
+            except OperationalError as exc:
+                if not self._is_missing_table_error(exc):
+                    raise
+                type_row = None
             if status_row is None and type_row is None:
                 return None
 
@@ -242,10 +251,15 @@ class OverlayTagReader:
                 status_query = status_query.filter(UserTagStatusPatch.target_tag_id == tag_id)
             status_rows = status_query.all()
 
-            type_query = session.query(UserTagTypePatch)
-            if tag_id is not None:
-                type_query = type_query.filter(UserTagTypePatch.target_tag_id == tag_id)
-            type_rows = type_query.all()
+            try:
+                type_query = session.query(UserTagTypePatch)
+                if tag_id is not None:
+                    type_query = type_query.filter(UserTagTypePatch.target_tag_id == tag_id)
+                type_rows = type_query.all()
+            except OperationalError as exc:
+                if not self._is_missing_table_error(exc):
+                    raise
+                type_rows = []
 
             statuses: dict[tuple[int, int], TagStatus] = {}
             for status_row in status_rows:
@@ -283,7 +297,12 @@ class OverlayTagReader:
             query = session.query(UserTagTypePatch)
             if tag_id is not None:
                 query = query.filter(UserTagTypePatch.target_tag_id == tag_id)
-            rows = query.all()
+            try:
+                rows = query.all()
+            except OperationalError as exc:
+                if self._is_missing_table_error(exc):
+                    return []
+                raise
             return [
                 UserTagTypePatch(
                     target_scope=row.target_scope,
@@ -492,7 +511,7 @@ class OverlayTagReader:
                 session.query(UserTagTypePatch).filter(UserTagTypePatch.target_tag_id.in_(tag_ids)).all()
             )
         except OperationalError as exc:
-            if "no such table" in str(exc).lower():
+            if self._is_missing_table_error(exc):
                 return {}
             raise
         result: dict[int, list[UserTagTypePatch]] = {}

@@ -480,6 +480,51 @@ def test_type_patch_search_merge_preserves_base_alias_fields() -> None:
     assert rows[0]["format_statuses"]["Lorairo"]["preferred_tag_id"] == preferred_id
 
 
+def test_type_patch_search_merge_defaults_status_fields_for_type_only_requested_format() -> None:
+    """requested format が type-only patch だけなら row-level status はその format の初期値にする。"""
+
+    base_factory = _memory_session_factory()
+    user_factory = _memory_session_factory(overlay=True)
+    base_reader = TagReader(base_factory)
+    user_reader = OverlayTagReader(user_factory)
+    merged_reader = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+
+    tag_id = 197283
+    preferred_id = 197284
+    with base_factory() as session:
+        session.add(TagFormat(format_id=1, format_name="danbooru"))
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=1, type_name="general"))
+        session.add(TagTypeName(type_name_id=2, type_name="character"))
+        session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=1))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=1, type_name_id=2))
+        session.add(Tag(tag_id=tag_id, tag="type_only_requested", source_tag="Type Only Requested"))
+        session.add(Tag(tag_id=preferred_id, tag="preferred_requested", source_tag="Preferred Requested"))
+        session.add(
+            TagStatus(
+                tag_id=tag_id,
+                format_id=1,
+                type_id=0,
+                alias=True,
+                preferred_tag_id=preferred_id,
+                deprecated=True,
+            )
+        )
+        session.commit()
+
+    with user_factory() as session:
+        session.add(UserTagTypePatch(target_scope="base", target_tag_id=tag_id, format_id=1000, type_id=1))
+        session.commit()
+
+    rows = merged_reader.search_tags("type_only_requested", format_name="Lorairo")
+
+    assert len(rows) == 1
+    assert rows[0]["alias"] is False
+    assert rows[0]["deprecated"] is False
+    assert rows[0]["type_name"] == "character"
+    assert rows[0]["format_statuses"]["Lorairo"]["preferred_tag_id"] == tag_id
+
+
 def test_user_only_overlay_unknown_type_ids_apply_type_patch() -> None:
     """OverlayTagReader を base_repo として単独利用しても type patch を unknown 一覧へ反映する。"""
 
