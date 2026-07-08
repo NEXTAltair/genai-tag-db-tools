@@ -23,6 +23,7 @@ from genai_tag_db_tools.db.schema import (
     UserTag,
     UserTagStatusPatch,
     UserTagTranslationPatch,
+    UserTagTypePatch,
     UserTagUsagePatch,
 )
 from genai_tag_db_tools.models import TagSearchRow
@@ -940,15 +941,11 @@ class TestOverlayTagReaderTypeMethods:
             self._seed_types(session)
             session.add(UserTag(tag_id=unknown_id, source_tag="m_src", tag="merged unknown"))
             session.add(
-                UserTagStatusPatch(
+                UserTagTypePatch(
                     target_scope="user",
                     target_tag_id=unknown_id,
                     format_id=3001,
                     type_id=7,
-                    alias=False,
-                    preferred_scope="user",
-                    preferred_tag_id=unknown_id,
-                    deprecated=False,
                 )
             )
             session.commit()

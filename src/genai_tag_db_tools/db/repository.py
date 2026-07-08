@@ -31,6 +31,7 @@ from genai_tag_db_tools.db.schema import (
     TagTypeName,
     TagUsageCounts,
     UserTagStatusPatch,
+    UserTagTypePatch,
 )
 from genai_tag_db_tools.models import TagSearchRow
 from genai_tag_db_tools.utils.messages import ErrorMessages
@@ -1549,6 +1550,37 @@ class TagRepository:
             )
         )
 
+    @staticmethod
+    def _write_type_patch_in_session(
+        session: Session,
+        *,
+        target_scope: str,
+        target_tag_id: int,
+        format_id: int,
+        type_id: int,
+    ) -> None:
+        existing = (
+            session.query(UserTagTypePatch)
+            .filter(
+                UserTagTypePatch.target_scope == target_scope,
+                UserTagTypePatch.target_tag_id == target_tag_id,
+                UserTagTypePatch.format_id == format_id,
+            )
+            .one_or_none()
+        )
+        if existing is not None:
+            existing.type_id = type_id
+            return
+
+        session.add(
+            UserTagTypePatch(
+                target_scope=target_scope,
+                target_tag_id=target_tag_id,
+                format_id=format_id,
+                type_id=type_id,
+            )
+        )
+
     def update_tags_type_batch(
         self,
         tag_updates: list,  # list[TagTypeUpdate] - avoid circular import
@@ -1614,22 +1646,12 @@ class TagRepository:
                             overlay_format_id,
                             overlay_type_name_to_type_id,
                         )
-                        existing_patch = (
-                            session.query(UserTagStatusPatch)
-                            .filter(
-                                UserTagStatusPatch.target_scope == scope,
-                                UserTagStatusPatch.target_tag_id == update.tag_id,
-                                UserTagStatusPatch.format_id == overlay_format_id,
-                            )
-                            .one_or_none()
-                        )
-                        self._write_status_patch_in_session(
+                        self._write_type_patch_in_session(
                             session,
                             target_scope=scope,
                             target_tag_id=update.tag_id,
                             format_id=overlay_format_id,
                             type_id=patch_type_id,
-                            deprecated=existing_patch.deprecated if existing_patch is not None else False,
                         )
                         continue
 
@@ -2350,7 +2372,10 @@ class MergedTagReader:
         return None
 
     def get_tag_status(self, tag_id: int, format_id: int) -> TagStatus | None:
-        return self._first_found("get_tag_status", tag_id, format_id)
+        for status in self.list_tag_statuses(tag_id):
+            if status.format_id == format_id:
+                return status
+        return None
 
     def get_usage_count(self, tag_id: int, format_id: int) -> int | None:
         return self._first_found("get_usage_count", tag_id, format_id)
@@ -2475,11 +2500,43 @@ class MergedTagReader:
         return result
 
     def list_tag_statuses(self, tag_id: int | None = None) -> list[TagStatus]:
-        return self._merge_by_key(
-            "list_tag_statuses",
-            lambda s: (s.tag_id, s.format_id),
-            tag_id=tag_id,
-        )
+        statuses: dict[tuple[int, int], TagStatus] = {}
+        for repo in self._iter_base_repos_low_to_high():
+            for status in repo.list_tag_statuses(tag_id):
+                statuses[(status.tag_id, status.format_id)] = status
+
+        if not self._has_user():
+            return list(statuses.values())
+
+        assert self.user_repo is not None
+        for patch in self.user_repo.list_status_patches(tag_id):
+            statuses[(patch.target_tag_id, patch.format_id)] = TagStatus(
+                tag_id=patch.target_tag_id,
+                format_id=patch.format_id,
+                type_id=patch.type_id,
+                alias=patch.alias,
+                preferred_tag_id=patch.preferred_tag_id,
+                deprecated=patch.deprecated,
+                deprecated_at=patch.deprecated_at,
+            )
+
+        for patch in self.user_repo.list_tag_type_patches(tag_id):
+            key = (patch.target_tag_id, patch.format_id)
+            existing = statuses.get(key)
+            if existing is not None:
+                existing.type_id = patch.type_id
+                continue
+            statuses[key] = TagStatus(
+                tag_id=patch.target_tag_id,
+                format_id=patch.format_id,
+                type_id=patch.type_id,
+                alias=False,
+                preferred_tag_id=patch.target_tag_id,
+                deprecated=False,
+                deprecated_at=None,
+            )
+
+        return list(statuses.values())
 
     def list_usage_counts(
         self, tag_id: int | None = None, format_id: int | None = None
@@ -3091,26 +3148,34 @@ class MergedTagReader:
 
         assert self.user_repo is not None
         try:
-            patched_statuses = {
-                status.tag_id: status
-                for status in self.user_repo.list_tag_statuses()
-                if status.format_id == format_id
+            tag_ids |= {
+                tag_id
+                for tag_id in self.user_repo.get_unknown_type_tag_ids(format_id)
+                if tag_id >= USER_TAG_ID_OFFSET
             }
         except OperationalError:
             return list(tag_ids)
-        user_type_map = {
-            type_id: type_name
-            for (fmt_id, type_id), type_name in self.user_repo.get_type_mapping_map().items()
-            if fmt_id == format_id
-        }
-        for tag_id, status in patched_statuses.items():
-            type_name = user_type_map.get(status.type_id)
-            if type_name is None:
-                continue
+
+        try:
+            type_patches = [
+                patch
+                for patch in self.user_repo.list_tag_type_patches()
+                if patch.format_id == format_id
+            ]
+            user_type_map = {
+                type_id: type_name
+                for (fmt_id, type_id), type_name in self.user_repo.get_type_mapping_map().items()
+                if fmt_id == format_id
+            }
+        except OperationalError:
+            return list(tag_ids)
+
+        for patch in type_patches:
+            type_name = user_type_map.get(patch.type_id)
             if type_name == "unknown":
-                tag_ids.add(tag_id)
+                tag_ids.add(patch.target_tag_id)
             else:
-                tag_ids.discard(tag_id)
+                tag_ids.discard(patch.target_tag_id)
 
         return list(tag_ids)
 

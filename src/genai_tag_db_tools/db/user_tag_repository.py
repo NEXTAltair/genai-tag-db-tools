@@ -17,6 +17,7 @@ from genai_tag_db_tools.db.schema import (
     UserTagTranslationPatch,
     UserTagTranslationPreference,
     UserTagTranslationTombstone,
+    UserTagTypePatch,
     UserTagUsagePatch,
 )
 
@@ -120,6 +121,39 @@ class UserTagRepository:
                     deprecated=deprecated,
                 )
                 session.add(patch)
+
+            session.commit()
+
+    def write_type_patch(
+        self,
+        target_scope: str,
+        target_tag_id: int,
+        format_id: int,
+        type_id: int,
+    ) -> None:
+        """USER_TAG_TYPE_PATCH に type 補正を INSERT or UPDATE する。"""
+        with self._session_factory() as session:
+            existing = (
+                session.query(UserTagTypePatch)
+                .filter(
+                    UserTagTypePatch.target_scope == target_scope,
+                    UserTagTypePatch.target_tag_id == target_tag_id,
+                    UserTagTypePatch.format_id == format_id,
+                )
+                .one_or_none()
+            )
+
+            if existing is not None:
+                existing.type_id = type_id
+            else:
+                session.add(
+                    UserTagTypePatch(
+                        target_scope=target_scope,
+                        target_tag_id=target_tag_id,
+                        format_id=format_id,
+                        type_id=type_id,
+                    )
+                )
 
             session.commit()
 
@@ -510,6 +544,32 @@ class UserTagRepository:
                 preferred_tag_id=row.preferred_tag_id,
                 deprecated=row.deprecated,
                 deprecated_at=row.deprecated_at,
+            )
+
+    def get_type_patch(
+        self,
+        target_scope: str,
+        target_tag_id: int,
+        format_id: int,
+    ) -> UserTagTypePatch | None:
+        """既存の type patch を detached 風に返す。"""
+        with self._session_factory() as session:
+            row = (
+                session.query(UserTagTypePatch)
+                .filter(
+                    UserTagTypePatch.target_scope == target_scope,
+                    UserTagTypePatch.target_tag_id == target_tag_id,
+                    UserTagTypePatch.format_id == format_id,
+                )
+                .one_or_none()
+            )
+            if row is None:
+                return None
+            return UserTagTypePatch(
+                target_scope=row.target_scope,
+                target_tag_id=row.target_tag_id,
+                format_id=row.format_id,
+                type_id=row.type_id,
             )
 
     def has_applied_feedback(self, proposal_hash: str) -> bool:

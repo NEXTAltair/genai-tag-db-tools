@@ -184,16 +184,12 @@ class LocalFeedbackApplyService:
         return target, format_id, status, proposed
 
     def _apply_type(self, proposal: DbFeedbackProposal) -> None:
-        target, format_id, type_id, status = self._prepare_type(proposal, create=True)
-        self._user_repository.write_patch(
+        target, format_id, type_id, _status = self._prepare_type(proposal, create=True)
+        self._user_repository.write_type_patch(
             target_scope=target.target_scope,
             target_tag_id=target.target_tag_id,
             format_id=format_id,
             type_id=type_id,
-            alias=status["alias"],
-            preferred_scope=status["preferred_scope"],
-            preferred_tag_id=status["preferred_tag_id"],
-            deprecated=status["deprecated"],
         )
 
     def _prepare_type(

@@ -27,6 +27,7 @@ from genai_tag_db_tools.db.schema import (
     UserTagTranslationPatch,
     UserTagTranslationPreference,
     UserTagTranslationTombstone,
+    UserTagTypePatch,
     UserTagUsagePatch,
 )
 from genai_tag_db_tools.models import TagSearchRow
@@ -197,9 +198,9 @@ class OverlayTagReader:
     # ------------------------------------------------------------------
 
     def get_tag_status(self, tag_id: int, format_id: int) -> TagStatus | None:
-        """USER_TAG_STATUS_PATCH からステータスを取得し、detached TagStatus を返す。"""
+        """USER_TAG_STATUS_PATCH + USER_TAG_TYPE_PATCH から effective status を返す。"""
         with self.session_factory() as session:
-            row = (
+            status_row = (
                 session.query(UserTagStatusPatch)
                 .filter(
                     UserTagStatusPatch.target_tag_id == tag_id,
@@ -207,36 +208,112 @@ class OverlayTagReader:
                 )
                 .one_or_none()
             )
-            if row is None:
+            type_row = (
+                session.query(UserTagTypePatch)
+                .filter(
+                    UserTagTypePatch.target_tag_id == tag_id,
+                    UserTagTypePatch.format_id == format_id,
+                )
+                .one_or_none()
+            )
+            if status_row is None and type_row is None:
                 return None
+
+            type_id = type_row.type_id if type_row is not None else status_row.type_id
+            alias = status_row.alias if status_row is not None else False
+            preferred_tag_id = status_row.preferred_tag_id if status_row is not None else tag_id
+            deprecated = status_row.deprecated if status_row is not None else False
+            deprecated_at = status_row.deprecated_at if status_row is not None else None
             return TagStatus(
-                tag_id=row.target_tag_id,
-                format_id=row.format_id,
-                type_id=row.type_id,
-                alias=row.alias,
-                preferred_tag_id=row.preferred_tag_id,
-                deprecated=row.deprecated,
-                deprecated_at=row.deprecated_at,
+                tag_id=tag_id,
+                format_id=format_id,
+                type_id=type_id,
+                alias=alias,
+                preferred_tag_id=preferred_tag_id,
+                deprecated=deprecated,
+                deprecated_at=deprecated_at,
             )
 
     def list_tag_statuses(self, tag_id: int | None = None) -> list[TagStatus]:
-        """USER_TAG_STATUS_PATCH を全件 (tag_id 指定時はフィルタ) 取得し TagStatus に変換して返す。"""
+        """USER_TAG_STATUS_PATCH + USER_TAG_TYPE_PATCH の effective status 一覧を返す。"""
+        with self.session_factory() as session:
+            status_query = session.query(UserTagStatusPatch)
+            if tag_id is not None:
+                status_query = status_query.filter(UserTagStatusPatch.target_tag_id == tag_id)
+            status_rows = status_query.all()
+
+            type_query = session.query(UserTagTypePatch)
+            if tag_id is not None:
+                type_query = type_query.filter(UserTagTypePatch.target_tag_id == tag_id)
+            type_rows = type_query.all()
+
+            statuses: dict[tuple[int, int], TagStatus] = {}
+            for row in status_rows:
+                statuses[(row.target_tag_id, row.format_id)] = TagStatus(
+                    tag_id=row.target_tag_id,
+                    format_id=row.format_id,
+                    type_id=row.type_id,
+                    alias=row.alias,
+                    preferred_tag_id=row.preferred_tag_id,
+                    deprecated=row.deprecated,
+                    deprecated_at=row.deprecated_at,
+                )
+
+            for row in type_rows:
+                key = (row.target_tag_id, row.format_id)
+                existing = statuses.get(key)
+                if existing is not None:
+                    existing.type_id = row.type_id
+                    continue
+                statuses[key] = TagStatus(
+                    tag_id=row.target_tag_id,
+                    format_id=row.format_id,
+                    type_id=row.type_id,
+                    alias=False,
+                    preferred_tag_id=row.target_tag_id,
+                    deprecated=False,
+                    deprecated_at=None,
+                )
+
+            return list(statuses.values())
+
+    def list_tag_type_patches(self, tag_id: int | None = None) -> list[UserTagTypePatch]:
+        """USER_TAG_TYPE_PATCH を全件 (tag_id 指定時はフィルタ) 取得する。"""
+        with self.session_factory() as session:
+            query = session.query(UserTagTypePatch)
+            if tag_id is not None:
+                query = query.filter(UserTagTypePatch.target_tag_id == tag_id)
+            rows = query.all()
+            return [
+                UserTagTypePatch(
+                    target_scope=row.target_scope,
+                    target_tag_id=row.target_tag_id,
+                    format_id=row.format_id,
+                    type_id=row.type_id,
+                )
+                for row in rows
+            ]
+
+    def list_status_patches(self, tag_id: int | None = None) -> list[UserTagStatusPatch]:
+        """USER_TAG_STATUS_PATCH を raw patch として取得する。"""
         with self.session_factory() as session:
             query = session.query(UserTagStatusPatch)
             if tag_id is not None:
                 query = query.filter(UserTagStatusPatch.target_tag_id == tag_id)
             rows = query.all()
             return [
-                TagStatus(
-                    tag_id=r.target_tag_id,
-                    format_id=r.format_id,
-                    type_id=r.type_id,
-                    alias=r.alias,
-                    preferred_tag_id=r.preferred_tag_id,
-                    deprecated=r.deprecated,
-                    deprecated_at=r.deprecated_at,
+                UserTagStatusPatch(
+                    target_scope=row.target_scope,
+                    target_tag_id=row.target_tag_id,
+                    format_id=row.format_id,
+                    type_id=row.type_id,
+                    alias=row.alias,
+                    preferred_scope=row.preferred_scope,
+                    preferred_tag_id=row.preferred_tag_id,
+                    deprecated=row.deprecated,
+                    deprecated_at=row.deprecated_at,
                 )
-                for r in rows
+                for row in rows
             ]
 
     # ------------------------------------------------------------------

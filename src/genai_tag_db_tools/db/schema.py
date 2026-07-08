@@ -276,6 +276,31 @@ class UserTagStatusPatch(UserOverlayBase):
     )
 
 
+class UserTagTypePatch(UserOverlayBase):
+    """base / user タグへの type 補正パッチ。
+
+    USER_TAG_STATUS_PATCH は alias / preferred / deprecated などの status 補正を持つ。
+    type 補正は status-only patch と区別できるよう、この表で明示的に管理する。
+    """
+
+    __tablename__ = "USER_TAG_TYPE_PATCH"
+
+    target_scope: Mapped[str] = mapped_column(primary_key=True)
+    target_tag_id: Mapped[int] = mapped_column(primary_key=True)
+    format_id: Mapped[int] = mapped_column(primary_key=True)
+    type_id: Mapped[int] = mapped_column()
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "target_scope IN ('base', 'user')",
+            name="ck_type_patch_target_scope",
+        ),
+        Index("ix_type_patch_target", "target_scope", "target_tag_id"),
+    )
+
+
 class UserTagTranslationPatch(UserOverlayBase):
     """base / user タグへの翻訳パッチ。
     TAG_TRANSLATIONS の FK なし版。target_scope + target_tag_id で対象タグを指定する。
