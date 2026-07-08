@@ -3095,9 +3095,9 @@ class MergedTagReader:
             for status in self.user_repo.list_tag_statuses()
             if status.format_id == format_id
         }
+        unknown_type_id = self.get_type_id_for_format("unknown", format_id)
         for tag_id, status in patched_statuses.items():
-            type_name = self.get_type_name_by_format_type_id(format_id, status.type_id)
-            if type_name == "unknown":
+            if unknown_type_id is not None and status.type_id == unknown_type_id:
                 tag_ids.add(tag_id)
             else:
                 tag_ids.discard(tag_id)
