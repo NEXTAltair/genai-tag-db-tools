@@ -1627,6 +1627,9 @@ class TagRepository:
             try:
                 overlay_format_id = format_id
                 if overlay_available:
+                    bind = session.get_bind()
+                    if not inspect(bind).has_table("USER_TAG_TYPE_PATCH"):
+                        cast(Any, UserTagTypePatch.__table__).create(bind, checkfirst=True)
                     overlay_format_id = self._get_or_create_format_id_in_session(
                         session, format_name or str(format_id), format_id
                     )
@@ -2103,12 +2106,21 @@ class MergedTagReader:
         assert self.user_repo is not None
         tag_ids = {row["tag_id"] for row in rows}
         patched_by_tag: dict[int, list[Any]] = {}
+        type_patched_by_tag: dict[int, list[Any]] = {}
         usage_by_tag: dict[int, list[TagUsageCounts]] = {}
         translations_by_tag = self.user_repo.get_translations_batch(list(tag_ids))
         # tombstone (#121): base 検索行に載ってきた翻訳もマージ時に除外する
         tombstones_by_tag = self._translation_tombstones_batch(list(tag_ids))
+        has_split_patches = hasattr(self.user_repo, "list_status_patches") and hasattr(
+            self.user_repo, "list_tag_type_patches"
+        )
         for tag_id in tag_ids:
-            patched_by_tag[tag_id] = self.user_repo.list_tag_statuses(tag_id)
+            if has_split_patches:
+                patched_by_tag[tag_id] = self.user_repo.list_status_patches(tag_id)
+                type_patched_by_tag[tag_id] = self.user_repo.list_tag_type_patches(tag_id)
+            else:
+                patched_by_tag[tag_id] = self.user_repo.list_tag_statuses(tag_id)
+                type_patched_by_tag[tag_id] = []
             usage_by_tag[tag_id] = self.user_repo.list_usage_counts(tag_id=tag_id)
 
         patched_rows: list[TagSearchRow] = []
@@ -2159,7 +2171,8 @@ class MergedTagReader:
                     updated["translations"] = translations
 
             patches = patched_by_tag.get(row["tag_id"], [])
-            if not patches:
+            type_patches = type_patched_by_tag.get(row["tag_id"], [])
+            if not patches and not type_patches:
                 updated["format_statuses"] = format_statuses
                 patched_rows.append(cast(TagSearchRow, updated))
                 continue
@@ -2189,6 +2202,24 @@ class MergedTagReader:
                     status["usage_count"] = patch_usage.count
                 format_statuses[fmt_name] = status
 
+            for patch in type_patches:
+                fmt_name = self._format_name_for_id(patch.format_id)
+                type_name = self._type_name_for_format_type(patch.format_id, patch.type_id)
+                status = self._format_status_dict(format_statuses.get(fmt_name))
+                status["type_id"] = patch.type_id
+                status["type_name"] = type_name
+                patch_usage = next(
+                    (
+                        item
+                        for item in usage_by_tag.get(row["tag_id"], [])
+                        if item.format_id == patch.format_id
+                    ),
+                    None,
+                )
+                if patch_usage is not None:
+                    status["usage_count"] = patch_usage.count
+                format_statuses[fmt_name] = status
+
             active_patch = self._select_active_status(patches, requested_format_id)
             if active_patch is not None:
                 updated["alias"] = active_patch.alias
@@ -2197,6 +2228,13 @@ class MergedTagReader:
                 updated["type_name"] = self._type_name_for_format_type(
                     active_patch.format_id,
                     active_patch.type_id,
+                )
+            active_type_patch = self._select_active_status(type_patches, requested_format_id)
+            if active_type_patch is not None:
+                updated["type_id"] = active_type_patch.type_id
+                updated["type_name"] = self._type_name_for_format_type(
+                    active_type_patch.format_id,
+                    active_type_patch.type_id,
                 )
             updated["format_statuses"] = format_statuses
             patched_rows.append(cast(TagSearchRow, updated))
@@ -3184,6 +3222,8 @@ class MergedTagReader:
             return
         for patch in type_patches:
             type_name = type_map.get(patch.type_id)
+            if type_name is None:
+                type_name = self._type_name_for_format_type(format_id, patch.type_id) or None
             if type_name == "unknown":
                 tag_ids.add(patch.target_tag_id)
             else:

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from logging import getLogger
+from typing import Any, cast
 
-from sqlalchemy import func
+from sqlalchemy import func, inspect
 from sqlalchemy.orm import Session
 
 from genai_tag_db_tools.db.schema import (
@@ -133,6 +134,7 @@ class UserTagRepository:
     ) -> None:
         """USER_TAG_TYPE_PATCH に type 補正を INSERT or UPDATE する。"""
         with self._session_factory() as session:
+            self._ensure_type_patch_table(session)
             existing = (
                 session.query(UserTagTypePatch)
                 .filter(
@@ -156,6 +158,12 @@ class UserTagRepository:
                 )
 
             session.commit()
+
+    @staticmethod
+    def _ensure_type_patch_table(session: Session) -> None:
+        bind = session.get_bind()
+        if not inspect(bind).has_table("USER_TAG_TYPE_PATCH"):
+            cast(Any, UserTagTypePatch.__table__).create(bind, checkfirst=True)
 
     def write_translation_preference(
         self, target_scope: str, target_tag_id: int, language: str, translation: str
