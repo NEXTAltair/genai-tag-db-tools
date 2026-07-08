@@ -7,7 +7,7 @@ if TYPE_CHECKING:
     from genai_tag_db_tools.db.overlay_reader import OverlayTagReader
 
 import polars as pl
-from sqlalchemy import func, or_
+from sqlalchemy import func, inspect, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -30,6 +30,7 @@ from genai_tag_db_tools.db.schema import (
     TagTypeFormatMapping,
     TagTypeName,
     TagUsageCounts,
+    UserTagStatusPatch,
 )
 from genai_tag_db_tools.models import TagSearchRow
 from genai_tag_db_tools.utils.messages import ErrorMessages
@@ -1442,6 +1443,112 @@ class TagRepository:
 
         return cache[type_name]
 
+    def _get_or_create_format_id_in_session(self, session: "Session", format_name: str, format_id: int) -> int:
+        format_obj = session.query(TagFormat).filter(TagFormat.format_id == format_id).one_or_none()
+        if format_obj is not None:
+            return format_obj.format_id
+        session.add(TagFormat(format_id=format_id, format_name=format_name))
+        return format_id
+
+    def _get_or_create_type_name_id_in_session(self, session: "Session", type_name: str) -> int:
+        type_obj = session.query(TagTypeName).filter(TagTypeName.type_name == type_name).one_or_none()
+        if type_obj is not None:
+            return type_obj.type_name_id
+        type_obj = TagTypeName(type_name=type_name)
+        session.add(type_obj)
+        session.flush()
+        return type_obj.type_name_id
+
+    def _resolve_type_id_for_format_in_session(
+        self,
+        session: "Session",
+        type_name: str,
+        type_name_id: int,
+        format_id: int,
+        cache: dict[str, int],
+    ) -> int:
+        if type_name in cache:
+            return cache[type_name]
+
+        mapping_by_name = (
+            session.query(TagTypeFormatMapping)
+            .filter(
+                TagTypeFormatMapping.format_id == format_id,
+                TagTypeFormatMapping.type_name_id == type_name_id,
+            )
+            .one_or_none()
+        )
+        if mapping_by_name is not None:
+            cache[type_name] = mapping_by_name.type_id
+            return mapping_by_name.type_id
+
+        max_type_id = (
+            session.query(func.max(TagTypeFormatMapping.type_id))
+            .filter(TagTypeFormatMapping.format_id == format_id)
+            .scalar()
+        )
+        candidate_type_id = 0 if max_type_id is None else int(max_type_id) + 1
+        while (
+            session.query(TagTypeFormatMapping)
+            .filter(
+                TagTypeFormatMapping.format_id == format_id,
+                TagTypeFormatMapping.type_id == candidate_type_id,
+            )
+            .one_or_none()
+            is not None
+        ):
+            candidate_type_id += 1
+
+        session.add(
+            TagTypeFormatMapping(
+                format_id=format_id,
+                type_id=candidate_type_id,
+                type_name_id=type_name_id,
+            )
+        )
+        cache[type_name] = candidate_type_id
+        return candidate_type_id
+
+    def _write_status_patch_in_session(
+        self,
+        session: "Session",
+        *,
+        target_scope: str,
+        target_tag_id: int,
+        format_id: int,
+        type_id: int,
+        deprecated: bool,
+    ) -> None:
+        existing = (
+            session.query(UserTagStatusPatch)
+            .filter(
+                UserTagStatusPatch.target_scope == target_scope,
+                UserTagStatusPatch.target_tag_id == target_tag_id,
+                UserTagStatusPatch.format_id == format_id,
+            )
+            .one_or_none()
+        )
+        if existing is not None:
+            existing.type_id = type_id
+            existing.alias = False
+            existing.preferred_scope = target_scope
+            existing.preferred_tag_id = target_tag_id
+            existing.deprecated = deprecated
+            return
+
+        session.add(
+            UserTagStatusPatch(
+                target_scope=target_scope,
+                target_tag_id=target_tag_id,
+                format_id=format_id,
+                type_id=type_id,
+                alias=False,
+                preferred_scope=target_scope,
+                preferred_tag_id=target_tag_id,
+                deprecated=deprecated,
+            )
+        )
+
     def update_tags_type_batch(
         self,
         tag_updates: list,  # list[TagTypeUpdate] - avoid circular import
@@ -1474,11 +1581,61 @@ class TagRepository:
             return
 
         with self.session_factory() as session:
+            overlay_available = inspect(session.get_bind()).has_table("USER_TAG_STATUS_PATCH")
+
+        format_name = None
+        if overlay_available:
+            if self._reader is not None:
+                try:
+                    format_name = self._reader.get_format_name(format_id)
+                except (AttributeError, ValueError):
+                    format_name = None
+
+        with self.session_factory() as session:
             try:
+                overlay_format_id = format_id
+                if overlay_available:
+                    overlay_format_id = self._get_or_create_format_id_in_session(
+                        session, format_name or str(format_id), format_id
+                    )
+
                 # Cache for type_name -> type_id mapping (format-specific)
                 type_name_to_type_id: dict[str, int] = {}
+                overlay_type_name_to_type_id: dict[str, int] = {}
 
                 for update in tag_updates:
+                    scope = self._reader.get_tag_scope(update.tag_id) if self._reader is not None else None
+                    if overlay_available and scope in {"base", "user"}:
+                        type_name_id = self._get_or_create_type_name_id_in_session(session, update.type_name)
+                        patch_type_id = self._resolve_type_id_for_format_in_session(
+                            session,
+                            update.type_name,
+                            type_name_id,
+                            overlay_format_id,
+                            overlay_type_name_to_type_id,
+                        )
+                        existing_patch = (
+                            session.query(UserTagStatusPatch)
+                            .filter(
+                                UserTagStatusPatch.target_scope == scope,
+                                UserTagStatusPatch.target_tag_id == update.tag_id,
+                                UserTagStatusPatch.format_id == overlay_format_id,
+                            )
+                            .one_or_none()
+                        )
+                        self._write_status_patch_in_session(
+                            session,
+                            target_scope=scope,
+                            target_tag_id=update.tag_id,
+                            format_id=overlay_format_id,
+                            type_id=patch_type_id,
+                            deprecated=existing_patch.deprecated if existing_patch is not None else False,
+                        )
+                        continue
+
+                    # Non-overlay DBs and unresolved tag IDs keep the legacy TAG_STATUS path.
+                    # The default LoRAIro runtime has USER_TAG_STATUS_PATCH and scope-known
+                    # base/user tags use the overlay patch branch above.
                     # Step 1: Get or create type_name_id
                     type_name_id = self.create_type_name_if_not_exists(update.type_name)
 
@@ -1488,7 +1645,8 @@ class TagRepository:
                     )
 
                     # Step 3: Update tag status with new type_id
-                    self.update_tag_status(
+                    self._write_tag_status_in_session(
+                        session,
                         tag_id=update.tag_id,
                         format_id=format_id,
                         alias=False,
@@ -1863,6 +2021,28 @@ class MergedTagReader:
         except (AttributeError, ValueError):
             return None
 
+    def _requested_format_ids(
+        self,
+        format_name: str | None = None,
+        format_names: list[str] | None = None,
+    ) -> set[int]:
+        names = format_names or ([format_name] if format_name else [])
+        format_ids: set[int] = set()
+        for name in names:
+            try:
+                format_id = self.get_format_id(name)
+            except (AttributeError, ValueError):
+                continue
+            if format_id is not None:
+                format_ids.add(format_id)
+        return format_ids
+
+    def _row_has_user_status_patch(self, row: TagSearchRow, requested_format_ids: set[int]) -> bool:
+        if not requested_format_ids or not self._has_user():
+            return False
+        assert self.user_repo is not None
+        return any(status.format_id in requested_format_ids for status in self.user_repo.list_tag_statuses(row["tag_id"]))
+
     def _format_name_for_id(self, format_id: int) -> str:
         try:
             return self.get_format_name(format_id) or str(format_id)
@@ -1913,6 +2093,13 @@ class MergedTagReader:
         for row in rows:
             updated = dict(row)
             format_statuses = dict(row.get("format_statuses") or {})
+            if requested_format_id is not None:
+                requested_format_name = self._format_name_for_id(requested_format_id)
+                requested_status = self._format_status_dict(format_statuses.get(requested_format_name))
+                if requested_status:
+                    for key in ("alias", "deprecated", "type_id", "type_name", "usage_count"):
+                        if key in requested_status:
+                            updated[key] = requested_status[key]
 
             # 検索行の translations は base 由来値が主 (user patch は overlay 側で
             # scope-aware に除外済みの値が後段でマージされる) ため、base 宛 tombstone
@@ -2393,6 +2580,7 @@ class MergedTagReader:
         offset: int = 0,
     ) -> list[TagSearchRow]:
         requested_format_id = self._requested_format_id(format_name, format_names)
+        requested_format_ids = self._requested_format_ids(format_name, format_names)
         rows = self._merge_search_tags_adaptive(
             keyword,
             limit=None,
@@ -2409,6 +2597,27 @@ class MergedTagReader:
             deprecated=None,
             resolve_preferred=False,
         )
+        if self._has_user() and requested_format_ids:
+            rows.extend(
+                row
+                for row in self._merge_search_tags_adaptive(
+                    keyword,
+                    limit=None,
+                    offset=0,
+                    partial=partial,
+                    format_name=None,
+                    format_names=None,
+                    type_name=None,
+                    type_names=None,
+                    language=None,
+                    min_usage=None,
+                    max_usage=None,
+                    alias=None,
+                    deprecated=None,
+                    resolve_preferred=False,
+                )
+                if self._row_has_user_status_patch(row, requested_format_ids)
+            )
         rows.extend(
             self._base_rows_for_user_translation_matches(
                 keyword,
@@ -2529,6 +2738,7 @@ class MergedTagReader:
         format_name: str | None = None,
         resolve_preferred: bool = False,
     ) -> dict[str, TagSearchRow]:
+        requested_format_ids = self._requested_format_ids(format_name)
         merged: dict[str, TagSearchRow] = self._merge_by_key(
             "search_tags_bulk",
             None,
@@ -2536,6 +2746,17 @@ class MergedTagReader:
             format_name=format_name,
             resolve_preferred=False,
         )
+        if self._has_user() and requested_format_ids:
+            patched_candidates: dict[str, TagSearchRow] = self._merge_by_key(
+                "search_tags_bulk",
+                None,
+                keywords,
+                format_name=None,
+                resolve_preferred=False,
+            )
+            for keyword, row in patched_candidates.items():
+                if self._row_has_user_status_patch(row, requested_format_ids):
+                    merged[keyword] = row
         if merged:
             requested_format_id = self._requested_format_id(format_name)
             patched = self._apply_user_patches_to_search_rows(
@@ -2601,6 +2822,7 @@ class MergedTagReader:
         if self._has_user():
             assert self.user_repo is not None
             repos.append(self.user_repo)
+        requested_format_ids = self._requested_format_ids(format_name)
 
         merged_by_keyword: dict[str, dict[int, TagSearchRow]] = {}
         for repo in repos:
@@ -2613,6 +2835,18 @@ class MergedTagReader:
                 bucket = merged_by_keyword.setdefault(keyword, {})
                 for row in rows:
                     bucket[row["tag_id"]] = row
+        if self._has_user() and requested_format_ids:
+            for repo in repos:
+                result = repo.search_tags_bulk_all(
+                    keywords,
+                    format_name=None,
+                    resolve_preferred=False,
+                )
+                for keyword, rows in result.items():
+                    bucket = merged_by_keyword.setdefault(keyword, {})
+                    for row in rows:
+                        if self._row_has_user_status_patch(row, requested_format_ids):
+                            bucket[row["tag_id"]] = row
         # tag_id 昇順で返す (`_merge_search_tags_adaptive` / `TagReader.search_tags_bulk_all` と
         # 同じ決定的順序。batch へ切替えても per-query search と行順が一致する、Codex PR #115 P3)。
         merged: dict[str, list[TagSearchRow]] = {
