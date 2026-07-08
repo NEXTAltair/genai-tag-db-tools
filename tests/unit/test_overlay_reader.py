@@ -720,6 +720,34 @@ class TestOverlayTagReaderSearchFilters:
         assert {r["tag_id"] for r in rows} == {char_id}
         assert rows[0]["type_name"] == "character"
 
+    def test_type_names_filter_uses_type_patch_without_status_patch(
+        self, overlay_reader, overlay_session_factory
+    ):
+        tag_id = USER_TAG_ID_OFFSET + 419
+        with overlay_session_factory() as session:
+            session.add(TagFormat(format_id=1000, format_name="danbooru"))
+            session.add(TagTypeName(type_name_id=1, type_name="unknown"))
+            session.add(TagTypeName(type_name_id=4, type_name="character"))
+            session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+            session.add(TagTypeFormatMapping(format_id=1000, type_id=4, type_name_id=4))
+            session.add(UserTag(tag_id=tag_id, source_tag="tp_src", tag="typepatch character"))
+            session.add(
+                UserTagTypePatch(
+                    target_scope="user",
+                    target_tag_id=tag_id,
+                    format_id=1000,
+                    type_id=4,
+                )
+            )
+            session.commit()
+
+        rows = overlay_reader.search_tags("typepatch", partial=True, type_names=["character"])
+
+        assert {row["tag_id"] for row in rows} == {tag_id}
+        assert rows[0]["type_id"] == 4
+        assert rows[0]["type_name"] == "character"
+        assert rows[0]["format_statuses"]["1000"]["type_name"] == "character"
+
     def test_type_names_unknown_returns_empty(self, overlay_reader, overlay_session_factory):
         tag_id = USER_TAG_ID_OFFSET + 418
         with overlay_session_factory() as session:

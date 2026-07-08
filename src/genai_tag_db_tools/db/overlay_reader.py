@@ -374,6 +374,10 @@ class OverlayTagReader:
             candidate_ids = set(tag_by_id)
 
             status_by_tag = self._load_status_patches(session, candidate_ids)
+            self._apply_type_patches_to_statuses(
+                status_by_tag,
+                self._load_type_patches(session, candidate_ids),
+            )
             usage_by_tag = self._load_usage_patches(session, candidate_ids)
             trans_by_tag = self._load_translation_patches(session, candidate_ids)
             type_map = self._load_type_name_map(session)
@@ -479,6 +483,49 @@ class OverlayTagReader:
         for patch_list in result.values():
             patch_list.sort(key=lambda p: p.format_id)
         return result
+
+    def _load_type_patches(self, session: Session, tag_ids: set[int]) -> dict[int, list[UserTagTypePatch]]:
+        if not tag_ids:
+            return {}
+        try:
+            rows = (
+                session.query(UserTagTypePatch).filter(UserTagTypePatch.target_tag_id.in_(tag_ids)).all()
+            )
+        except OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return {}
+            raise
+        result: dict[int, list[UserTagTypePatch]] = {}
+        for row in rows:
+            result.setdefault(row.target_tag_id, []).append(row)
+        return result
+
+    def _apply_type_patches_to_statuses(
+        self,
+        status_by_tag: dict[int, list[UserTagStatusPatch]],
+        type_by_tag: dict[int, list[UserTagTypePatch]],
+    ) -> None:
+        for tag_id, type_patches in type_by_tag.items():
+            statuses = status_by_tag.setdefault(tag_id, [])
+            status_by_format = {status.format_id: status for status in statuses}
+            for type_patch in type_patches:
+                existing = status_by_format.get(type_patch.format_id)
+                if existing is not None:
+                    existing.type_id = type_patch.type_id
+                    continue
+                status = UserTagStatusPatch(
+                    target_scope=type_patch.target_scope,
+                    target_tag_id=type_patch.target_tag_id,
+                    format_id=type_patch.format_id,
+                    type_id=type_patch.type_id,
+                    alias=False,
+                    preferred_scope=type_patch.target_scope,
+                    preferred_tag_id=type_patch.target_tag_id,
+                    deprecated=False,
+                )
+                statuses.append(status)
+                status_by_format[type_patch.format_id] = status
+            statuses.sort(key=lambda p: p.format_id)
 
     def _load_usage_patches(
         self, session: Session, tag_ids: set[int]
