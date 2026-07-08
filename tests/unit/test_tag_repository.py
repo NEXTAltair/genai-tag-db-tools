@@ -368,6 +368,60 @@ def test_type_patch_overrides_only_type_and_preserves_base_status_fields() -> No
     assert status.deprecated is True
 
 
+def test_user_only_overlay_unknown_type_ids_apply_type_patch() -> None:
+    """OverlayTagReader を base_repo として単独利用しても type patch を unknown 一覧へ反映する。"""
+
+    user_factory = _memory_session_factory(overlay=True)
+    user_reader = OverlayTagReader(user_factory)
+    merged_reader = MergedTagReader(base_repo=user_reader)
+
+    tag_id = 1_000_000_100
+    with user_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=1, type_name="unknown"))
+        session.add(TagTypeName(type_name_id=2, type_name="character"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=1, type_name_id=2))
+        session.add(UserTagTypePatch(target_scope="user", target_tag_id=tag_id, format_id=1000, type_id=1))
+        session.add(
+            UserTagStatusPatch(
+                target_scope="user",
+                target_tag_id=tag_id,
+                format_id=1000,
+                type_id=0,
+                alias=False,
+                preferred_scope="user",
+                preferred_tag_id=tag_id,
+                deprecated=False,
+            )
+        )
+        session.commit()
+
+    assert merged_reader.get_unknown_type_tag_ids(format_id=1000) == []
+
+
+def test_plain_user_repo_status_merge_remains_supported() -> None:
+    """user_repo が plain TagReader でも list_tag_statuses / get_tag_status が動く。"""
+
+    base_factory = _memory_session_factory()
+    user_factory = _memory_session_factory()
+    base_reader = TagReader(base_factory)
+    user_reader = TagReader(user_factory)
+    merged_reader = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+
+    tag_id = 42
+    with user_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(Tag(tag_id=tag_id, tag="legacy_user", source_tag="Legacy User"))
+        session.add(TagStatus(tag_id=tag_id, format_id=1000, type_id=3, alias=False, preferred_tag_id=tag_id))
+        session.commit()
+
+    status = merged_reader.get_tag_status(tag_id, 1000)
+
+    assert status is not None
+    assert status.type_id == 3
+
+
 def test_create_tag_returns_existing_id(session_factory: Callable[[], Session]) -> None:
     reader = TagReader(session_factory)
     repo = TagRepository(session_factory, reader=MergedTagReader(base_repo=reader))

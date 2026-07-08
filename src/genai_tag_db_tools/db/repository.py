@@ -2509,6 +2509,13 @@ class MergedTagReader:
             return list(statuses.values())
 
         assert self.user_repo is not None
+        if not hasattr(self.user_repo, "list_status_patches") or not hasattr(
+            self.user_repo, "list_tag_type_patches"
+        ):
+            for status in self.user_repo.list_tag_statuses(tag_id):
+                statuses[(status.tag_id, status.format_id)] = status
+            return list(statuses.values())
+
         for patch in self.user_repo.list_status_patches(tag_id):
             statuses[(patch.target_tag_id, patch.format_id)] = TagStatus(
                 tag_id=patch.target_tag_id,
@@ -3142,6 +3149,7 @@ class MergedTagReader:
         tag_ids: set[int] = set()
         for repo in self._iter_base_repos():
             tag_ids |= set(repo.get_unknown_type_tag_ids(format_id))
+            self._apply_type_patches_to_unknown_ids(tag_ids, repo, format_id)
 
         if not self._has_user():
             return list(tag_ids)
@@ -3156,28 +3164,30 @@ class MergedTagReader:
         except OperationalError:
             return list(tag_ids)
 
+        self._apply_type_patches_to_unknown_ids(tag_ids, self.user_repo, format_id)
+
+        return list(tag_ids)
+
+    def _apply_type_patches_to_unknown_ids(self, tag_ids: set[int], repo: Any, format_id: int) -> None:
+        list_type_patches = getattr(repo, "list_tag_type_patches", None)
+        get_type_mapping_map = getattr(repo, "get_type_mapping_map", None)
+        if list_type_patches is None or get_type_mapping_map is None:
+            return
         try:
-            type_patches = [
-                patch
-                for patch in self.user_repo.list_tag_type_patches()
-                if patch.format_id == format_id
-            ]
-            user_type_map = {
+            type_patches = [patch for patch in list_type_patches() if patch.format_id == format_id]
+            type_map = {
                 type_id: type_name
-                for (fmt_id, type_id), type_name in self.user_repo.get_type_mapping_map().items()
+                for (fmt_id, type_id), type_name in get_type_mapping_map().items()
                 if fmt_id == format_id
             }
         except OperationalError:
-            return list(tag_ids)
-
+            return
         for patch in type_patches:
-            type_name = user_type_map.get(patch.type_id)
+            type_name = type_map.get(patch.type_id)
             if type_name == "unknown":
                 tag_ids.add(patch.target_tag_id)
             else:
                 tag_ids.discard(patch.target_tag_id)
-
-        return list(tag_ids)
 
     # ------------------------------------------------------------------
     # Pattern E: Set union (簡易集約)
