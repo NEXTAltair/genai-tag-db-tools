@@ -454,7 +454,8 @@ def _search_exact_recommendation_rows(
     format_name: str,
     format_id: int | None,
 ) -> list[TagSearchRow]:
-    effective_format_name = format_name if format_id is not None else None
+    has_user_overlay = bool(getattr(repo, "_has_user", lambda: False)())
+    effective_format_name = None if has_user_overlay else (format_name if format_id is not None else None)
     return repo.search_tags(
         tag,
         partial=False,

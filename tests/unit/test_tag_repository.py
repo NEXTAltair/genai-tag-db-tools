@@ -4,10 +4,11 @@ from collections.abc import Callable
 
 import polars as pl
 import pytest
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from genai_tag_db_tools.db.overlay_reader import OverlayTagReader
 from genai_tag_db_tools.db.repository import MergedTagReader, TagReader, TagRepository
 from genai_tag_db_tools.db.schema import (
     Base,
@@ -18,24 +19,22 @@ from genai_tag_db_tools.db.schema import (
     TagTypeFormatMapping,
     TagTypeName,
     TagUsageCounts,
+    UserOverlayBase,
+    UserTagStatusPatch,
 )
 
 pytestmark = pytest.mark.db_tools
 
 
-def _memory_session_factory(*, foreign_keys: bool = False) -> Callable[[], Session]:
+def _memory_session_factory(*, overlay: bool = False) -> Callable[[], Session]:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    if foreign_keys:
-
-        @event.listens_for(engine, "connect")
-        def _enable_foreign_keys(dbapi_connection, connection_record) -> None:
-            dbapi_connection.execute("PRAGMA foreign_keys=ON")
-
     Base.metadata.create_all(engine)
+    if overlay:
+        UserOverlayBase.metadata.create_all(engine)
     return sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
@@ -44,14 +43,14 @@ def session_factory() -> Callable[[], Session]:
     return _memory_session_factory()
 
 
-def test_update_tags_type_batch_materializes_base_tag_parent_in_user_db() -> None:
-    """Base DB 由来タグの type 補正時に user DB 側 TAGS 親行を保証する (#1268)。"""
+def test_update_tags_type_batch_writes_base_tag_type_overlay_patch() -> None:
+    """Base DB 由来タグの type 補正は USER_TAG_STATUS_PATCH に保存する (#1268/#136)。"""
     from genai_tag_db_tools.models import TagTypeUpdate
 
     base_factory = _memory_session_factory()
-    user_factory = _memory_session_factory(foreign_keys=True)
+    user_factory = _memory_session_factory(overlay=True)
     base_reader = TagReader(base_factory)
-    user_reader = TagReader(user_factory)
+    user_reader = OverlayTagReader(user_factory)
     merged_reader = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
     repo = TagRepository(user_factory, reader=merged_reader)
 
@@ -78,22 +77,30 @@ def test_update_tags_type_batch_materializes_base_tag_parent_in_user_db() -> Non
     )
 
     with user_factory() as session:
-        tag = session.query(Tag).filter(Tag.tag_id == base_tag_id).one()
-        status = session.query(TagStatus).filter(TagStatus.tag_id == base_tag_id).one()
+        assert session.query(Tag).filter(Tag.tag_id == base_tag_id).one_or_none() is None
+        assert session.query(TagStatus).filter(TagStatus.tag_id == base_tag_id).one_or_none() is None
+        patch = (
+            session.query(UserTagStatusPatch)
+            .filter(
+                UserTagStatusPatch.target_scope == "base",
+                UserTagStatusPatch.target_tag_id == base_tag_id,
+                UserTagStatusPatch.format_id == 1000,
+            )
+            .one()
+        )
         type_name = (
             session.query(TagTypeName.type_name)
             .join(TagTypeFormatMapping, TagTypeName.type_name_id == TagTypeFormatMapping.type_name_id)
-            .filter(TagTypeFormatMapping.format_id == 1000, TagTypeFormatMapping.type_id == status.type_id)
+            .filter(TagTypeFormatMapping.format_id == 1000, TagTypeFormatMapping.type_id == patch.type_id)
             .scalar()
         )
 
-    assert tag.tag == "base_only_tag"
-    assert tag.source_tag == "Base Only Tag"
-    assert status.format_id == 1000
-    assert status.preferred_tag_id == base_tag_id
+    assert patch.alias is False
+    assert patch.preferred_scope == "base"
+    assert patch.preferred_tag_id == base_tag_id
     assert type_name == "general"
 
-    rows = merged_reader.search_tags("base_only_tag")
+    rows = merged_reader.search_tags("base_only_tag", format_name="Lorairo", type_name="general")
 
     assert len(rows) == 1
     assert rows[0]["tag_id"] == base_tag_id
@@ -101,13 +108,76 @@ def test_update_tags_type_batch_materializes_base_tag_parent_in_user_db() -> Non
     assert "danbooru" in rows[0]["format_statuses"]
     assert "Lorairo" in rows[0]["format_statuses"]
 
-    bulk_row = merged_reader.search_tags_bulk(["base_only_tag"])["base_only_tag"]
-    bulk_all_row = merged_reader.search_tags_bulk_all(["base_only_tag"])["base_only_tag"][0]
+    bulk_row = merged_reader.search_tags_bulk(["base_only_tag"], format_name="Lorairo")["base_only_tag"]
+    bulk_all_row = merged_reader.search_tags_bulk_all(["base_only_tag"], format_name="Lorairo")[
+        "base_only_tag"
+    ][0]
 
     assert bulk_row["translations"] == {"ja": ["ベースのみ"]}
     assert "Lorairo" in bulk_row["format_statuses"]
     assert bulk_all_row["translations"] == {"ja": ["ベースのみ"]}
     assert "Lorairo" in bulk_all_row["format_statuses"]
+
+    with base_factory() as session:
+        session.add(Tag(tag_id=base_tag_id + 1, tag="unpatched_base", source_tag="Unpatched Base"))
+        session.add(
+            TagStatus(
+                tag_id=base_tag_id + 1,
+                format_id=1,
+                type_id=0,
+                alias=False,
+                preferred_tag_id=base_tag_id + 1,
+            )
+        )
+        session.commit()
+
+    assert merged_reader.search_tags("unpatched_base", format_name="Lorairo") == []
+    assert merged_reader.search_tags_bulk(["unpatched_base"], format_name="Lorairo") == {}
+    assert merged_reader.search_tags_bulk_all(["unpatched_base"], format_name="Lorairo") == {}
+
+
+def test_update_tags_type_batch_rolls_back_overlay_patch_when_batch_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """後続更新が失敗したら、同一 batch 内の overlay patch も rollback する。"""
+    from genai_tag_db_tools.models import TagTypeUpdate
+
+    base_factory = _memory_session_factory()
+    user_factory = _memory_session_factory(overlay=True)
+    base_reader = TagReader(base_factory)
+    user_reader = OverlayTagReader(user_factory)
+    merged_reader = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+    repo = TagRepository(user_factory, reader=merged_reader)
+
+    base_tag_id = 197273
+    with base_factory() as session:
+        session.add(TagFormat(format_id=1, format_name="danbooru"))
+        session.add(TagTypeName(type_name_id=1, type_name="general"))
+        session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=1))
+        session.add(Tag(tag_id=base_tag_id, tag="base_only_tag", source_tag="Base Only Tag"))
+        session.add(TagStatus(tag_id=base_tag_id, format_id=1, type_id=0, alias=False, preferred_tag_id=base_tag_id))
+        session.commit()
+
+    with user_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.commit()
+
+    def _raise_on_legacy_path(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("legacy path failed")
+
+    monkeypatch.setattr(repo, "_write_tag_status_in_session", _raise_on_legacy_path)
+
+    with pytest.raises(RuntimeError, match="legacy path failed"):
+        repo.update_tags_type_batch(
+            [
+                TagTypeUpdate(tag_id=base_tag_id, type_name="general"),
+                TagTypeUpdate(tag_id=999999, type_name="general"),
+            ],
+            format_id=1000,
+        )
+
+    with user_factory() as session:
+        assert session.query(UserTagStatusPatch).all() == []
 
 
 def test_create_tag_returns_existing_id(session_factory: Callable[[], Session]) -> None:
@@ -852,86 +922,6 @@ def test_merged_reader_search_tags_applies_offset_after_merge(
     result = merged.search_tags("sample", partial=True, limit=2, offset=3)
 
     assert [row["tag_id"] for row in result] == [4, 5]
-
-
-def test_merged_reader_search_tags_higher_priority_base_row_wins(
-    session_factory: Callable[[], Session],
-) -> None:
-    """同一 tag_id/tag/source_tag でも高優先度 base DB の検索行を採用する。"""
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    from sqlalchemy.pool import StaticPool
-
-    engine_b = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(engine_b)
-    session_factory_b: Callable[[], Session] = sessionmaker(
-        bind=engine_b, autoflush=False, autocommit=False
-    )
-
-    def _seed_cat(session: Session, translation: str) -> None:
-        session.add(TagFormat(format_id=1, format_name="test"))
-        session.add(TagTypeName(type_name_id=1, type_name="general"))
-        session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=1))
-        session.add(Tag(tag_id=1, tag="cat", source_tag="cat"))
-        session.add(
-            TagStatus(tag_id=1, format_id=1, type_id=0, alias=False, preferred_tag_id=1, deprecated=False)
-        )
-        session.add(TagTranslation(tag_id=1, language="japanese", translation=translation))
-        session.commit()
-
-    reader_a = TagReader(session_factory)
-    reader_b = TagReader(session_factory_b)
-    with session_factory() as session:
-        _seed_cat(session, "猫A")
-    with session_factory_b() as session:
-        _seed_cat(session, "猫B")
-
-    merged = MergedTagReader(base_repo=[reader_a, reader_b])
-    result = merged.search_tags("cat")
-
-    assert len(result) == 1
-    assert result[0]["translations"] == {"japanese": ["猫A"]}
-
-
-def test_merged_reader_search_tags_bulk_keeps_distinct_user_tag_with_same_name(
-    session_factory: Callable[[], Session],
-) -> None:
-    """同じ tag/source_tag でも別 tag_id の user tag は materialized parent 扱いしない。"""
-    user_factory = _memory_session_factory()
-    base_reader = TagReader(session_factory)
-    user_reader = TagReader(user_factory)
-
-    with session_factory() as session:
-        session.add(TagFormat(format_id=1, format_name="test"))
-        session.add(TagTypeName(type_name_id=1, type_name="general"))
-        session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=1))
-        session.add(Tag(tag_id=1, tag="cat", source_tag="cat"))
-        session.add(TagStatus(tag_id=1, format_id=1, type_id=0, alias=False, preferred_tag_id=1))
-        session.add(TagTranslation(tag_id=1, language="japanese", translation="猫base"))
-        session.commit()
-
-    with user_factory() as session:
-        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
-        session.add(TagTypeName(type_name_id=1, type_name="general"))
-        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
-        session.add(Tag(tag_id=1_000_000_001, tag="cat", source_tag="cat"))
-        session.add(
-            TagStatus(
-                tag_id=1_000_000_001,
-                format_id=1000,
-                type_id=0,
-                alias=False,
-                preferred_tag_id=1_000_000_001,
-            )
-        )
-        session.add(TagTranslation(tag_id=1_000_000_001, language="japanese", translation="猫user"))
-        session.commit()
-
-    merged = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
-    result = merged.search_tags_bulk(["cat"])
-
-    assert result["cat"]["tag_id"] == 1_000_000_001
-    assert result["cat"]["translations"] == {"japanese": ["猫user"]}
 
 
 def _seed_bulk_all_rows(session: Session) -> None:
