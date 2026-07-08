@@ -23,6 +23,7 @@ from genai_tag_db_tools.db.schema import (
     UserTag,
     UserTagStatusPatch,
     UserTagTranslationPatch,
+    UserTagTypePatch,
     UserTagUsagePatch,
 )
 from genai_tag_db_tools.models import TagSearchRow
@@ -217,6 +218,25 @@ class TestOverlayTagReaderStatus:
 
         statuses = overlay_reader.list_tag_statuses(tag_id=tag_id)
         assert statuses == []
+
+    def test_type_patch_reads_tolerate_missing_type_patch_table(
+        self, overlay_reader, overlay_session_factory
+    ):
+        tag_id = USER_TAG_ID_OFFSET + 240
+        with overlay_session_factory() as session:
+            session.add(UserTag(tag_id=tag_id, source_tag="legacy", tag="legacy_status_tag"))
+            session.add(self._make_patch(tag_id, 1000))
+            UserTagTypePatch.__table__.drop(session.get_bind())
+            session.commit()
+
+        status = overlay_reader.get_tag_status(tag_id, 1000)
+        statuses = overlay_reader.list_tag_statuses(tag_id=tag_id)
+        type_patches = overlay_reader.list_tag_type_patches(tag_id=tag_id)
+
+        assert status is not None
+        assert status.tag_id == tag_id
+        assert [row.tag_id for row in statuses] == [tag_id]
+        assert type_patches == []
 
 
 class TestOverlayTagReaderSearch:
@@ -719,6 +739,34 @@ class TestOverlayTagReaderSearchFilters:
         assert {r["tag_id"] for r in rows} == {char_id}
         assert rows[0]["type_name"] == "character"
 
+    def test_type_names_filter_uses_type_patch_without_status_patch(
+        self, overlay_reader, overlay_session_factory
+    ):
+        tag_id = USER_TAG_ID_OFFSET + 419
+        with overlay_session_factory() as session:
+            session.add(TagFormat(format_id=1000, format_name="danbooru"))
+            session.add(TagTypeName(type_name_id=1, type_name="unknown"))
+            session.add(TagTypeName(type_name_id=4, type_name="character"))
+            session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+            session.add(TagTypeFormatMapping(format_id=1000, type_id=4, type_name_id=4))
+            session.add(UserTag(tag_id=tag_id, source_tag="tp_src", tag="typepatch character"))
+            session.add(
+                UserTagTypePatch(
+                    target_scope="user",
+                    target_tag_id=tag_id,
+                    format_id=1000,
+                    type_id=4,
+                )
+            )
+            session.commit()
+
+        rows = overlay_reader.search_tags("typepatch", partial=True, type_names=["character"])
+
+        assert {row["tag_id"] for row in rows} == {tag_id}
+        assert rows[0]["type_id"] == 4
+        assert rows[0]["type_name"] == "character"
+        assert rows[0]["format_statuses"]["1000"]["type_name"] == "character"
+
     def test_type_names_unknown_returns_empty(self, overlay_reader, overlay_session_factory):
         tag_id = USER_TAG_ID_OFFSET + 418
         with overlay_session_factory() as session:
@@ -940,15 +988,11 @@ class TestOverlayTagReaderTypeMethods:
             self._seed_types(session)
             session.add(UserTag(tag_id=unknown_id, source_tag="m_src", tag="merged unknown"))
             session.add(
-                UserTagStatusPatch(
+                UserTagTypePatch(
                     target_scope="user",
                     target_tag_id=unknown_id,
                     format_id=3001,
                     type_id=7,
-                    alias=False,
-                    preferred_scope="user",
-                    preferred_tag_id=unknown_id,
-                    deprecated=False,
                 )
             )
             session.commit()

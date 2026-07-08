@@ -296,6 +296,22 @@ def migrate_legacy_to_overlay(
                         "updated_at": updated_at,
                     },
                 )
+                session.execute(
+                    text(
+                        "INSERT OR IGNORE INTO USER_TAG_TYPE_PATCH "
+                        "(target_scope, target_tag_id, format_id, type_id, created_at, updated_at) "
+                        "VALUES (:target_scope, :target_tag_id, :format_id, :type_id, "
+                        ":created_at, :updated_at)"
+                    ),
+                    {
+                        "target_scope": target_scope,
+                        "target_tag_id": target_tag_id,
+                        "format_id": format_id,
+                        "type_id": type_id,
+                        "created_at": created_at,
+                        "updated_at": updated_at,
+                    },
+                )
         result.status_migrated = len(old_statuses)
 
         # --- TAG_TRANSLATIONS → USER_TAG_TRANSLATION_PATCH ---

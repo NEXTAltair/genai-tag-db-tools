@@ -17,6 +17,7 @@ from genai_tag_db_tools.db.schema import (
     UserTag,
     UserTagStatusPatch,
     UserTagTranslationPatch,
+    UserTagTypePatch,
     UserTagUsagePatch,
 )
 from genai_tag_db_tools.db.user_tag_repository import UserTagRepository
@@ -270,10 +271,12 @@ def test_type_correction_preserves_existing_status_fields(user_repo, user_sessio
     apply_approved_feedback(_approved(proposal), user_repository=user_repo)
 
     with user_session_factory() as session:
-        patch = session.query(UserTagStatusPatch).one()
-        assert patch.type_id == 4
-        assert patch.deprecated is True
-        assert patch.alias is False
+        status_patch = session.query(UserTagStatusPatch).one()
+        type_patch = session.query(UserTagTypePatch).one()
+        assert status_patch.type_id == 0
+        assert status_patch.deprecated is True
+        assert status_patch.alias is False
+        assert type_patch.type_id == 4
         mapping = session.query(TagTypeFormatMapping).filter_by(format_id=format_id, type_id=4).one()
         assert mapping is not None
 
@@ -312,7 +315,7 @@ def test_type_correction_accepts_type_id_without_unknown_type_name(user_repo, us
     apply_approved_feedback(_approved(proposal), user_repository=user_repo)
 
     with user_session_factory() as session:
-        patch = session.query(UserTagStatusPatch).one()
+        patch = session.query(UserTagTypePatch).one()
         mappings = session.query(TagTypeFormatMapping).all()
     assert patch.format_id == format_id
     assert patch.type_id == 4
@@ -387,14 +390,11 @@ def test_type_correction_uses_reader_type_and_preserves_reader_status(
     )
 
     with user_session_factory() as session:
-        patch = session.query(UserTagStatusPatch).one()
+        patch = session.query(UserTagTypePatch).one()
+        assert session.query(UserTagStatusPatch).count() == 0
         assert session.query(TagTypeFormatMapping).count() == 0
     assert patch.format_id == 1
     assert patch.type_id == 4
-    assert patch.alias is True
-    assert patch.preferred_scope == "base"
-    assert patch.preferred_tag_id == 99
-    assert patch.deprecated is True
 
 
 def test_alias_addition_creates_user_alias_without_copying_preferred_base_tag(
@@ -492,7 +492,8 @@ def test_user_scope_type_correction_uses_reader_type_for_base_format(user_repo, 
     apply_approved_feedback(_approved(proposal), user_repository=user_repo, reader=_ReaderWithBaseFormats())
 
     with user_session_factory() as session:
-        patch = session.query(UserTagStatusPatch).one()
+        patch = session.query(UserTagTypePatch).one()
+        assert session.query(UserTagStatusPatch).count() == 0
         assert session.query(TagTypeFormatMapping).count() == 0
     assert patch.format_id == 1
     assert patch.type_id == 4

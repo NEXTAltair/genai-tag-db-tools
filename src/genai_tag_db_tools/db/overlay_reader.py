@@ -27,6 +27,7 @@ from genai_tag_db_tools.db.schema import (
     UserTagTranslationPatch,
     UserTagTranslationPreference,
     UserTagTranslationTombstone,
+    UserTagTypePatch,
     UserTagUsagePatch,
 )
 from genai_tag_db_tools.models import TagSearchRow
@@ -42,6 +43,10 @@ class OverlayTagReader:
     def __init__(self, session_factory: Callable[[], Session]):
         self.logger = getLogger(__name__)
         self.session_factory = session_factory
+
+    @staticmethod
+    def _is_missing_table_error(exc: OperationalError) -> bool:
+        return "no such table" in str(exc).lower()
 
     # ------------------------------------------------------------------
     # タグ取得 (USER_TAGS)
@@ -197,9 +202,9 @@ class OverlayTagReader:
     # ------------------------------------------------------------------
 
     def get_tag_status(self, tag_id: int, format_id: int) -> TagStatus | None:
-        """USER_TAG_STATUS_PATCH からステータスを取得し、detached TagStatus を返す。"""
+        """USER_TAG_STATUS_PATCH + USER_TAG_TYPE_PATCH から effective status を返す。"""
         with self.session_factory() as session:
-            row = (
+            status_row = (
                 session.query(UserTagStatusPatch)
                 .filter(
                     UserTagStatusPatch.target_tag_id == tag_id,
@@ -207,36 +212,127 @@ class OverlayTagReader:
                 )
                 .one_or_none()
             )
-            if row is None:
+            try:
+                type_row = (
+                    session.query(UserTagTypePatch)
+                    .filter(
+                        UserTagTypePatch.target_tag_id == tag_id,
+                        UserTagTypePatch.format_id == format_id,
+                    )
+                    .one_or_none()
+                )
+            except OperationalError as exc:
+                if not self._is_missing_table_error(exc):
+                    raise
+                type_row = None
+            if status_row is None and type_row is None:
                 return None
+
+            type_id = type_row.type_id if type_row is not None else status_row.type_id
+            alias = status_row.alias if status_row is not None else False
+            preferred_tag_id = status_row.preferred_tag_id if status_row is not None else tag_id
+            deprecated = status_row.deprecated if status_row is not None else False
+            deprecated_at = status_row.deprecated_at if status_row is not None else None
             return TagStatus(
-                tag_id=row.target_tag_id,
-                format_id=row.format_id,
-                type_id=row.type_id,
-                alias=row.alias,
-                preferred_tag_id=row.preferred_tag_id,
-                deprecated=row.deprecated,
-                deprecated_at=row.deprecated_at,
+                tag_id=tag_id,
+                format_id=format_id,
+                type_id=type_id,
+                alias=alias,
+                preferred_tag_id=preferred_tag_id,
+                deprecated=deprecated,
+                deprecated_at=deprecated_at,
             )
 
     def list_tag_statuses(self, tag_id: int | None = None) -> list[TagStatus]:
-        """USER_TAG_STATUS_PATCH を全件 (tag_id 指定時はフィルタ) 取得し TagStatus に変換して返す。"""
+        """USER_TAG_STATUS_PATCH + USER_TAG_TYPE_PATCH の effective status 一覧を返す。"""
+        with self.session_factory() as session:
+            status_query = session.query(UserTagStatusPatch)
+            if tag_id is not None:
+                status_query = status_query.filter(UserTagStatusPatch.target_tag_id == tag_id)
+            status_rows = status_query.all()
+
+            try:
+                type_query = session.query(UserTagTypePatch)
+                if tag_id is not None:
+                    type_query = type_query.filter(UserTagTypePatch.target_tag_id == tag_id)
+                type_rows = type_query.all()
+            except OperationalError as exc:
+                if not self._is_missing_table_error(exc):
+                    raise
+                type_rows = []
+
+            statuses: dict[tuple[int, int], TagStatus] = {}
+            for status_row in status_rows:
+                statuses[(status_row.target_tag_id, status_row.format_id)] = TagStatus(
+                    tag_id=status_row.target_tag_id,
+                    format_id=status_row.format_id,
+                    type_id=status_row.type_id,
+                    alias=status_row.alias,
+                    preferred_tag_id=status_row.preferred_tag_id,
+                    deprecated=status_row.deprecated,
+                    deprecated_at=status_row.deprecated_at,
+                )
+
+            for type_row in type_rows:
+                key = (type_row.target_tag_id, type_row.format_id)
+                existing = statuses.get(key)
+                if existing is not None:
+                    existing.type_id = type_row.type_id
+                    continue
+                statuses[key] = TagStatus(
+                    tag_id=type_row.target_tag_id,
+                    format_id=type_row.format_id,
+                    type_id=type_row.type_id,
+                    alias=False,
+                    preferred_tag_id=type_row.target_tag_id,
+                    deprecated=False,
+                    deprecated_at=None,
+                )
+
+            return list(statuses.values())
+
+    def list_tag_type_patches(self, tag_id: int | None = None) -> list[UserTagTypePatch]:
+        """USER_TAG_TYPE_PATCH を全件 (tag_id 指定時はフィルタ) 取得する。"""
+        with self.session_factory() as session:
+            query = session.query(UserTagTypePatch)
+            if tag_id is not None:
+                query = query.filter(UserTagTypePatch.target_tag_id == tag_id)
+            try:
+                rows = query.all()
+            except OperationalError as exc:
+                if self._is_missing_table_error(exc):
+                    return []
+                raise
+            return [
+                UserTagTypePatch(
+                    target_scope=row.target_scope,
+                    target_tag_id=row.target_tag_id,
+                    format_id=row.format_id,
+                    type_id=row.type_id,
+                )
+                for row in rows
+            ]
+
+    def list_status_patches(self, tag_id: int | None = None) -> list[UserTagStatusPatch]:
+        """USER_TAG_STATUS_PATCH を raw patch として取得する。"""
         with self.session_factory() as session:
             query = session.query(UserTagStatusPatch)
             if tag_id is not None:
                 query = query.filter(UserTagStatusPatch.target_tag_id == tag_id)
             rows = query.all()
             return [
-                TagStatus(
-                    tag_id=r.target_tag_id,
-                    format_id=r.format_id,
-                    type_id=r.type_id,
-                    alias=r.alias,
-                    preferred_tag_id=r.preferred_tag_id,
-                    deprecated=r.deprecated,
-                    deprecated_at=r.deprecated_at,
+                UserTagStatusPatch(
+                    target_scope=row.target_scope,
+                    target_tag_id=row.target_tag_id,
+                    format_id=row.format_id,
+                    type_id=row.type_id,
+                    alias=row.alias,
+                    preferred_scope=row.preferred_scope,
+                    preferred_tag_id=row.preferred_tag_id,
+                    deprecated=row.deprecated,
+                    deprecated_at=row.deprecated_at,
                 )
-                for r in rows
+                for row in rows
             ]
 
     # ------------------------------------------------------------------
@@ -297,6 +393,10 @@ class OverlayTagReader:
             candidate_ids = set(tag_by_id)
 
             status_by_tag = self._load_status_patches(session, candidate_ids)
+            self._apply_type_patches_to_statuses(
+                status_by_tag,
+                self._load_type_patches(session, candidate_ids),
+            )
             usage_by_tag = self._load_usage_patches(session, candidate_ids)
             trans_by_tag = self._load_translation_patches(session, candidate_ids)
             type_map = self._load_type_name_map(session)
@@ -402,6 +502,49 @@ class OverlayTagReader:
         for patch_list in result.values():
             patch_list.sort(key=lambda p: p.format_id)
         return result
+
+    def _load_type_patches(self, session: Session, tag_ids: set[int]) -> dict[int, list[UserTagTypePatch]]:
+        if not tag_ids:
+            return {}
+        try:
+            rows = (
+                session.query(UserTagTypePatch).filter(UserTagTypePatch.target_tag_id.in_(tag_ids)).all()
+            )
+        except OperationalError as exc:
+            if self._is_missing_table_error(exc):
+                return {}
+            raise
+        result: dict[int, list[UserTagTypePatch]] = {}
+        for row in rows:
+            result.setdefault(row.target_tag_id, []).append(row)
+        return result
+
+    def _apply_type_patches_to_statuses(
+        self,
+        status_by_tag: dict[int, list[UserTagStatusPatch]],
+        type_by_tag: dict[int, list[UserTagTypePatch]],
+    ) -> None:
+        for tag_id, type_patches in type_by_tag.items():
+            statuses = status_by_tag.setdefault(tag_id, [])
+            status_by_format = {status.format_id: status for status in statuses}
+            for type_patch in type_patches:
+                existing = status_by_format.get(type_patch.format_id)
+                if existing is not None:
+                    existing.type_id = type_patch.type_id
+                    continue
+                status = UserTagStatusPatch(
+                    target_scope=type_patch.target_scope,
+                    target_tag_id=type_patch.target_tag_id,
+                    format_id=type_patch.format_id,
+                    type_id=type_patch.type_id,
+                    alias=False,
+                    preferred_scope=type_patch.target_scope,
+                    preferred_tag_id=type_patch.target_tag_id,
+                    deprecated=False,
+                )
+                statuses.append(status)
+                status_by_format[type_patch.format_id] = status
+            statuses.sort(key=lambda p: p.format_id)
 
     def _load_usage_patches(
         self, session: Session, tag_ids: set[int]

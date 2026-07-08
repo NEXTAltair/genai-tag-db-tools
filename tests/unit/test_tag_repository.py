@@ -21,6 +21,7 @@ from genai_tag_db_tools.db.schema import (
     TagUsageCounts,
     UserOverlayBase,
     UserTagStatusPatch,
+    UserTagTypePatch,
 )
 
 pytestmark = pytest.mark.db_tools
@@ -44,7 +45,7 @@ def session_factory() -> Callable[[], Session]:
 
 
 def test_update_tags_type_batch_writes_base_tag_type_overlay_patch() -> None:
-    """Base DB 由来タグの type 補正は USER_TAG_STATUS_PATCH に保存する (#1268/#136)。"""
+    """Base DB 由来タグの type 補正は USER_TAG_TYPE_PATCH に保存する (#1268/#136/#138)。"""
     from genai_tag_db_tools.models import TagTypeUpdate
 
     base_factory = _memory_session_factory()
@@ -79,12 +80,13 @@ def test_update_tags_type_batch_writes_base_tag_type_overlay_patch() -> None:
     with user_factory() as session:
         assert session.query(Tag).filter(Tag.tag_id == base_tag_id).one_or_none() is None
         assert session.query(TagStatus).filter(TagStatus.tag_id == base_tag_id).one_or_none() is None
+        assert session.query(UserTagStatusPatch).filter(UserTagStatusPatch.target_tag_id == base_tag_id).all() == []
         patch = (
-            session.query(UserTagStatusPatch)
+            session.query(UserTagTypePatch)
             .filter(
-                UserTagStatusPatch.target_scope == "base",
-                UserTagStatusPatch.target_tag_id == base_tag_id,
-                UserTagStatusPatch.format_id == 1000,
+                UserTagTypePatch.target_scope == "base",
+                UserTagTypePatch.target_tag_id == base_tag_id,
+                UserTagTypePatch.format_id == 1000,
             )
             .one()
         )
@@ -95,9 +97,6 @@ def test_update_tags_type_batch_writes_base_tag_type_overlay_patch() -> None:
             .scalar()
         )
 
-    assert patch.alias is False
-    assert patch.preferred_scope == "base"
-    assert patch.preferred_tag_id == base_tag_id
     assert type_name == "general"
 
     rows = merged_reader.search_tags("base_only_tag", format_name="Lorairo", type_name="general")
@@ -178,6 +177,406 @@ def test_update_tags_type_batch_rolls_back_overlay_patch_when_batch_fails(
 
     with user_factory() as session:
         assert session.query(UserTagStatusPatch).all() == []
+        assert session.query(UserTagTypePatch).all() == []
+
+
+def test_update_tags_type_batch_creates_missing_type_patch_table_for_old_overlay_db() -> None:
+    """旧 overlay DB に USER_TAG_TYPE_PATCH が無くても type patch 書き込み前に作成する。"""
+    from genai_tag_db_tools.models import TagTypeUpdate
+
+    base_factory = _memory_session_factory()
+    user_factory = _memory_session_factory(overlay=True)
+    base_reader = TagReader(base_factory)
+    user_reader = OverlayTagReader(user_factory)
+    merged_reader = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+    repo = TagRepository(user_factory, reader=merged_reader)
+
+    base_tag_id = 197279
+    with base_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=1, type_name="general"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+        session.add(Tag(tag_id=base_tag_id, tag="old_overlay_tag", source_tag="Old Overlay Tag"))
+        session.add(
+            TagStatus(
+                tag_id=base_tag_id,
+                format_id=1000,
+                type_id=0,
+                alias=False,
+                preferred_tag_id=base_tag_id,
+            )
+        )
+        session.commit()
+
+    with user_factory() as session:
+        UserTagTypePatch.__table__.drop(session.get_bind())
+        session.commit()
+
+    repo.update_tags_type_batch([TagTypeUpdate(tag_id=base_tag_id, type_name="general")], format_id=1000)
+
+    with user_factory() as session:
+        patch = session.query(UserTagTypePatch).one()
+
+    assert patch.target_tag_id == base_tag_id
+
+
+def test_merged_unknown_type_ids_use_overlay_status_as_effective_status() -> None:
+    """user overlay で type 補正済みの base tag は unknown 一覧から除外する。"""
+
+    base_factory = _memory_session_factory()
+    user_factory = _memory_session_factory(overlay=True)
+    base_reader = TagReader(base_factory)
+    user_reader = OverlayTagReader(user_factory)
+    merged_reader = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+
+    tag_id = 197273
+    with base_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=1, type_name="unknown"))
+        session.add(TagTypeName(type_name_id=2, type_name="character"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=1, type_name_id=2))
+        session.add(Tag(tag_id=tag_id, tag="base_unknown_tag", source_tag="Base Unknown Tag"))
+        session.add(TagStatus(tag_id=tag_id, format_id=1000, type_id=0, alias=False, preferred_tag_id=tag_id))
+        session.commit()
+
+    assert merged_reader.get_unknown_type_tag_ids(format_id=1000) == [tag_id]
+
+    with user_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=1, type_name="unknown"))
+        session.add(TagTypeName(type_name_id=2, type_name="character"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=1, type_name_id=2))
+        session.add(
+            UserTagTypePatch(
+                target_scope="base",
+                target_tag_id=tag_id,
+                format_id=1000,
+                type_id=1,
+            )
+        )
+        session.commit()
+
+    assert merged_reader.get_unknown_type_tag_ids(format_id=1000) == []
+
+
+def test_merged_unknown_type_ids_classify_explicit_type_patch_with_user_type_mapping() -> None:
+    """明示 type patch は user type mapping で unknown 一覧から除外する。"""
+
+    base_factory = _memory_session_factory()
+    user_factory = _memory_session_factory(overlay=True)
+    base_reader = TagReader(base_factory)
+    user_reader = OverlayTagReader(user_factory)
+    merged_reader = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+
+    tag_id = 197274
+    with base_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=1, type_name="unknown"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+        session.add(Tag(tag_id=tag_id, tag="base_unknown_tag", source_tag="Base Unknown Tag"))
+        session.add(TagStatus(tag_id=tag_id, format_id=1000, type_id=0, alias=False, preferred_tag_id=tag_id))
+        session.commit()
+
+    with user_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=2, type_name="general"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=2))
+        session.add(
+            UserTagTypePatch(
+                target_scope="base",
+                target_tag_id=tag_id,
+                format_id=1000,
+                type_id=0,
+            )
+        )
+        session.commit()
+
+    assert merged_reader.get_unknown_type_tag_ids(format_id=1000) == []
+
+
+def test_merged_unknown_type_ids_classify_type_patch_with_base_type_mapping_fallback() -> None:
+    """user mapping が無い type patch は reader/base 側の type_id で unknown 判定する。"""
+
+    base_factory = _memory_session_factory()
+    user_factory = _memory_session_factory(overlay=True)
+    base_reader = TagReader(base_factory)
+    user_reader = OverlayTagReader(user_factory)
+    merged_reader = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+
+    tag_id = 197280
+    with base_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=1, type_name="unknown"))
+        session.add(TagTypeName(type_name_id=2, type_name="character"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=1, type_name_id=2))
+        session.add(Tag(tag_id=tag_id, tag="base_character_tag", source_tag="Base Character Tag"))
+        session.add(TagStatus(tag_id=tag_id, format_id=1000, type_id=1, alias=False, preferred_tag_id=tag_id))
+        session.commit()
+
+    with user_factory() as session:
+        session.add(UserTagTypePatch(target_scope="base", target_tag_id=tag_id, format_id=1000, type_id=0))
+        session.commit()
+
+    assert merged_reader.get_unknown_type_tag_ids(format_id=1000) == [tag_id]
+
+
+def test_merged_unknown_type_ids_preserve_base_unknown_for_status_only_overlay_patch() -> None:
+    """user type mapping の無い status-only patch は base unknown 判定を維持する。"""
+
+    base_factory = _memory_session_factory()
+    user_factory = _memory_session_factory(overlay=True)
+    base_reader = TagReader(base_factory)
+    user_reader = OverlayTagReader(user_factory)
+    merged_reader = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+
+    tag_id = 197275
+    with base_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=1, type_name="unknown"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+        session.add(Tag(tag_id=tag_id, tag="status_only_unknown", source_tag="Status Only Unknown"))
+        session.add(TagStatus(tag_id=tag_id, format_id=1000, type_id=0, alias=False, preferred_tag_id=tag_id))
+        session.commit()
+
+    with user_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=2, type_name="general"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=2))
+        session.add(
+            UserTagStatusPatch(
+                target_scope="base",
+                target_tag_id=tag_id,
+                format_id=1000,
+                type_id=0,
+                alias=False,
+                preferred_scope="base",
+                preferred_tag_id=tag_id,
+                deprecated=True,
+            )
+        )
+        session.commit()
+
+    assert merged_reader.get_unknown_type_tag_ids(format_id=1000) == [tag_id]
+
+
+def test_merged_unknown_type_ids_tolerates_user_db_without_overlay_status_table() -> None:
+    """旧 user DB で USER_TAG_STATUS_PATCH が無くても base unknown を返す。"""
+
+    base_factory = _memory_session_factory()
+    user_factory = _memory_session_factory(overlay=False)
+    base_reader = TagReader(base_factory)
+    user_reader = OverlayTagReader(user_factory)
+    merged_reader = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+
+    tag_id = 197276
+    with base_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=1, type_name="unknown"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+        session.add(Tag(tag_id=tag_id, tag="legacy_user_db_unknown", source_tag="Legacy User DB Unknown"))
+        session.add(TagStatus(tag_id=tag_id, format_id=1000, type_id=0, alias=False, preferred_tag_id=tag_id))
+        session.commit()
+
+    assert merged_reader.get_unknown_type_tag_ids(format_id=1000) == [tag_id]
+
+
+def test_type_patch_overrides_only_type_and_preserves_base_status_fields() -> None:
+    """type-only patch は base の alias / preferred / deprecated を shadow しない。"""
+
+    base_factory = _memory_session_factory()
+    user_factory = _memory_session_factory(overlay=True)
+    base_reader = TagReader(base_factory)
+    user_reader = OverlayTagReader(user_factory)
+    merged_reader = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+
+    alias_id = 197277
+    preferred_id = 197278
+    with base_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=1, type_name="unknown"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+        session.add(Tag(tag_id=alias_id, tag="alias_tag", source_tag="Alias Tag"))
+        session.add(Tag(tag_id=preferred_id, tag="preferred_tag", source_tag="Preferred Tag"))
+        session.add(
+            TagStatus(
+                tag_id=alias_id,
+                format_id=1000,
+                type_id=0,
+                alias=True,
+                preferred_tag_id=preferred_id,
+                deprecated=True,
+            )
+        )
+        session.commit()
+
+    with user_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=2, type_name="character"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=1, type_name_id=2))
+        session.add(
+            UserTagTypePatch(
+                target_scope="base",
+                target_tag_id=alias_id,
+                format_id=1000,
+                type_id=1,
+            )
+        )
+        session.commit()
+
+    status = merged_reader.get_tag_status(alias_id, 1000)
+
+    assert status is not None
+    assert status.type_id == 1
+    assert status.alias is True
+    assert status.preferred_tag_id == preferred_id
+    assert status.deprecated is True
+
+
+def test_type_patch_search_merge_preserves_base_alias_fields() -> None:
+    """検索 merge でも type-only patch は base alias / preferred / deprecated を shadow しない。"""
+
+    base_factory = _memory_session_factory()
+    user_factory = _memory_session_factory(overlay=True)
+    base_reader = TagReader(base_factory)
+    user_reader = OverlayTagReader(user_factory)
+    merged_reader = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+
+    alias_id = 197281
+    preferred_id = 197282
+    with base_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=1, type_name="general"))
+        session.add(TagTypeName(type_name_id=2, type_name="character"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=1, type_name_id=2))
+        session.add(Tag(tag_id=alias_id, tag="alias_search_tag", source_tag="Alias Search Tag"))
+        session.add(Tag(tag_id=preferred_id, tag="preferred_search_tag", source_tag="Preferred Search Tag"))
+        session.add(
+            TagStatus(
+                tag_id=alias_id,
+                format_id=1000,
+                type_id=0,
+                alias=True,
+                preferred_tag_id=preferred_id,
+                deprecated=True,
+            )
+        )
+        session.commit()
+
+    with user_factory() as session:
+        session.add(UserTagTypePatch(target_scope="base", target_tag_id=alias_id, format_id=1000, type_id=1))
+        session.commit()
+
+    rows = merged_reader.search_tags("alias_search_tag", format_name="Lorairo")
+
+    assert len(rows) == 1
+    assert rows[0]["alias"] is True
+    assert rows[0]["deprecated"] is True
+    assert rows[0]["type_id"] == 1
+    assert rows[0]["type_name"] == "character"
+    assert rows[0]["format_statuses"]["Lorairo"]["preferred_tag_id"] == preferred_id
+
+
+def test_type_patch_search_merge_defaults_status_fields_for_type_only_requested_format() -> None:
+    """requested format が type-only patch だけなら row-level status はその format の初期値にする。"""
+
+    base_factory = _memory_session_factory()
+    user_factory = _memory_session_factory(overlay=True)
+    base_reader = TagReader(base_factory)
+    user_reader = OverlayTagReader(user_factory)
+    merged_reader = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+
+    tag_id = 197283
+    preferred_id = 197284
+    with base_factory() as session:
+        session.add(TagFormat(format_id=1, format_name="danbooru"))
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=1, type_name="general"))
+        session.add(TagTypeName(type_name_id=2, type_name="character"))
+        session.add(TagTypeFormatMapping(format_id=1, type_id=0, type_name_id=1))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=1, type_name_id=2))
+        session.add(Tag(tag_id=tag_id, tag="type_only_requested", source_tag="Type Only Requested"))
+        session.add(Tag(tag_id=preferred_id, tag="preferred_requested", source_tag="Preferred Requested"))
+        session.add(
+            TagStatus(
+                tag_id=tag_id,
+                format_id=1,
+                type_id=0,
+                alias=True,
+                preferred_tag_id=preferred_id,
+                deprecated=True,
+            )
+        )
+        session.commit()
+
+    with user_factory() as session:
+        session.add(UserTagTypePatch(target_scope="base", target_tag_id=tag_id, format_id=1000, type_id=1))
+        session.commit()
+
+    rows = merged_reader.search_tags("type_only_requested", format_name="Lorairo")
+
+    assert len(rows) == 1
+    assert rows[0]["alias"] is False
+    assert rows[0]["deprecated"] is False
+    assert rows[0]["type_name"] == "character"
+    assert rows[0]["format_statuses"]["Lorairo"]["preferred_tag_id"] == tag_id
+
+
+def test_user_only_overlay_unknown_type_ids_apply_type_patch() -> None:
+    """OverlayTagReader を base_repo として単独利用しても type patch を unknown 一覧へ反映する。"""
+
+    user_factory = _memory_session_factory(overlay=True)
+    user_reader = OverlayTagReader(user_factory)
+    merged_reader = MergedTagReader(base_repo=user_reader)
+
+    tag_id = 1_000_000_100
+    with user_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=1, type_name="unknown"))
+        session.add(TagTypeName(type_name_id=2, type_name="character"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=1, type_name_id=2))
+        session.add(UserTagTypePatch(target_scope="user", target_tag_id=tag_id, format_id=1000, type_id=1))
+        session.add(
+            UserTagStatusPatch(
+                target_scope="user",
+                target_tag_id=tag_id,
+                format_id=1000,
+                type_id=0,
+                alias=False,
+                preferred_scope="user",
+                preferred_tag_id=tag_id,
+                deprecated=False,
+            )
+        )
+        session.commit()
+
+    assert merged_reader.get_unknown_type_tag_ids(format_id=1000) == []
+
+
+def test_plain_user_repo_status_merge_remains_supported() -> None:
+    """user_repo が plain TagReader でも list_tag_statuses / get_tag_status が動く。"""
+
+    base_factory = _memory_session_factory()
+    user_factory = _memory_session_factory()
+    base_reader = TagReader(base_factory)
+    user_reader = TagReader(user_factory)
+    merged_reader = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+
+    tag_id = 42
+    with user_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(Tag(tag_id=tag_id, tag="legacy_user", source_tag="Legacy User"))
+        session.add(TagStatus(tag_id=tag_id, format_id=1000, type_id=3, alias=False, preferred_tag_id=tag_id))
+        session.commit()
+
+    status = merged_reader.get_tag_status(tag_id, 1000)
+
+    assert status is not None
+    assert status.type_id == 3
 
 
 def test_create_tag_returns_existing_id(session_factory: Callable[[], Session]) -> None:
