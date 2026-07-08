@@ -264,6 +264,42 @@ def test_merged_unknown_type_ids_classify_overlay_patch_with_user_type_mapping_o
     assert merged_reader.get_unknown_type_tag_ids(format_id=1000) == []
 
 
+def test_merged_unknown_type_ids_preserve_base_unknown_for_status_only_overlay_patch() -> None:
+    """user type mapping の無い status-only patch は base unknown 判定を維持する。"""
+
+    base_factory = _memory_session_factory()
+    user_factory = _memory_session_factory(overlay=True)
+    base_reader = TagReader(base_factory)
+    user_reader = OverlayTagReader(user_factory)
+    merged_reader = MergedTagReader(base_repo=base_reader, user_repo=user_reader)
+
+    tag_id = 197275
+    with base_factory() as session:
+        session.add(TagFormat(format_id=1000, format_name="Lorairo"))
+        session.add(TagTypeName(type_name_id=1, type_name="unknown"))
+        session.add(TagTypeFormatMapping(format_id=1000, type_id=0, type_name_id=1))
+        session.add(Tag(tag_id=tag_id, tag="status_only_unknown", source_tag="Status Only Unknown"))
+        session.add(TagStatus(tag_id=tag_id, format_id=1000, type_id=0, alias=False, preferred_tag_id=tag_id))
+        session.commit()
+
+    with user_factory() as session:
+        session.add(
+            UserTagStatusPatch(
+                target_scope="base",
+                target_tag_id=tag_id,
+                format_id=1000,
+                type_id=0,
+                alias=False,
+                preferred_scope="base",
+                preferred_tag_id=tag_id,
+                deprecated=True,
+            )
+        )
+        session.commit()
+
+    assert merged_reader.get_unknown_type_tag_ids(format_id=1000) == [tag_id]
+
+
 def test_create_tag_returns_existing_id(session_factory: Callable[[], Session]) -> None:
     reader = TagReader(session_factory)
     repo = TagRepository(session_factory, reader=MergedTagReader(base_repo=reader))
