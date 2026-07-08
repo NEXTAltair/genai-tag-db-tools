@@ -248,29 +248,29 @@ class OverlayTagReader:
             type_rows = type_query.all()
 
             statuses: dict[tuple[int, int], TagStatus] = {}
-            for row in status_rows:
-                statuses[(row.target_tag_id, row.format_id)] = TagStatus(
-                    tag_id=row.target_tag_id,
-                    format_id=row.format_id,
-                    type_id=row.type_id,
-                    alias=row.alias,
-                    preferred_tag_id=row.preferred_tag_id,
-                    deprecated=row.deprecated,
-                    deprecated_at=row.deprecated_at,
+            for status_row in status_rows:
+                statuses[(status_row.target_tag_id, status_row.format_id)] = TagStatus(
+                    tag_id=status_row.target_tag_id,
+                    format_id=status_row.format_id,
+                    type_id=status_row.type_id,
+                    alias=status_row.alias,
+                    preferred_tag_id=status_row.preferred_tag_id,
+                    deprecated=status_row.deprecated,
+                    deprecated_at=status_row.deprecated_at,
                 )
 
-            for row in type_rows:
-                key = (row.target_tag_id, row.format_id)
+            for type_row in type_rows:
+                key = (type_row.target_tag_id, type_row.format_id)
                 existing = statuses.get(key)
                 if existing is not None:
-                    existing.type_id = row.type_id
+                    existing.type_id = type_row.type_id
                     continue
                 statuses[key] = TagStatus(
-                    tag_id=row.target_tag_id,
-                    format_id=row.format_id,
-                    type_id=row.type_id,
+                    tag_id=type_row.target_tag_id,
+                    format_id=type_row.format_id,
+                    type_id=type_row.type_id,
                     alias=False,
-                    preferred_tag_id=row.target_tag_id,
+                    preferred_tag_id=type_row.target_tag_id,
                     deprecated=False,
                     deprecated_at=None,
                 )
