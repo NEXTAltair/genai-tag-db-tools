@@ -1701,3 +1701,55 @@ def test_register_tag_with_status_type_id_none_defaults_and_preserves(
             .one()
         )
         assert status.type_id == 2
+
+
+def _search_row(tag: str, translations: dict[str, list[str]]) -> dict:
+    return {
+        "tag_id": 1,
+        "tag": tag,
+        "source_tag": None,
+        "usage_count": 0,
+        "alias": False,
+        "deprecated": False,
+        "type_id": None,
+        "type_name": "general",
+        "translations": translations,
+        "format_statuses": {},
+    }
+
+
+def _matches(reader: MergedTagReader, row: dict, keyword: str) -> bool:
+    return reader._search_row_matches_filters(
+        row,
+        keyword,
+        partial=False,
+        type_name=None,
+        type_names=None,
+        language=None,
+        min_usage=None,
+        max_usage=None,
+        alias=None,
+        deprecated=None,
+    )
+
+
+def test_merged_exact_filter_matches_translation_case_sensitively() -> None:
+    """merged 経路の exact 照合も翻訳は大小を区別する (#139 Codex P2)。
+
+    `_exact_match_translation_rows` だけ case-sensitive にしても、この Python 側
+    フィルタが casefold 比較のままだと merged/bulk 検索で `aiki` が `Aiki` を拾う。
+    """
+    reader = MergedTagReader.__new__(MergedTagReader)
+    row = _search_row("aiki-tag", {"en": ["Aiki"]})
+
+    assert _matches(reader, row, "Aiki") is True
+    assert _matches(reader, row, "aiki") is False
+
+
+def test_merged_exact_filter_still_matches_tag_case_insensitively() -> None:
+    """TAGS 側 (canonical) は従来どおり大小無視で照合する。"""
+    reader = MergedTagReader.__new__(MergedTagReader)
+    row = _search_row("blue hair", {})
+
+    assert _matches(reader, row, "Blue Hair") is True
+    assert _matches(reader, row, "blue hair") is True
