@@ -236,7 +236,20 @@ def default_sources() -> list[DbSourceRef]:
     ]
 
 
-def ensure_databases(requests: list[EnsureDbRequest]) -> list[EnsureDbResult]:
+def ensure_databases(
+    requests: list[EnsureDbRequest], *, compute_digest: bool = True
+) -> list[EnsureDbResult]:
+    """base DB を用意し、その所在 (と任意で SHA256) を返す。
+
+    Args:
+        requests: 取得対象の DB。
+        compute_digest: SHA256 を計算するか。base DB は 1 本あたり数 GB あり、
+            ハッシュ計算だけで数秒〜十数秒かかる。ダイジェストを読まない呼び出し
+            (`initialize_databases` 経由の起動処理) では False にする。
+
+    Returns:
+        DB ごとの結果。`compute_digest=False` のとき `sha256` は None。
+    """
     if not requests:
         raise ValueError("requests は空にできません")
 
@@ -248,7 +261,7 @@ def ensure_databases(requests: list[EnsureDbRequest]) -> list[EnsureDbResult]:
         results.append(
             EnsureDbResult(
                 db_path=str(db_path),
-                sha256=_compute_sha256(db_path),
+                sha256=_compute_sha256(db_path) if compute_digest else None,
                 revision=None,
                 cached=is_cached,
             )
@@ -276,6 +289,11 @@ def initialize_databases(
             is provided, otherwise False.
         format_name: Format name for user DB (e.g., "Lorairo", "MyApp").
             If None, defaults to "tag-db".
+
+    Note:
+        返り値の `sha256` は常に None。ダイジェストが要るときは
+        `ensure_databases(..., compute_digest=True)` を直接呼ぶこと
+        (`ensure-dbs` CLI はそちらを使う)。
     """
     resolved_user_db_dir = Path(user_db_dir) if user_db_dir is not None else None
     if init_user_db is None:
@@ -286,7 +304,8 @@ def initialize_databases(
     requested_sources = sources or default_sources()
     requests = [EnsureDbRequest(source=source, cache=cache) for source in requested_sources]
 
-    results = ensure_databases(requests)
+    # 起動経路では SHA256 を読まないので計算しない (8.4GB のハッシュ計算に実測 13 秒)。
+    results = ensure_databases(requests, compute_digest=False)
     base_paths = [Path(result.db_path) for result in results]
     runtime.set_base_database_paths(base_paths)
     runtime.init_engine(base_paths[0])

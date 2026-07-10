@@ -72,7 +72,7 @@ class EnsureDbResult(BaseModel):
 
     Args:
         db_path: ローカルSQLiteの実体パス（HFキャッシュ内のsymlink）。
-        sha256: 取得ファイルのSHA256。
+        sha256: 取得ファイルのSHA256。ダイジェスト計算を省いた場合は None。
         revision: 解決されたリビジョン（コミットハッシュ）。
         cached: オフラインモードでキャッシュを使用したか。
 
@@ -83,7 +83,7 @@ class EnsureDbResult(BaseModel):
     """
 
     db_path: str = Field(..., description="ローカルSQLiteの実体パス")
-    sha256: str = Field(..., description="取得ファイルのSHA256")
+    sha256: str | None = Field(default=None, description="取得ファイルのSHA256 (未計算なら None)")
     revision: str | None = Field(default=None, description="解決されたリビジョン")
     cached: bool = Field(default=False, description="キャッシュのみ使用したか")
 

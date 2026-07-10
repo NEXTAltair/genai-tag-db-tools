@@ -91,9 +91,15 @@ def test_ensure_db_result_valid():
 
 
 @pytest.mark.db_tools
-def test_ensure_db_result_requires_all_fields():
+def test_ensure_db_result_requires_db_path():
     with pytest.raises(ValidationError):
-        EnsureDbResult(db_path="/path/to/db.sqlite", cached=True)
+        EnsureDbResult(cached=True)
+
+
+def test_ensure_db_result_sha256_is_optional():
+    """SHA256 は任意 (compute_digest=False の起動経路では計算しない)。"""
+    result = EnsureDbResult(db_path="/path/to/db.sqlite", cached=True)
+    assert result.sha256 is None
 
 
 @pytest.mark.db_tools

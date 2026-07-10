@@ -119,6 +119,57 @@ def test_ensure_databases_returns_cached_status_per_spec(monkeypatch, tmp_path):
     assert results[1].sha256 == _hash_bytes(b"bb")
 
 
+def test_ensure_databases_skips_digest_when_not_requested(monkeypatch, tmp_path):
+    """compute_digest=False では SHA256 を計算しない。
+
+    base DB は数 GB あり、ハッシュ計算だけで十数秒かかる。ダイジェストを読まない
+    呼び出し (起動処理) はこれを省く。
+    """
+    db_a = tmp_path / "a.sqlite"
+    db_a.write_bytes(b"a")
+
+    monkeypatch.setattr(
+        hf_downloader,
+        "download_with_offline_fallback",
+        lambda spec, *, token=None: (db_a, True),
+    )
+
+    def fail_if_called(path):
+        raise AssertionError(f"SHA256 を計算してはいけない: {path}")
+
+    monkeypatch.setattr(core_api, "_compute_sha256", fail_if_called)
+
+    results = core_api.ensure_databases(
+        [_build_request(tmp_path, "org/a", "a.sqlite")], compute_digest=False
+    )
+
+    assert results[0].sha256 is None
+    assert results[0].db_path == str(db_a)
+
+
+def test_initialize_databases_does_not_hash_base_dbs(tmp_path, monkeypatch):
+    """起動経路 (initialize_databases) は base DB をハッシュしない。"""
+    db = tmp_path / "base.sqlite"
+    db.write_bytes(b"x")
+
+    monkeypatch.setattr(
+        hf_downloader,
+        "download_with_offline_fallback",
+        lambda spec, *, token=None: (db, True),
+    )
+    monkeypatch.setattr(core_api.runtime, "set_base_database_paths", lambda paths: None)
+    monkeypatch.setattr(core_api.runtime, "init_engine", lambda path: None)
+
+    def fail_if_called(path):
+        raise AssertionError(f"起動処理で SHA256 を計算してはいけない: {path}")
+
+    monkeypatch.setattr(core_api, "_compute_sha256", fail_if_called)
+
+    results = core_api.initialize_databases(user_db_dir=tmp_path, init_user_db=False)
+
+    assert all(result.sha256 is None for result in results)
+
+
 def _usage_row(tag_id: int, usage: int) -> dict[str, object]:
     return {
         "tag": f"t{tag_id}",
