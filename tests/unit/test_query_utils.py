@@ -11,7 +11,6 @@ from genai_tag_db_tools.db.query_utils import (
     TagSearchPreloader,
     TagSearchQueryBuilder,
     TagSearchResultBuilder,
-    invalidate_case_exception_cache,
     sqlite_ascii_lower,
 )
 from genai_tag_db_tools.db.schema import (
@@ -91,20 +90,42 @@ def test_initial_tag_ids_for_keywords_is_case_insensitive(
     assert result == {"Blue Hair": {1}}
 
 
-def test_exact_match_finds_uppercase_stored_rows_via_exception_path(
+def test_exact_match_does_not_fold_stored_tag_values(
     session_factory: Callable[[], Session],
 ) -> None:
-    """DB 側に大文字混じりで格納された行も index 迂回の例外行経路で照合できる。"""
+    """小文字キーは大文字混じりの格納値に一致しない (Issue #142)。
+
+    `:d` (tag_id 25296) と `:D` (1087135) のように、大小のみが異なる格納値が
+    別タグを指す (base DB 実測で 34 組)。格納値を畳んで照合すると別タグを拾う。
+    """
     with session_factory() as session:
         session.add(Tag(tag_id=1, source_tag="Blue_Hair", tag="Blue Hair"))
         session.add(Tag(tag_id=2, source_tag="blue_hair", tag="blue hair"))
         session.commit()
         builder = TagSearchQueryBuilder(session)
-        result = builder.initial_tag_ids_for_keywords(["blue hair"])
-        single = builder.initial_tag_ids("blue hair", use_like=False)
 
-    assert result == {"blue hair": {1, 2}}
-    assert single == {1, 2}
+        # 格納値が小文字の行は、キーを畳んで index で引ける (従来どおり)
+        assert builder.initial_tag_ids_for_keywords(["blue hair"]) == {"blue hair": {2}}
+        assert builder.initial_tag_ids("blue hair", use_like=False) == {2}
+
+        # 表記どおりに打てば大文字混じりの行も引ける
+        assert builder.initial_tag_ids("Blue Hair", use_like=False) == {1, 2}
+
+
+def test_exact_match_case_variant_tags_do_not_collide(
+    session_factory: Callable[[], Session],
+) -> None:
+    """大小のみ異なる格納タグが別 tag_id の場合、取り違えない (Issue #142)。"""
+    with session_factory() as session:
+        session.add(Tag(tag_id=1, source_tag=":D", tag=":D"))
+        session.add(Tag(tag_id=2, source_tag=":d", tag=":d"))
+        session.commit()
+        builder = TagSearchQueryBuilder(session)
+
+        # 小文字キーは小文字の行だけを引く
+        assert builder.initial_tag_ids(":d", use_like=False) == {2}
+        # 大文字キーは自身 + 畳んだキーの行を引く (canonical が小文字である前提を保つ)
+        assert builder.initial_tag_ids(":D", use_like=False) == {1, 2}
 
 
 def test_translation_match_is_case_sensitive(
@@ -150,25 +171,6 @@ def test_translation_case_variants_resolve_to_distinct_tags(
         assert builder.initial_tag_ids_for_keywords(["aiki"]) == {"aiki": {2}}
         assert builder.initial_tag_ids("Aiki", use_like=False) == {1}
         assert builder.initial_tag_ids("aiki", use_like=False) == {2}
-
-
-def test_case_exception_cache_is_refreshed_after_invalidate(
-    session_factory: Callable[[], Session],
-) -> None:
-    """例外行キャッシュは invalidate 後に再構築され、後から入った大文字行を拾える。"""
-    with session_factory() as session:
-        session.add(Tag(tag_id=1, source_tag="cat", tag="cat"))
-        session.commit()
-        builder = TagSearchQueryBuilder(session)
-        assert builder.initial_tag_ids_for_keywords(["mixed case"]) == {}
-
-        # キャッシュ構築後に大文字混じり行を直接追加 (通常は TagRepository が invalidate する)
-        session.add(Tag(tag_id=2, source_tag="Mixed_Case", tag="Mixed Case"))
-        session.commit()
-        invalidate_case_exception_cache(session.get_bind())
-        result = builder.initial_tag_ids_for_keywords(["mixed case"])
-
-    assert result == {"mixed case": {2}}
 
 
 def test_sqlite_ascii_lower_folds_ascii_only() -> None:

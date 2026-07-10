@@ -1,9 +1,8 @@
 import string
-import weakref
 from logging import Logger
 from typing import Any, TypedDict
 
-from sqlalchemy import exists, func, not_, select
+from sqlalchemy import exists, not_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import literal_column, or_
 
@@ -37,30 +36,30 @@ TAG_ID_IN_CHUNK = 900
 # 同じ照合を再現するための変換テーブル (str.lower は Unicode 全体を畳むため不一致)。
 _ASCII_LOWER_TABLE = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
 
-# TAGS の「ASCII 小文字化で不変でない」例外行のキャッシュ (engine 単位)。
-# base DB (数百万行) は runtime 中は不変で、例外行は全体の 0.01% 未満なので、
-# 一度のスキャン結果を保持すれば以降の完全一致照合は index だけで済む。
-# TAGS を書き換える経路 (TagRepository) は invalidate_case_exception_cache() を呼ぶこと。
-_case_exception_cache: "weakref.WeakKeyDictionary[Any, list[tuple[int, str | None, str | None]]]" = (
-    weakref.WeakKeyDictionary()
-)
-
-
 def sqlite_ascii_lower(value: str) -> str:
     """SQLite の lower() / COLLATE NOCASE と同じ ASCII 限定の小文字化を行う。"""
     return value.translate(_ASCII_LOWER_TABLE)
 
 
-def invalidate_case_exception_cache(bind: Any | None = None) -> None:
-    """TAGS の大小文字例外行キャッシュを無効化する。
+def exact_match_keys(keyword: str) -> set[str]:
+    """TAGS の完全一致照合に使う index 引き当てキーを返す (Issue #142)。
+
+    canonical タグは実質すべて小文字なので、キーを畳めば `Blue Hair` → `blue hair`
+    が index 一致で引ける。一方 **格納値は畳まない**: `:d` (tag_id 25296) と
+    `:D` (1087135) のように大小のみが異なる格納値が別タグを指すため
+    (base DB 実測で 34 組)、格納値を畳むと別タグを拾ってしまう。
+
+    大文字混じりの格納値 (base DB に 49 行) を表記どおりに引けるよう、生キーも
+    併せて probe する。いずれも index (`idx_tags_tag` / `idx_tags_source_tag`) が
+    効くため、従来の 448 万行スキャンは不要になる。
 
     Args:
-        bind: 無効化対象の engine。None なら全 engine 分を破棄する。
+        keyword: 生の検索キーワード。
+
+    Returns:
+        `{生キー, ASCII 小文字化キー}`。
     """
-    if bind is None:
-        _case_exception_cache.clear()
-    else:
-        _case_exception_cache.pop(bind, None)
+    return {keyword, sqlite_ascii_lower(keyword)}
 
 
 def _chunked_in(column: Any, values: list[int]) -> Any:
@@ -149,66 +148,40 @@ class TagSearchQueryBuilder:
         return {row[0] for row in union_query.all()}
 
     def _exact_match_tag_rows(self, match_keys: set[str]) -> list[tuple[int, str | None, str | None]]:
-        """ASCII 小文字化済みキーに case-insensitive 完全一致する TAGS 行を返す。
+        """キーに完全一致する TAGS 行を index 経路で返す。
 
         `lower(col) IN (...)` / `COLLATE NOCASE ==` は index を使えず TAGS 全表スキャン
-        (数百万行、1 回あたり秒〜十秒台) になる (LoRAIro #1203/#1206)。行の大多数は既に
-        小文字なので、(1) index が効く完全一致 IN と (2) 小文字化で不変でない例外行
-        (engine 単位で 1 回だけスキャンしキャッシュ) の Python 照合に分割し、照合結果を
-        変えずに index を活用する。
+        (数百万行、1 回あたり秒台) になる (LoRAIro #1203/#1206)。キー側を畳んで生キーと
+        併せて probe することで、格納値を畳まずに index (`idx_tags_tag` /
+        `idx_tags_source_tag`) だけで照合する (Issue #142)。
 
         Args:
-            match_keys: `sqlite_ascii_lower` 済みの照合キー集合。
+            match_keys: `exact_match_keys()` が組み立てた照合キー集合。
 
         Returns:
-            (tag_id, tag, source_tag) のリスト。例外行経由の重複を含み得る
-            (呼び出し側は set に畳むため実害なし)。
+            (tag_id, tag, source_tag) のリスト。
         """
         if not match_keys:
             return []
         keys = list(match_keys)
-        rows: list[tuple[int, str | None, str | None]] = list(
+        return list(
             self.session.query(Tag.tag_id, Tag.tag, Tag.source_tag)
             .filter(or_(Tag.tag.in_(keys), Tag.source_tag.in_(keys)))
             .all()
         )
-        for tag_id, tag, source_tag in self._case_exceptional_tag_rows():
-            if (tag is not None and sqlite_ascii_lower(tag) in match_keys) or (
-                source_tag is not None and sqlite_ascii_lower(source_tag) in match_keys
-            ):
-                rows.append((tag_id, tag, source_tag))
-        return rows
 
     def _exact_match_tag_ids(self, keyword: str) -> set[int]:
         """単一 keyword の完全一致で tag_id 集合を返す。
 
-        TAGS は canonical 化されている (実質すべて小文字) ため大小を無視して照合するが、
-        翻訳は大小を区別する (Issue #139: `Aiki` と `aiki` は別タグ)。
+        TAGS は canonical 化されている (実質すべて小文字) ためキーを畳んで照合するが、
+        格納値は畳まない (Issue #142)。翻訳は大小を区別する (Issue #139)。
 
         Args:
             keyword: 生の検索キーワード (小文字化前)。
         """
-        ids = {row[0] for row in self._exact_match_tag_rows({sqlite_ascii_lower(keyword)})}
+        ids = {row[0] for row in self._exact_match_tag_rows(exact_match_keys(keyword))}
         ids.update(row[0] for row in self._exact_match_translation_rows({keyword}))
         return ids
-
-    def _case_exceptional_tag_rows(self) -> list[tuple[int, str | None, str | None]]:
-        """ASCII 小文字化で不変でない TAGS 行を engine 単位のキャッシュ付きで返す。"""
-        bind = self.session.get_bind()
-        cached = _case_exception_cache.get(bind)
-        if cached is None:
-            cached = list(
-                self.session.query(Tag.tag_id, Tag.tag, Tag.source_tag)
-                .filter(
-                    or_(
-                        Tag.tag != func.lower(Tag.tag),
-                        Tag.source_tag != func.lower(Tag.source_tag),
-                    )
-                )
-                .all()
-            )
-            _case_exception_cache[bind] = cached
-        return cached
 
     def _exact_match_translation_rows(self, match_keys: set[str]) -> list[tuple[int, str | None]]:
         """キーに完全一致する翻訳行を返す (大文字小文字を区別する、Issue #139)。
@@ -423,17 +396,17 @@ class TagSearchQueryBuilder:
             return {}
 
         keyword_set = set(keywords)
-        # TAGS は大小を無視して照合するため lower 化したキーで突き合わせる。
-        # 同一 lower 値を持つ keyword が複数あっても、それぞれに tag_id を割り当てる。
-        keywords_by_lower: dict[str, set[str]] = {}
+        # TAGS はキー側だけ畳んで照合する (格納値は畳まない、Issue #142)。
+        # 生キーと畳んだキーの両方を probe キーにし、格納値と binary 一致で突き合わせる。
+        keywords_by_key: dict[str, set[str]] = {}
         for keyword in keyword_set:
-            keywords_by_lower.setdefault(sqlite_ascii_lower(keyword), set()).add(keyword)
-        lower_keys = set(keywords_by_lower.keys())
+            for key in exact_match_keys(keyword):
+                keywords_by_key.setdefault(key, set()).add(keyword)
 
         # index 活用の完全一致照合 (LoRAIro #1203/#1206: 従来の lower(col) IN (...) は
         # index を使えず keyword 数に関係なく毎回 TAGS/TAG_TRANSLATIONS の全表スキャンだった)。
         # 翻訳は大小を区別するため生キーで引く (Issue #139)。
-        tag_rows = self._exact_match_tag_rows(lower_keys)
+        tag_rows = self._exact_match_tag_rows(set(keywords_by_key.keys()))
         trans_rows = self._exact_match_translation_rows(keyword_set)
 
         tag_ids_by_keyword: dict[str, set[int]] = {keyword: set() for keyword in keyword_set}
@@ -441,7 +414,7 @@ class TagSearchQueryBuilder:
             for value in (tag, source_tag):
                 if value is None:
                     continue
-                for keyword in keywords_by_lower.get(sqlite_ascii_lower(value), ()):
+                for keyword in keywords_by_key.get(value, ()):
                     tag_ids_by_keyword[keyword].add(tag_id)
         for tag_id, translation in trans_rows:
             if translation is None:

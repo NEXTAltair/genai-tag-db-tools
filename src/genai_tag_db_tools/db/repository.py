@@ -17,7 +17,6 @@ from genai_tag_db_tools.db.query_utils import (
     TagSearchQueryBuilder,
     TagSearchResultBuilder,
     contains_like_pattern,
-    invalidate_case_exception_cache,
     normalize_search_keyword,
     sqlite_ascii_lower,
 )
@@ -629,7 +628,6 @@ class TagRepository:
                 msg = ErrorMessages.DB_OPERATION_FAILED.format(error_msg=str(e))
                 self.logger.error(msg)
                 raise ValueError(msg) from e
-            invalidate_case_exception_cache(session.get_bind())
             return new_tag.tag_id
 
     @staticmethod
@@ -740,7 +738,6 @@ class TagRepository:
                     msg = ErrorMessages.DB_OPERATION_FAILED.format(error_msg=str(retry_error))
                     self.logger.error(msg)
                     raise ValueError(msg) from retry_error
-            invalidate_case_exception_cache(session.get_bind())
             return tag_id
 
     def _write_status_and_translations_in_session(
@@ -781,7 +778,6 @@ class TagRepository:
             if tag is not None:
                 tag_obj.tag = tag
             session.commit()
-            invalidate_case_exception_cache(session.get_bind())
 
     def delete_tag(self, tag_id: int) -> None:
         with self.session_factory() as session:
@@ -792,7 +788,6 @@ class TagRepository:
                 raise ValueError(msg)
             session.delete(tag_obj)
             session.commit()
-            invalidate_case_exception_cache(session.get_bind())
 
     def bulk_insert_tags(self, df: pl.DataFrame) -> None:
         required_cols = {"source_tag", "tag"}
@@ -817,7 +812,6 @@ class TagRepository:
                 session.rollback()
                 msg = ErrorMessages.DB_OPERATION_FAILED.format(error_msg=str(e))
                 raise ValueError(msg) from e
-            invalidate_case_exception_cache(session.get_bind())
 
     def create_tag_with_id(self, tag_id: int, source_tag: str, tag: str) -> int:
         if not tag or not source_tag:
@@ -841,7 +835,6 @@ class TagRepository:
             try:
                 session.add(Tag(tag_id=tag_id, source_tag=source_tag, tag=tag))
                 session.commit()
-                invalidate_case_exception_cache(session.get_bind())
                 return tag_id
             except IntegrityError as e:
                 session.rollback()
@@ -2276,9 +2269,12 @@ class MergedTagReader:
             if needle and not any(needle in value.casefold() for value in haystacks):
                 return False
         elif normalized:
-            # exact 照合: TAGS は canonical (小文字前提) なので大小を無視するが、翻訳は
-            # 大小を区別する (Issue #139: `Aiki` と `aiki` は別タグ)。SQL 側と同じ
-            # ASCII 限定の折り畳みを使う (casefold は Unicode 全体を畳み SQL と不一致)。
+            # exact 照合: タグ名は大小を無視する。user overlay が `COLLATE NOCASE` で
+            # 引く (case-variant な user 重複タグをブラウズで残す #1223) ため、ここで
+            # 畳まないとその行を落としてしまう。base 側の case-variant 衝突 (#142) は
+            # SQL 層 (`_exact_match_tag_rows`) で既に解決済み。
+            # 翻訳は大小を区別する (Issue #139: `Aiki` と `aiki` は別タグ)。折り畳みは
+            # SQL と同じ ASCII 限定 (casefold は Unicode 全体を畳み SQL と不一致)。
             folded = sqlite_ascii_lower(normalized)
             tag_hit = any(folded == sqlite_ascii_lower(value) for value in tag_values)
             translation_hit = any(normalized == value for value in translation_values)
