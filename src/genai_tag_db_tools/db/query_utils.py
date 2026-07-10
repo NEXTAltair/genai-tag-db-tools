@@ -1,4 +1,3 @@
-import re
 import string
 import weakref
 from logging import Logger
@@ -37,9 +36,6 @@ TAG_ID_IN_CHUNK = 900
 # SQLite の lower() / COLLATE NOCASE は ASCII A-Z のみ折り畳む。Python 側で
 # 同じ照合を再現するための変換テーブル (str.lower は Unicode 全体を畳むため不一致)。
 _ASCII_LOWER_TABLE = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
-
-# ASCII 小文字を含むか (大文字混じり行の lower() 済み値と一致し得るか) の判定
-_HAS_ASCII_LOWER_RE = re.compile(r"[a-z]")
 
 # TAGS の「ASCII 小文字化で不変でない」例外行のキャッシュ (engine 単位)。
 # base DB (数百万行) は runtime 中は不変で、例外行は全体の 0.01% 未満なので、
@@ -118,11 +114,12 @@ class TagSearchQueryBuilder:
         limit: int | None = None,
         offset: int = 0,
     ) -> set[int]:
-        # 完全一致 (use_like=False) は COLLATE NOCASE 相当の照合を index 活用経路で行う
-        # (LoRAIro #1203/#1206: NOCASE 比較は index を使えず数百万行の全表スキャンになる)。
+        # 完全一致 (use_like=False) は index 活用経路で照合する (LoRAIro #1203/#1206:
+        # NOCASE 比較は index を使えず数百万行の全表スキャンになる)。TAGS は大小を無視し、
+        # 翻訳は大小を区別する (Issue #139)。
         # LIKE は SQLite 既定で ASCII 大文字小文字を無視するため挙動は変えない。
         if not use_like:
-            ids = sorted(self._exact_match_tag_ids({sqlite_ascii_lower(keyword)}))
+            ids = sorted(self._exact_match_tag_ids(keyword))
             # ページングを決定的にするため tag_id 昇順で offset/limit を適用する (従来の
             # UNION + order_by と同じ意味論)。
             if offset:
@@ -182,10 +179,17 @@ class TagSearchQueryBuilder:
                 rows.append((tag_id, tag, source_tag))
         return rows
 
-    def _exact_match_tag_ids(self, match_keys: set[str]) -> set[int]:
-        """`_exact_match_tag_rows` + 翻訳一致の tag_id 集合版 (単一 keyword の完全一致用)。"""
-        ids = {row[0] for row in self._exact_match_tag_rows(match_keys)}
-        ids.update(row[0] for row in self._exact_match_translation_rows(match_keys))
+    def _exact_match_tag_ids(self, keyword: str) -> set[int]:
+        """単一 keyword の完全一致で tag_id 集合を返す。
+
+        TAGS は canonical 化されている (実質すべて小文字) ため大小を無視して照合するが、
+        翻訳は大小を区別する (Issue #139: `Aiki` と `aiki` は別タグ)。
+
+        Args:
+            keyword: 生の検索キーワード (小文字化前)。
+        """
+        ids = {row[0] for row in self._exact_match_tag_rows({sqlite_ascii_lower(keyword)})}
+        ids.update(row[0] for row in self._exact_match_translation_rows({keyword}))
         return ids
 
     def _case_exceptional_tag_rows(self) -> list[tuple[int, str | None, str | None]]:
@@ -207,32 +211,25 @@ class TagSearchQueryBuilder:
         return cached
 
     def _exact_match_translation_rows(self, match_keys: set[str]) -> list[tuple[int, str | None]]:
-        """ASCII 小文字化済みキーに case-insensitive 完全一致する翻訳行を返す。
+        """キーに完全一致する翻訳行を返す (大文字小文字を区別する、Issue #139)。
 
-        index が効く完全一致 IN で小文字行を取り、大文字混じり行は
-        `translation <> lower(translation)` で絞った narrow スキャンで補完する
-        (TAG_TRANSLATIONS は TAGS より十分小さく、このスキャンは実測 0.1 秒台)。
-        キーが ASCII 小文字を 1 つも含まない場合 (CJK のみ等)、大文字混じり行の
-        lower() 済み値と一致し得ないため narrow スキャンを省略する。
+        翻訳は TAGS と違い canonical 化されておらず、`Aiki` と `aiki` のように大小のみが
+        異なる表記が別タグを指す (base DB 実測で 358 組)。小文字化して照合すると誤った
+        tag_id を返しうるため、`translation` の binary 一致のみで照合する。
+
+        Args:
+            match_keys: 照合キー (小文字化しない生の文字列)。
+
+        Returns:
+            (tag_id, translation) のリスト。
         """
         if not match_keys:
             return []
-        keys = list(match_keys)
-        rows: list[tuple[int, str | None]] = list(
+        return list(
             self.session.query(TagTranslation.tag_id, TagTranslation.translation)
-            .filter(TagTranslation.translation.in_(keys))
+            .filter(TagTranslation.translation.in_(list(match_keys)))
             .all()
         )
-        if any(_HAS_ASCII_LOWER_RE.search(key) for key in keys):
-            rows.extend(
-                self.session.query(TagTranslation.tag_id, TagTranslation.translation)
-                .filter(
-                    TagTranslation.translation != func.lower(TagTranslation.translation),
-                    func.lower(TagTranslation.translation).in_(keys),
-                )
-                .all()
-            )
-        return rows
 
     def filtered_tag_ids(
         self,
@@ -273,7 +270,7 @@ class TagSearchQueryBuilder:
             query = self.session.query(tag_id_column)
         else:
             # 完全一致は index 活用経路で候補 tag_id を先に確定する (LoRAIro #1203/#1206)。
-            candidate_ids = sorted(self._exact_match_tag_ids({sqlite_ascii_lower(keyword)}))
+            candidate_ids = sorted(self._exact_match_tag_ids(keyword))
             if not candidate_ids:
                 return set(), resolved_format_id
             tag_id_column = Tag.tag_id
@@ -426,30 +423,31 @@ class TagSearchQueryBuilder:
             return {}
 
         keyword_set = set(keywords)
-        # 大文字小文字を無視して照合するため lower 化したキーで突き合わせる。
+        # TAGS は大小を無視して照合するため lower 化したキーで突き合わせる。
         # 同一 lower 値を持つ keyword が複数あっても、それぞれに tag_id を割り当てる。
         keywords_by_lower: dict[str, set[str]] = {}
         for keyword in keyword_set:
-            keywords_by_lower.setdefault(keyword.lower(), set()).add(keyword)
+            keywords_by_lower.setdefault(sqlite_ascii_lower(keyword), set()).add(keyword)
         lower_keys = set(keywords_by_lower.keys())
 
         # index 活用の完全一致照合 (LoRAIro #1203/#1206: 従来の lower(col) IN (...) は
-        # index を使えず keyword 数に関係なく毎回 TAGS/TAG_TRANSLATIONS の全表スキャンだった)
+        # index を使えず keyword 数に関係なく毎回 TAGS/TAG_TRANSLATIONS の全表スキャンだった)。
+        # 翻訳は大小を区別するため生キーで引く (Issue #139)。
         tag_rows = self._exact_match_tag_rows(lower_keys)
-        trans_rows = self._exact_match_translation_rows(lower_keys)
+        trans_rows = self._exact_match_translation_rows(keyword_set)
 
         tag_ids_by_keyword: dict[str, set[int]] = {keyword: set() for keyword in keyword_set}
         for tag_id, tag, source_tag in tag_rows:
             for value in (tag, source_tag):
                 if value is None:
                     continue
-                for keyword in keywords_by_lower.get(value.lower(), ()):
+                for keyword in keywords_by_lower.get(sqlite_ascii_lower(value), ()):
                     tag_ids_by_keyword[keyword].add(tag_id)
         for tag_id, translation in trans_rows:
             if translation is None:
                 continue
-            for keyword in keywords_by_lower.get(translation.lower(), ()):
-                tag_ids_by_keyword[keyword].add(tag_id)
+            if translation in tag_ids_by_keyword:
+                tag_ids_by_keyword[translation].add(tag_id)
 
         return {keyword: ids for keyword, ids in tag_ids_by_keyword.items() if ids}
 

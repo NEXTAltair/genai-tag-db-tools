@@ -107,19 +107,49 @@ def test_exact_match_finds_uppercase_stored_rows_via_exception_path(
     assert single == {1, 2}
 
 
-def test_exact_match_matches_uppercase_translations(
+def test_translation_match_is_case_sensitive(
     session_factory: Callable[[], Session],
 ) -> None:
-    """大文字混じり翻訳行も narrow スキャン経路で case-insensitive に一致する。"""
+    """翻訳は大文字小文字を区別して照合する (Issue #139)。
+
+    `Aiki` と `aiki` のように大小のみが異なる翻訳が別タグを指すため、
+    小文字化した照合は誤った tag_id を返しうる。
+    """
     with session_factory() as session:
         session.add(Tag(tag_id=1, source_tag="cat", tag="cat"))
         session.add(TagTranslation(translation_id=1, tag_id=1, language="en", translation="Cat Ears"))
         session.add(TagTranslation(translation_id=2, tag_id=1, language="ja", translation="猫耳"))
         session.commit()
         builder = TagSearchQueryBuilder(session)
-        result = builder.initial_tag_ids_for_keywords(["cat ears", "猫耳"])
 
-    assert result == {"cat ears": {1}, "猫耳": {1}}
+        # 表記どおりなら一致する (非 ASCII はそもそも大小の概念がないので常に一致)
+        assert builder.initial_tag_ids_for_keywords(["Cat Ears", "猫耳"]) == {
+            "Cat Ears": {1},
+            "猫耳": {1},
+        }
+        assert builder.initial_tag_ids("Cat Ears", use_like=False) == {1}
+
+        # 小文字化した入力は大文字混じり翻訳に一致しない
+        assert builder.initial_tag_ids_for_keywords(["cat ears"]) == {}
+        assert builder.initial_tag_ids("cat ears", use_like=False) == set()
+
+
+def test_translation_case_variants_resolve_to_distinct_tags(
+    session_factory: Callable[[], Session],
+) -> None:
+    """大小のみ異なる翻訳が別タグを指す場合、取り違えない (Issue #139)。"""
+    with session_factory() as session:
+        session.add(Tag(tag_id=1, source_tag="aiki_upper", tag="aiki upper"))
+        session.add(Tag(tag_id=2, source_tag="aiki_lower", tag="aiki lower"))
+        session.add(TagTranslation(translation_id=1, tag_id=1, language="en", translation="Aiki"))
+        session.add(TagTranslation(translation_id=2, tag_id=2, language="en", translation="aiki"))
+        session.commit()
+        builder = TagSearchQueryBuilder(session)
+
+        assert builder.initial_tag_ids_for_keywords(["Aiki"]) == {"Aiki": {1}}
+        assert builder.initial_tag_ids_for_keywords(["aiki"]) == {"aiki": {2}}
+        assert builder.initial_tag_ids("Aiki", use_like=False) == {1}
+        assert builder.initial_tag_ids("aiki", use_like=False) == {2}
 
 
 def test_case_exception_cache_is_refreshed_after_invalidate(

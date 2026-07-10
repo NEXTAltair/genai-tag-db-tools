@@ -19,6 +19,7 @@ from genai_tag_db_tools.db.query_utils import (
     contains_like_pattern,
     invalidate_case_exception_cache,
     normalize_search_keyword,
+    sqlite_ascii_lower,
 )
 from genai_tag_db_tools.db.schema import (
     USER_TAG_ID_OFFSET,
@@ -2263,14 +2264,26 @@ class MergedTagReader:
         deprecated: bool | None,
     ) -> bool:
         normalized, use_like = normalize_search_keyword(keyword, partial)
-        needle = normalized.strip("%").casefold() if use_like else normalized.casefold()
-        haystacks = [row["tag"], row.get("source_tag") or ""]
+        tag_values = [row["tag"], row.get("source_tag") or ""]
+        translation_values: list[str] = []
         for values in row.get("translations", {}).values():
-            haystacks.extend(values)
-        if needle and use_like and not any(needle in value.casefold() for value in haystacks):
-            return False
-        if needle and not use_like and not any(needle == value.casefold() for value in haystacks):
-            return False
+            translation_values.extend(values)
+
+        if use_like:
+            # LIKE は SQLite 既定で大小を無視するため、部分一致は従来どおり畳んで比較する。
+            needle = normalized.strip("%").casefold()
+            haystacks = tag_values + translation_values
+            if needle and not any(needle in value.casefold() for value in haystacks):
+                return False
+        elif normalized:
+            # exact 照合: TAGS は canonical (小文字前提) なので大小を無視するが、翻訳は
+            # 大小を区別する (Issue #139: `Aiki` と `aiki` は別タグ)。SQL 側と同じ
+            # ASCII 限定の折り畳みを使う (casefold は Unicode 全体を畳み SQL と不一致)。
+            folded = sqlite_ascii_lower(normalized)
+            tag_hit = any(folded == sqlite_ascii_lower(value) for value in tag_values)
+            translation_hit = any(normalized == value for value in translation_values)
+            if not tag_hit and not translation_hit:
+                return False
 
         if alias is not None and row["alias"] is not alias:
             return False
@@ -2318,7 +2331,8 @@ class MergedTagReader:
             return []
         assert self.user_repo is not None
         normalized, use_like = normalize_search_keyword(keyword, partial)
-        needle = normalized.strip("%").casefold() if use_like else normalized.casefold()
+        # 翻訳は大小を区別する (Issue #139)。部分一致 (LIKE) は SQLite 既定に合わせて畳む。
+        needle = normalized.strip("%").casefold() if use_like else normalized
         rows: list[TagSearchRow] = []
         for translation in self.user_repo.list_translations():
             if language is not None and translation.language != language:
@@ -2326,7 +2340,7 @@ class MergedTagReader:
             value = translation.translation or ""
             if needle and use_like and needle not in value.casefold():
                 continue
-            if needle and not use_like and needle != value.casefold():
+            if needle and not use_like and needle != value:
                 continue
             tag = self.get_tag_by_id(translation.tag_id)
             if tag is None:
