@@ -47,7 +47,7 @@ from .core_api import (
     update_tags_type_batch,
     write_user_translation,
 )
-from .db.runtime import set_query_abort_check
+from .db.runtime import database_runtime_scope, set_query_abort_check
 from .models import (
     ApprovedDbFeedback,
     DbFeedbackProposal,
@@ -92,6 +92,7 @@ __all__ = [
     "clear_preferred_translation",
     "convert_tags",
     "create_tag_register_service",
+    "database_runtime_scope",
     "delete_user_translation",
     "ensure_databases",
     "get_all_type_names",

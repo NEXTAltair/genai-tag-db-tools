@@ -339,6 +339,9 @@ user overlay DB:
 
 ### 公開API
 
+操作ごとに別の DB 設定を使うホストは、公開 [`database_runtime_scope()`](docs/database-runtime-scope.md)
+でランタイムを分離し、終了時に元の接続状態へ戻せます。
+
 **安定 public API はトップレベル `genai_tag_db_tools` パッケージのみ**。下流の利用側は
 `genai_tag_db_tools.db.*` / `genai_tag_db_tools.services.*` などの内部モジュールに依存して
 はならない（リファクタで壊れる）。リーダ等のハンドルは下記ファクトリで取得し、モジュール
