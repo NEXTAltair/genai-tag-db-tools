@@ -47,7 +47,7 @@ from .core_api import (
     update_tags_type_batch,
     write_user_translation,
 )
-from .db.runtime import database_runtime_scope, set_query_abort_check
+from .db.runtime import ReadOnlyDatabaseError, database_runtime_scope, set_query_abort_check
 from .models import (
     ApprovedDbFeedback,
     DbFeedbackProposal,
@@ -78,6 +78,7 @@ __all__ = [
     "LocalFeedbackApplyResult",
     "MergedTagReader",
     "ProposalTarget",
+    "ReadOnlyDatabaseError",
     "RefinementReason",
     "RefinementRecommendation",
     "RefinementSuggestion",

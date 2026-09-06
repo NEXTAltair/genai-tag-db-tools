@@ -276,6 +276,7 @@ def initialize_databases(
     token: str | None = None,
     *,
     init_user_db: bool | None = None,
+    read_only: bool = False,
     format_name: str | None = None,
 ) -> list[EnsureDbResult]:
     """Download base DBs (if needed) and initialize runtime.
@@ -287,6 +288,7 @@ def initialize_databases(
         token: Hugging Face access token (optional).
         init_user_db: Whether to initialize the user DB. Defaults to True when user_db_dir
             is provided, otherwise False.
+        read_only: Use existing compatible cached files only; no download, schema or mapping writes.
         format_name: Format name for user DB (e.g., "Lorairo", "MyApp").
             If None, defaults to "tag-db".
 
@@ -302,6 +304,24 @@ def initialize_databases(
     cache_dir = resolved_user_db_dir or hf_downloader.default_cache_dir()
     cache = DbCacheConfig(cache_dir=str(cache_dir), token=token)
     requested_sources = sources or default_sources()
+    if read_only:
+        from huggingface_hub import try_to_load_from_cache
+
+        results = []
+        for source in requested_sources:
+            cached = try_to_load_from_cache(
+                source.repo_id, source.filename, revision=source.revision, repo_type="dataset"
+            )
+            if not isinstance(cached, str):
+                raise runtime.ReadOnlyDatabaseError(
+                    f"Base database is not cached; initialize with write permission: {source.repo_id}/{source.filename}"
+                )
+            results.append(EnsureDbResult(db_path=cached, cached=True))
+        runtime.initialize_read_only_runtime(
+            [Path(result.db_path) for result in results],
+            cache_dir / "user_tags.sqlite" if init_user_db else None,
+        )
+        return results
     requests = [EnsureDbRequest(source=source, cache=cache) for source in requested_sources]
 
     # 起動経路では SHA256 を読まないので計算しない (8.4GB のハッシュ計算に実測 13 秒)。
