@@ -5,7 +5,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-from sqlalchemy import Engine, create_engine, event
+from sqlalchemy import Engine, create_engine, event, inspect
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -24,6 +24,11 @@ _UserSessionLocal = None
 
 _RUNTIME_SCOPE_LOCK = RLock()
 _scope_engines: list[Engine] | None = None
+_read_only = False
+
+
+class ReadOnlyDatabaseError(RuntimeError):
+    """Existing cached databases need explicit writable preparation before reading."""
 
 
 @contextmanager
@@ -37,7 +42,7 @@ def database_runtime_scope() -> Iterator[None]:
     a synchronous context manager; do not interleave asynchronous tasks inside it.
     """
     global _base_db_paths, _engine, _SessionLocal, _user_db_path, _user_engine, _UserSessionLocal
-    global _scope_engines
+    global _scope_engines, _read_only
 
     with _RUNTIME_SCOPE_LOCK:
         previous = (
@@ -48,8 +53,10 @@ def database_runtime_scope() -> Iterator[None]:
             _user_engine,
             _UserSessionLocal,
             _scope_engines,
+            _read_only,
         )
         _base_db_paths = _engine = _SessionLocal = _user_db_path = _user_engine = _UserSessionLocal = None
+        _read_only = False
         owned_engines: list[Engine] = []
         _scope_engines = owned_engines
         try:
@@ -71,6 +78,7 @@ def database_runtime_scope() -> Iterator[None]:
                     _user_engine,
                     _UserSessionLocal,
                     _scope_engines,
+                    _read_only,
                 ) = previous
             if cleanup_errors:
                 raise ExceptionGroup("Failed to dispose scoped database engines", cleanup_errors)
@@ -184,10 +192,19 @@ def _ensure_wal_journal_mode(engine: Engine) -> None:
 
 def _create_engine(db_path: Path) -> Engine:
     engine = create_engine(
-        f"sqlite:///{db_path.absolute()}",
+        f"sqlite:///{db_path.resolve().as_uri()}?mode=ro&uri=true"
+        if _read_only
+        else f"sqlite:///{db_path.absolute()}",
         connect_args={"check_same_thread": False},
         echo=False,
     )
+    if _read_only:
+
+        @event.listens_for(engine, "connect")
+        def protect_connection(connection: Any, record: Any) -> None:
+            connection.execute("PRAGMA query_only=ON")
+            connection.execute("PRAGMA temp_store=MEMORY")
+
     if _scope_engines is not None:
         _scope_engines.append(engine)
     event.listen(engine, "connect", enable_foreign_keys)
@@ -205,10 +222,11 @@ def create_session_factory(db_path: Path) -> sessionmaker[Session]:
     return sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
-def init_engine(path: Path | None = None) -> None:
+def init_engine(path: Path | None = None, *, read_only: bool = False) -> None:
     """DBパスからグローバルのエンジン/セッションを初期化する。"""
-    global _engine, _SessionLocal
+    global _engine, _SessionLocal, _read_only
 
+    _read_only = read_only
     db_path = path or get_base_database_paths()[0]
     if not db_path.exists():
         raise FileNotFoundError(f"DBファイルが見つかりません: {db_path}")
@@ -250,6 +268,8 @@ def init_user_db(user_db_dir: Path | None = None, *, format_name: str | None = N
 
         user_db_dir = default_cache_dir()
 
+    if _read_only:
+        raise ReadOnlyDatabaseError("Writable user initialization is forbidden in a read-only runtime")
     user_db_path = user_db_dir / "user_tags.sqlite"
     user_db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -279,6 +299,51 @@ def init_user_db(user_db_dir: Path | None = None, *, format_name: str | None = N
 
     logger.info("User DB initialized: %s", user_db_path)
     return user_db_path
+
+
+def initialize_read_only_runtime(base_paths: list[Path], user_path: Path | None) -> None:
+    """Configure existing databases without creation, migration, seed or WAL preparation."""
+    global _user_db_path, _user_engine, _UserSessionLocal
+
+    paths = [*base_paths, *([user_path] if user_path is not None else [])]
+    for path in paths:
+        if not path.is_file() or path.stat().st_size == 0:
+            raise ReadOnlyDatabaseError(f"Missing or empty database; prepare with write permission: {path}")
+    set_base_database_paths(base_paths)
+    init_engine(base_paths[0], read_only=True)
+    if user_path is not None:
+        _user_db_path = user_path
+        _user_engine = _create_engine(user_path)
+        _UserSessionLocal = sessionmaker(bind=_user_engine, autoflush=False, autocommit=False)
+    else:
+        _user_db_path = None
+        _user_engine = None
+        _UserSessionLocal = None
+
+    for path in paths:
+        engine = _create_engine(path)
+        try:
+            with engine.connect() as connection:
+                inspector = inspect(connection)
+                tables = set(inspector.get_table_names())
+                required = [*Base.metadata.sorted_tables]
+                if path == user_path:
+                    required.extend(UserOverlayBase.metadata.sorted_tables)
+                for table in required:
+                    if table.name not in tables:
+                        raise ReadOnlyDatabaseError(f"Incompatible database schema; prepare first: {path}")
+                    columns = {column["name"] for column in inspector.get_columns(table.name)}
+                    if not set(table.columns.keys()).issubset(columns):
+                        raise ReadOnlyDatabaseError(f"Incompatible database schema; prepare first: {path}")
+            if path == user_path:
+                from genai_tag_db_tools.db.user_db_migration import detect_legacy_schema
+
+                if detect_legacy_schema(engine):
+                    raise ReadOnlyDatabaseError(f"Legacy user data requires explicit migration: {path}")
+        except SQLAlchemyError as exc:
+            raise ReadOnlyDatabaseError(f"Unreadable database; prepare first: {path}") from exc
+        finally:
+            engine.dispose()
 
 
 def _initialize_default_user_mappings(

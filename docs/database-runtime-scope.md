@@ -45,3 +45,24 @@ Query cancellation callback registration is process-wide and is unaffected by
 workspace selection. Existing callers that do not use a scope retain their
 current initialization behavior. Scope exit does not undo writes made to the
 selected database during the operation.
+
+## Existing databases with read-only access
+
+`initialize_databases(user_db_dir=directory, read_only=True)` uses Hugging Face's
+read-only cache lookup (`try_to_load_from_cache`) and opens the existing SQLite files
+with `mode=ro` and `query_only=ON`. It does not download, create directories/files,
+apply schema migrations, seed mappings, or change journal mode. The default remains
+`read_only=False` for existing writable initialization callers.
+
+Use this inside `database_runtime_scope()` so both the selected paths and connection
+policy are restored after the operation. Base readers and the user overlay receive
+protected connections. Missing cache/files, empty or incompatible schema, and user
+rows awaiting legacy migration raise public `ReadOnlyDatabaseError`; prepare them
+explicitly with write permission before retrying. A readonly initialization failure
+must not be followed by queries in the same scope; exit that scope and retry in a new one.
+
+This is a logical data protection contract. SQLite may still use WAL/SHM coordination
+files and locks. For a requirement that forbids every filesystem write, provide an
+already consistent database snapshot on read-only media with its required journal
+state, or use an external read-only mount. `immutable=1` is intentionally not used:
+it would disable change detection and is unsafe for a live concurrently modified DB.
