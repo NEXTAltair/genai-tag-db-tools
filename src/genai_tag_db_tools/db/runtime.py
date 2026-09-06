@@ -1,6 +1,8 @@
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 from sqlalchemy import Engine, create_engine, event
@@ -19,6 +21,60 @@ _SessionLocal = None
 _user_db_path: Path | None = None
 _user_engine = None
 _UserSessionLocal = None
+
+_RUNTIME_SCOPE_LOCK = RLock()
+_scope_engines: list[Engine] | None = None
+
+
+@contextmanager
+def database_runtime_scope() -> Iterator[None]:
+    """Use an empty database runtime, then restore the previous runtime without I/O.
+
+    Initialize the desired databases inside the scope before obtaining reader/writer
+    handles. Scopes nest on the same thread and serialize across threads. Close all
+    sessions and finish work inside the scope; handles must not escape it. Legacy
+    unscoped global runtime access must not run concurrently with a scope. This is
+    a synchronous context manager; do not interleave asynchronous tasks inside it.
+    """
+    global _base_db_paths, _engine, _SessionLocal, _user_db_path, _user_engine, _UserSessionLocal
+    global _scope_engines
+
+    with _RUNTIME_SCOPE_LOCK:
+        previous = (
+            _base_db_paths,
+            _engine,
+            _SessionLocal,
+            _user_db_path,
+            _user_engine,
+            _UserSessionLocal,
+            _scope_engines,
+        )
+        _base_db_paths = _engine = _SessionLocal = _user_db_path = _user_engine = _UserSessionLocal = None
+        owned_engines: list[Engine] = []
+        _scope_engines = owned_engines
+        try:
+            yield
+        finally:
+            cleanup_errors: list[Exception] = []
+            try:
+                for engine in owned_engines:
+                    try:
+                        engine.dispose()
+                    except Exception as exc:
+                        cleanup_errors.append(exc)
+            finally:
+                (
+                    _base_db_paths,
+                    _engine,
+                    _SessionLocal,
+                    _user_db_path,
+                    _user_engine,
+                    _UserSessionLocal,
+                    _scope_engines,
+                ) = previous
+            if cleanup_errors:
+                raise ExceptionGroup("Failed to dispose scoped database engines", cleanup_errors)
+
 
 # 実行中 SQL を中断させる判定関数 (ホストアプリが set_query_abort_check で登録)
 _query_abort_check: Callable[[], bool] | None = None
@@ -132,6 +188,8 @@ def _create_engine(db_path: Path) -> Engine:
         connect_args={"check_same_thread": False},
         echo=False,
     )
+    if _scope_engines is not None:
+        _scope_engines.append(engine)
     event.listen(engine, "connect", enable_foreign_keys)
     # ロック競合時に即時失敗させず待機する (GUI/CLI 併用、LoRAIro #1239)。
     event.listen(engine, "connect", set_busy_timeout)
