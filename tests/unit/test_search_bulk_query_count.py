@@ -181,3 +181,51 @@ def test_search_tags_bulk_matches_search_tags_per_keyword(merged: MergedTagReade
         assert actual is not None, f"{keyword}: bulk が行を返していない"
         assert actual["tag_id"] == expected["tag_id"]
         assert actual.get("tag") == expected.get("tag")
+
+
+class _KeywordOnlyUserRepo:
+    """バッチ API を持たず `tag_id` がキーワード専用の duck-typed user_repo。
+
+    `_user_patches_by_tag` のフォールバック経路の呼び出し契約を固定する
+    (PR #149 Codex P2: 位置引数で呼ぶと TypeError になる実装が存在しうる)。
+    """
+
+    def list_usage_counts(
+        self, *, tag_id: int | None = None, format_id: int | None = None
+    ) -> list[int]:
+        return [] if tag_id is None else [tag_id]
+
+    def list_status_patches(self, *, tag_id: int | None = None) -> list[int]:
+        return [] if tag_id is None else [tag_id * 10]
+
+
+def test_user_patches_by_tag_fallback_uses_tag_id_keyword(
+    base_session_factory: Callable[[], Session],
+    populated_base: None,
+) -> None:
+    """単数 API へのフォールバックは `tag_id` キーワードで呼ぶ (PR #149 Codex P2)。"""
+    merged = MergedTagReader(
+        base_repo=TagReader(session_factory=base_session_factory),
+        user_repo=_KeywordOnlyUserRepo(),
+    )
+
+    usage = merged._user_patches_by_tag("list_usage_counts_batch", "list_usage_counts", [1, 2])
+    status = merged._user_patches_by_tag("list_status_patches_batch", "list_status_patches", [1, 2])
+
+    assert usage == {1: [1], 2: [2]}
+    assert status == {1: [10], 2: [20]}
+
+
+def test_user_patches_by_tag_returns_empty_when_method_missing(
+    base_session_factory: Callable[[], Session],
+    populated_base: None,
+) -> None:
+    """バッチ API も単数 API も持たない実装では空を返す (例外にしない)。"""
+    merged = MergedTagReader(
+        base_repo=TagReader(session_factory=base_session_factory),
+        user_repo=_KeywordOnlyUserRepo(),
+    )
+
+    result = merged._user_patches_by_tag("list_tag_type_patches_batch", "list_tag_type_patches", [1, 2])
+
+    assert result == {1: [], 2: []}

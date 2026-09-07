@@ -2064,6 +2064,11 @@ class MergedTagReader:
         バッチ API (`*_batch`) があれば 1 回にまとめ、無ければ tag_id ごとの単数 API に
         フォールバックする。どちらも持たない実装では空を返す。
 
+        単数 API は `tag_id` キーワードで呼ぶ。`list_usage_counts` はバッチ化前から
+        `list_usage_counts(tag_id=tag_id)` で呼ばれており、キーワード専用引数を持つ
+        duck-typed 実装を位置引数呼び出しで壊さないため (PR #149 Codex P2)。
+        既存の実装はいずれも第 1 引数名が `tag_id` なので他メソッドでも同じ形で呼べる。
+
         Args:
             batch_name: `dict[int, list[...]]` を返すバッチメソッド名。
             single_name: `list[...]` を返す単数メソッド名。
@@ -2081,7 +2086,7 @@ class MergedTagReader:
         single = getattr(self.user_repo, single_name, None)
         if not callable(single):
             return {tag_id: [] for tag_id in tag_ids}
-        return {tag_id: list(single(tag_id)) for tag_id in tag_ids}
+        return {tag_id: list(single(tag_id=tag_id)) for tag_id in tag_ids}
 
     def _tag_ids_with_user_status_patch(
         self, tag_ids: list[int], requested_format_ids: set[int]
