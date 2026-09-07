@@ -261,35 +261,93 @@ class OverlayTagReader:
                     raise
                 type_rows = []
 
-            statuses: dict[tuple[int, int], TagStatus] = {}
-            for status_row in status_rows:
-                statuses[(status_row.target_tag_id, status_row.format_id)] = TagStatus(
-                    tag_id=status_row.target_tag_id,
-                    format_id=status_row.format_id,
-                    type_id=status_row.type_id,
-                    alias=status_row.alias,
-                    preferred_tag_id=status_row.preferred_tag_id,
-                    deprecated=status_row.deprecated,
-                    deprecated_at=status_row.deprecated_at,
-                )
+            return list(self._merge_status_and_type_rows(status_rows, type_rows).values())
 
-            for type_row in type_rows:
-                key = (type_row.target_tag_id, type_row.format_id)
-                existing = statuses.get(key)
-                if existing is not None:
-                    existing.type_id = type_row.type_id
-                    continue
-                statuses[key] = TagStatus(
-                    tag_id=type_row.target_tag_id,
-                    format_id=type_row.format_id,
-                    type_id=type_row.type_id,
-                    alias=False,
-                    preferred_tag_id=type_row.target_tag_id,
-                    deprecated=False,
-                    deprecated_at=None,
-                )
+    @staticmethod
+    def _merge_status_and_type_rows(
+        status_rows: list[UserTagStatusPatch],
+        type_rows: list[UserTagTypePatch],
+    ) -> dict[tuple[int, int], TagStatus]:
+        """status patch と type patch を (tag_id, format_id) 単位の effective status に畳む。
 
-            return list(statuses.values())
+        status 行を先に入れ、type 行は既存があれば ``type_id`` のみ上書きし、
+        無ければ status 相当を合成する (挿入順もこの順序を保つ)。
+
+        Args:
+            status_rows: USER_TAG_STATUS_PATCH の行。
+            type_rows: USER_TAG_TYPE_PATCH の行。
+
+        Returns:
+            (tag_id, format_id) をキーとする effective status。
+        """
+        statuses: dict[tuple[int, int], TagStatus] = {}
+        for status_row in status_rows:
+            statuses[(status_row.target_tag_id, status_row.format_id)] = TagStatus(
+                tag_id=status_row.target_tag_id,
+                format_id=status_row.format_id,
+                type_id=status_row.type_id,
+                alias=status_row.alias,
+                preferred_tag_id=status_row.preferred_tag_id,
+                deprecated=status_row.deprecated,
+                deprecated_at=status_row.deprecated_at,
+            )
+
+        for type_row in type_rows:
+            key = (type_row.target_tag_id, type_row.format_id)
+            existing = statuses.get(key)
+            if existing is not None:
+                existing.type_id = type_row.type_id
+                continue
+            statuses[key] = TagStatus(
+                tag_id=type_row.target_tag_id,
+                format_id=type_row.format_id,
+                type_id=type_row.type_id,
+                alias=False,
+                preferred_tag_id=type_row.target_tag_id,
+                deprecated=False,
+                deprecated_at=None,
+            )
+
+        return statuses
+
+    def _query_type_patch_rows(self, session: Session, chunk: list[int]) -> list[UserTagTypePatch]:
+        """USER_TAG_TYPE_PATCH をチャンク取得する (テーブル未作成なら空)。"""
+        try:
+            return session.query(UserTagTypePatch).filter(UserTagTypePatch.target_tag_id.in_(chunk)).all()
+        except OperationalError as exc:
+            if self._is_missing_table_error(exc):
+                return []
+            raise
+
+    def list_tag_statuses_batch(self, tag_ids: list[int]) -> dict[int, list[TagStatus]]:
+        """複数 tag_id の effective status を一括取得する (Issue #148)。
+
+        `list_tag_statuses(tag_id)` を tag_id ごとに呼ぶと USER_TAG_STATUS_PATCH と
+        USER_TAG_TYPE_PATCH に 1 本ずつ、計 2N 本を発行して N+1 になる。
+
+        Args:
+            tag_ids: 取得対象の tag_id リスト。
+
+        Returns:
+            tag_id -> effective status のリスト。patch が無い tag_id はキーを持たない。
+        """
+        result: dict[int, list[TagStatus]] = {}
+        if not tag_ids:
+            return result
+
+        ordered_ids = sorted(set(tag_ids))
+        with self.session_factory() as session:
+            for start in range(0, len(ordered_ids), TAG_ID_IN_CHUNK):
+                chunk = ordered_ids[start : start + TAG_ID_IN_CHUNK]
+                status_rows = (
+                    session.query(UserTagStatusPatch)
+                    .filter(UserTagStatusPatch.target_tag_id.in_(chunk))
+                    .all()
+                )
+                type_rows = self._query_type_patch_rows(session, chunk)
+                for status in self._merge_status_and_type_rows(status_rows, type_rows).values():
+                    result.setdefault(status.tag_id, []).append(status)
+        return result
 
     def list_tag_type_patches(self, tag_id: int | None = None) -> list[UserTagTypePatch]:
         """USER_TAG_TYPE_PATCH を全件 (tag_id 指定時はフィルタ) 取得する。"""
@@ -303,15 +361,38 @@ class OverlayTagReader:
                 if self._is_missing_table_error(exc):
                     return []
                 raise
-            return [
-                UserTagTypePatch(
-                    target_scope=row.target_scope,
-                    target_tag_id=row.target_tag_id,
-                    format_id=row.format_id,
-                    type_id=row.type_id,
-                )
-                for row in rows
-            ]
+            return [self._detach_type_patch(row) for row in rows]
+
+    @staticmethod
+    def _detach_type_patch(row: UserTagTypePatch) -> UserTagTypePatch:
+        """session に紐づかない USER_TAG_TYPE_PATCH のコピーを返す。"""
+        return UserTagTypePatch(
+            target_scope=row.target_scope,
+            target_tag_id=row.target_tag_id,
+            format_id=row.format_id,
+            type_id=row.type_id,
+        )
+
+    def list_tag_type_patches_batch(self, tag_ids: list[int]) -> dict[int, list[UserTagTypePatch]]:
+        """複数 tag_id の USER_TAG_TYPE_PATCH を一括取得する (Issue #148)。
+
+        Args:
+            tag_ids: 取得対象の tag_id リスト。
+
+        Returns:
+            tag_id -> patch のリスト。patch が無い tag_id はキーを持たない。
+        """
+        result: dict[int, list[UserTagTypePatch]] = {}
+        if not tag_ids:
+            return result
+
+        ordered_ids = sorted(set(tag_ids))
+        with self.session_factory() as session:
+            for start in range(0, len(ordered_ids), TAG_ID_IN_CHUNK):
+                chunk = ordered_ids[start : start + TAG_ID_IN_CHUNK]
+                for row in self._query_type_patch_rows(session, chunk):
+                    result.setdefault(row.target_tag_id, []).append(self._detach_type_patch(row))
+        return result
 
     def list_status_patches(self, tag_id: int | None = None) -> list[UserTagStatusPatch]:
         """USER_TAG_STATUS_PATCH を raw patch として取得する。"""
@@ -320,20 +401,79 @@ class OverlayTagReader:
             if tag_id is not None:
                 query = query.filter(UserTagStatusPatch.target_tag_id == tag_id)
             rows = query.all()
-            return [
-                UserTagStatusPatch(
-                    target_scope=row.target_scope,
-                    target_tag_id=row.target_tag_id,
-                    format_id=row.format_id,
-                    type_id=row.type_id,
-                    alias=row.alias,
-                    preferred_scope=row.preferred_scope,
-                    preferred_tag_id=row.preferred_tag_id,
-                    deprecated=row.deprecated,
-                    deprecated_at=row.deprecated_at,
+            return [self._detach_status_patch(row) for row in rows]
+
+    @staticmethod
+    def _detach_status_patch(row: UserTagStatusPatch) -> UserTagStatusPatch:
+        """session に紐づかない USER_TAG_STATUS_PATCH のコピーを返す。"""
+        return UserTagStatusPatch(
+            target_scope=row.target_scope,
+            target_tag_id=row.target_tag_id,
+            format_id=row.format_id,
+            type_id=row.type_id,
+            alias=row.alias,
+            preferred_scope=row.preferred_scope,
+            preferred_tag_id=row.preferred_tag_id,
+            deprecated=row.deprecated,
+            deprecated_at=row.deprecated_at,
+        )
+
+    def list_status_patches_batch(self, tag_ids: list[int]) -> dict[int, list[UserTagStatusPatch]]:
+        """複数 tag_id の USER_TAG_STATUS_PATCH を一括取得する (Issue #148)。
+
+        Args:
+            tag_ids: 取得対象の tag_id リスト。
+
+        Returns:
+            tag_id -> patch のリスト。patch が無い tag_id はキーを持たない。
+        """
+        result: dict[int, list[UserTagStatusPatch]] = {}
+        if not tag_ids:
+            return result
+
+        ordered_ids = sorted(set(tag_ids))
+        with self.session_factory() as session:
+            for start in range(0, len(ordered_ids), TAG_ID_IN_CHUNK):
+                chunk = ordered_ids[start : start + TAG_ID_IN_CHUNK]
+                rows = (
+                    session.query(UserTagStatusPatch)
+                    .filter(UserTagStatusPatch.target_tag_id.in_(chunk))
+                    .all()
                 )
-                for row in rows
-            ]
+                for row in rows:
+                    result.setdefault(row.target_tag_id, []).append(self._detach_status_patch(row))
+        return result
+
+    def list_usage_counts_batch(self, tag_ids: list[int]) -> dict[int, list[TagUsageCounts]]:
+        """複数 tag_id の USER_TAG_USAGE_PATCH を一括取得する (Issue #148)。
+
+        `get_usage_counts_batch` は ``{tag_id: {format_id: count}}`` を返すのに対し、
+        本メソッドは `list_usage_counts` と同じ `TagUsageCounts` のリストを返す。
+
+        Args:
+            tag_ids: 取得対象の tag_id リスト。
+
+        Returns:
+            tag_id -> TagUsageCounts のリスト。行が無い tag_id はキーを持たない。
+        """
+        result: dict[int, list[TagUsageCounts]] = {}
+        if not tag_ids:
+            return result
+
+        ordered_ids = sorted(set(tag_ids))
+        with self.session_factory() as session:
+            for start in range(0, len(ordered_ids), TAG_ID_IN_CHUNK):
+                chunk = ordered_ids[start : start + TAG_ID_IN_CHUNK]
+                rows = (
+                    session.query(UserTagUsagePatch)
+                    .filter(UserTagUsagePatch.target_tag_id.in_(chunk))
+                    .all()
+                )
+                for row in rows:
+                    result.setdefault(row.target_tag_id, []).append(
+                        TagUsageCounts(tag_id=row.target_tag_id, format_id=row.format_id, count=row.count)
+                    )
+        return result
 
     # ------------------------------------------------------------------
     # 検索 (USER_TAGS + USER_TAG_STATUS_PATCH)
@@ -507,9 +647,7 @@ class OverlayTagReader:
         if not tag_ids:
             return {}
         try:
-            rows = (
-                session.query(UserTagTypePatch).filter(UserTagTypePatch.target_tag_id.in_(tag_ids)).all()
-            )
+            rows = session.query(UserTagTypePatch).filter(UserTagTypePatch.target_tag_id.in_(tag_ids)).all()
         except OperationalError as exc:
             if self._is_missing_table_error(exc):
                 return {}
