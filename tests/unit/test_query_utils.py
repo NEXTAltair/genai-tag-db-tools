@@ -3,10 +3,11 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from genai_tag_db_tools.db import query_utils
 from genai_tag_db_tools.db.query_utils import (
     TagSearchPreloader,
     TagSearchQueryBuilder,
@@ -371,3 +372,119 @@ def test_preloader_load_returns_empty_for_empty_input(session_factory: Callable[
 
     assert preloaded.tags_by_id == {}
     assert preloaded.statuses_by_tag_id == {}
+
+
+def _seed_second_format(session: Session, tag_ids: range, format_id: int) -> None:
+    """既存タグに別 format の TAG_STATUS 行を追加する (format 絞り込み検証用)。"""
+    session.add(TagFormat(format_id=format_id, format_name=f"format_{format_id}"))
+    session.add(TagTypeFormatMapping(format_id=format_id, type_id=0, type_name_id=1))
+    for tag_id in tag_ids:
+        session.add(
+            TagStatus(
+                tag_id=tag_id,
+                format_id=format_id,
+                type_id=0,
+                alias=False,
+                preferred_tag_id=tag_id,
+                deprecated=False,
+            )
+        )
+    session.commit()
+
+
+def test_apply_format_filter_returns_only_requested_tag_ids_present_in_format(
+    session_factory: Callable[[], Session],
+) -> None:
+    """format に属する tag_id だけが残り、format 外の tag_id は落ちる。"""
+    with session_factory() as session:
+        _seed_minimal_schema(session, total_tags=50)
+        # 1..50 は format 1。31..50 のみ format 2 にも属する。
+        _seed_second_format(session, range(31, 51), format_id=2)
+        builder = TagSearchQueryBuilder(session)
+
+        ids, format_id = builder.apply_format_filter({10, 35, 40}, "format_2")
+
+    assert ids == {35, 40}
+    assert format_id == 2
+
+
+def test_apply_format_filter_does_not_scan_rows_outside_requested_tag_ids(
+    session_factory: Callable[[], Session],
+) -> None:
+    """絞り込みは SQL 側で行い、format 全行を materialize しない (Issue #146)。
+
+    現行実装は `WHERE format_id = ?` だけで該当 format の TAG_STATUS 全行を読むため、
+    入力 tag_ids の件数に依らず一定のスキャンコストが乗る。tag_id 述語が SQL に
+    渡っていることを、発行された文と bind パラメータで検証する。
+    """
+    with session_factory() as session:
+        _seed_minimal_schema(session, total_tags=500)
+        engine = session.get_bind()
+        statements: list[tuple[str, object]] = []
+
+        def capture(conn, cursor, statement, parameters, context, executemany):
+            statements.append((statement, parameters))
+
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            builder = TagSearchQueryBuilder(session)
+            ids, _ = builder.apply_format_filter({1, 2, 3}, "test")
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+
+    assert ids == {1, 2, 3}
+
+    status_statements = [
+        (sql, params) for sql, params in statements if "TAG_STATUS" in sql and "SELECT" in sql.upper()
+    ]
+    assert status_statements, "TAG_STATUS への SELECT が発行されていない"
+    for sql, params in status_statements:
+        assert "tag_id IN" in sql, f"tag_id 述語が SQL に渡っていない (全行スキャン): {sql}"
+        # bind パラメータに要求した tag_id が含まれ、全 500 件を読んでいないこと
+        assert params, f"bind パラメータが空: {sql}"
+
+
+def test_apply_format_filter_handles_id_sets_over_sqlite_variable_limit(
+    session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SQLite の IN 句変数上限を超える tag_ids でもチャンク分割して正しく返す。"""
+    monkeypatch.setattr(query_utils, "TAG_ID_IN_CHUNK", 200)
+    with session_factory() as session:
+        _seed_minimal_schema(session, total_tags=1200)
+        builder = TagSearchQueryBuilder(session)
+
+        engine = session.get_bind()
+        status_selects = 0
+
+        def capture(conn, cursor, statement, parameters, context, executemany):
+            nonlocal status_selects
+            if "TAG_STATUS" in statement and statement.upper().startswith("SELECT"):
+                status_selects += 1
+
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            # format に存在しない ID (2001..2100) を混ぜ、絞り込みが効くことも確認する
+            requested = set(range(1, 1201)) | set(range(2001, 2101))
+            ids, format_id = builder.apply_format_filter(requested, "test")
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+
+    assert ids == set(range(1, 1201))
+    assert format_id == 1
+    # 1300 件 / チャンク 200 → 7 文に分割される (1 文にまとめず bind 上限を守る)
+    assert status_selects == 7
+
+
+def test_apply_format_filter_returns_input_untouched_for_all_or_missing_format(
+    session_factory: Callable[[], Session],
+) -> None:
+    """format 未指定/"all" は素通し、未知 format は空集合 (現行挙動の維持)。"""
+    with session_factory() as session:
+        _seed_minimal_schema(session, total_tags=10)
+        builder = TagSearchQueryBuilder(session)
+
+        assert builder.apply_format_filter({1, 2}, None) == ({1, 2}, None)
+        assert builder.apply_format_filter({1, 2}, "all") == ({1, 2}, None)
+        assert builder.apply_format_filter({1, 2}, "no_such_format") == (set(), None)
+        assert builder.apply_format_filter(set(), "test") == (set(), 1)
