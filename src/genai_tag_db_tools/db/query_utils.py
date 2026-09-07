@@ -435,11 +435,37 @@ class TagSearchQueryBuilder:
             return set(), None
 
         format_id = fmt_obj.format_id
-        format_tag_ids = {
-            row[0]
-            for row in self.session.query(TagStatus.tag_id).filter(TagStatus.format_id == format_id).all()
-        }
-        return tag_ids & format_tag_ids, format_id
+        return self._tag_ids_in_format(tag_ids, format_id), format_id
+
+    def _tag_ids_in_format(self, tag_ids: set[int], format_id: int) -> set[int]:
+        """`tag_ids` のうち `format_id` に属するものだけを SQL 側の述語で絞り込む。
+
+        Issue #146: 旧実装は `WHERE format_id = ?` だけで該当 format の TAG_STATUS を
+        全件 materialize してから Python 側で交差させていたため、入力が数件でも
+        format 全行 (danbooru なら約 160 万行) を読んでいた。`tag_id` を述語に渡すと
+        `(tag_id, format_id)` の複合 UNIQUE が covering index として効き、
+        読み取り行数が入力件数に比例するようになる。
+
+        Args:
+            tag_ids: 絞り込み対象の tag_id 集合。
+            format_id: 対象フォーマットの format_id。
+
+        Returns:
+            `tag_ids` のうち当該 format に登録済みの tag_id 集合。
+        """
+        if not tag_ids:
+            return set()
+
+        id_list = sorted(tag_ids)
+        base_query = self.session.query(TagStatus.tag_id).filter(TagStatus.format_id == format_id)
+        matched: set[int] = set()
+        # bind 変数上限を避けるためチャンクごとに発行する。`_chunked_in` は分割した IN を
+        # 1 文へ OR 結合するため総 bind 数が入力件数のままになり、wildcard 検索で
+        # tag_ids が数万件になる経路では上限に触れうる。ここは文を分けて上限を守る。
+        for start in range(0, len(id_list), TAG_ID_IN_CHUNK):
+            chunk = id_list[start : start + TAG_ID_IN_CHUNK]
+            matched.update(row[0] for row in base_query.filter(TagStatus.tag_id.in_(chunk)).all())
+        return matched
 
     def apply_usage_filter(
         self,
