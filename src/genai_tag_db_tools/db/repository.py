@@ -79,6 +79,28 @@ class TagReader:
         with self.session_factory() as session:
             return session.query(Tag).filter(Tag.tag_id == tag_id).one_or_none()
 
+    def get_tags_by_ids(self, tag_ids: list[int]) -> dict[int, Tag]:
+        """複数 tag_id の TAGS 行を一括取得する (Issue #148)。
+
+        `get_tag_by_id` を tag_id ごとに呼ぶと N 本発行して N+1 になる。
+
+        Args:
+            tag_ids: 取得対象の tag_id リスト。
+
+        Returns:
+            tag_id -> Tag。存在しない tag_id はキーを持たない。
+        """
+        if not tag_ids:
+            return {}
+        ordered_ids = sorted(set(tag_ids))
+        result: dict[int, Tag] = {}
+        with self.session_factory() as session:
+            for start in range(0, len(ordered_ids), TAG_ID_IN_CHUNK):
+                chunk = ordered_ids[start : start + TAG_ID_IN_CHUNK]
+                for tag in session.query(Tag).filter(Tag.tag_id.in_(chunk)).all():
+                    result[tag.tag_id] = tag
+        return result
+
     def list_tags(self) -> list[Tag]:
         with self.session_factory() as session:
             return session.query(Tag).all()
@@ -230,6 +252,30 @@ class TagReader:
             if tag_id is not None:
                 query = query.filter(TagStatus.tag_id == tag_id)
             return query.all()
+
+    def list_tag_statuses_batch(self, tag_ids: list[int]) -> dict[int, list[TagStatus]]:
+        """複数 tag_id の TAG_STATUS を一括取得する (Issue #148)。
+
+        `list_tag_statuses(tag_id)` を tag_id ごとに呼ぶと N 本発行して N+1 になる。
+        単数版と同じく ORDER BY を付けないため、tag_id ごとの行順は変わらない。
+
+        Args:
+            tag_ids: 取得対象の tag_id リスト。
+
+        Returns:
+            tag_id -> TagStatus のリスト。行が無い tag_id はキーを持たない。
+        """
+        if not tag_ids:
+            return {}
+        ordered_ids = sorted(set(tag_ids))
+        result: dict[int, list[TagStatus]] = {}
+        with self.session_factory() as session:
+            for start in range(0, len(ordered_ids), TAG_ID_IN_CHUNK):
+                chunk = ordered_ids[start : start + TAG_ID_IN_CHUNK]
+                rows = session.query(TagStatus).filter(TagStatus.tag_id.in_(chunk)).all()
+                for row in rows:
+                    result.setdefault(row.tag_id, []).append(row)
+        return result
 
     def get_usage_count(self, tag_id: int, format_id: int) -> int | None:
         with self.session_factory() as session:
@@ -2715,6 +2761,17 @@ class MergedTagReader:
         Returns:
             preferred 解決後の TagSearchRow リスト。
         """
+        alias_tag_ids = [row["tag_id"] for row in rows if row["alias"]]
+        if not alias_tag_ids:
+            return list(rows)
+
+        # Issue #148: 以下 3 種の lookup を alias 行ごとに引くと、リポ数 x 3 本が
+        # 行数に比例して発行される。行ループの前に一括で引いておく。
+        preferred_by_tag = self._preferred_tag_ids_for_aliases(alias_tag_ids)
+        preferred_ids = sorted(set(preferred_by_tag.values()))
+        tag_by_id = self._tags_by_ids_across_repos(preferred_ids)
+        translations_by_tag = self._translations_by_tag(preferred_ids)
+
         result: list[TagSearchRow] = []
         for row in rows:
             if not row["alias"]:
@@ -2722,50 +2779,128 @@ class MergedTagReader:
                 continue
 
             tag_id = row["tag_id"]
-            preferred_tag_id: int | None = None
-
-            # 全リポからステータスを取得して preferred_tag_id を探す
-            for repo in self._iter_repos():
-                statuses = repo.list_tag_statuses(tag_id)
-                for status in statuses:
-                    if status.alias and status.preferred_tag_id != tag_id:
-                        preferred_tag_id = status.preferred_tag_id
-                        break
-                if preferred_tag_id is not None:
-                    break
-
-            if preferred_tag_id is None or preferred_tag_id == tag_id:
+            preferred_tag_id = preferred_by_tag.get(tag_id)
+            if preferred_tag_id is None:
+                result.append(row)
+                continue
+            preferred_tag = tag_by_id.get(preferred_tag_id)
+            if preferred_tag is None:
                 result.append(row)
                 continue
 
-            # preferred tag を全リポから取得
-            preferred_tag: Tag | None = None
-            for repo in self._iter_repos():
-                preferred_tag = repo.get_tag_by_id(preferred_tag_id)
-                if preferred_tag is not None:
-                    break
-
-            if preferred_tag is not None:
-                translations: dict[str, list[str]] = {}
-                for translation in self.get_translations(preferred_tag_id):
-                    if translation.language and translation.translation:
-                        translations.setdefault(translation.language, []).append(translation.translation)
-                new_row: TagSearchRow = {
-                    "tag_id": preferred_tag_id,
-                    "tag": preferred_tag.tag,
-                    "source_tag": preferred_tag.source_tag,
-                    "usage_count": row["usage_count"],
-                    "alias": False,
-                    "deprecated": row["deprecated"],
-                    "type_id": row["type_id"],
-                    "type_name": row["type_name"],
-                    "translations": translations,
-                    "format_statuses": row["format_statuses"],
-                }
-                result.append(new_row)
-            else:
-                result.append(row)
+            translations: dict[str, list[str]] = {}
+            for translation in translations_by_tag.get(preferred_tag_id, []):
+                if translation.language and translation.translation:
+                    translations.setdefault(translation.language, []).append(translation.translation)
+            new_row: TagSearchRow = {
+                "tag_id": preferred_tag_id,
+                "tag": preferred_tag.tag,
+                "source_tag": preferred_tag.source_tag,
+                "usage_count": row["usage_count"],
+                "alias": False,
+                "deprecated": row["deprecated"],
+                "type_id": row["type_id"],
+                "type_name": row["type_name"],
+                "translations": translations,
+                "format_statuses": row["format_statuses"],
+            }
+            result.append(new_row)
         return result
+
+    def _preferred_tag_ids_for_aliases(self, alias_tag_ids: list[int]) -> dict[int, int]:
+        """alias tag_id -> preferred tag_id を全リポ横断で一括解決する (Issue #148)。
+
+        優先順位は `_iter_repos()` の順 (user → base 低→高)、リポ内は status 行の順で、
+        最初に見つかった `alias=True かつ preferred_tag_id != tag_id` を採用する
+        (逐次版と同じ選択規則)。自分自身を指す preferred は解決対象外として除外する。
+
+        逐次版は「最初の該当 status で内側ループを抜けるが、その `preferred_tag_id` が
+        None なら次のリポを探し続ける」挙動なので、それも再現する。
+
+        Args:
+            alias_tag_ids: alias 行の tag_id リスト。
+
+        Returns:
+            解決できた alias tag_id -> preferred tag_id。
+        """
+        remaining = set(alias_tag_ids)
+        resolved: dict[int, int] = {}
+        for repo in self._iter_repos():
+            if not remaining:
+                break
+            statuses_by_tag = self._list_tag_statuses_by_tag(repo, sorted(remaining))
+            for tag_id in sorted(remaining):
+                for status in statuses_by_tag.get(tag_id, []):
+                    if status.alias and status.preferred_tag_id != tag_id:
+                        if status.preferred_tag_id is not None:
+                            resolved[tag_id] = status.preferred_tag_id
+                        break
+            remaining -= resolved.keys()
+        return resolved
+
+    @staticmethod
+    def _list_tag_statuses_by_tag(
+        repo: "TagReader | OverlayTagReader", tag_ids: list[int]
+    ) -> dict[int, list[TagStatus]]:
+        """repo からの status 取得。バッチ API が無ければ tag_id ごとにフォールバックする。"""
+        batch = getattr(repo, "list_tag_statuses_batch", None)
+        if callable(batch):
+            loaded: dict[int, list[TagStatus]] = batch(tag_ids)
+            return loaded
+        return {tag_id: repo.list_tag_statuses(tag_id=tag_id) for tag_id in tag_ids}
+
+    def _translations_by_tag(self, tag_ids: list[int]) -> dict[int, list[TagTranslation]]:
+        """tag_id -> 翻訳リストを取得する (Issue #148)。
+
+        全リポが `get_translations_batch` を持つ場合のみバッチ経路を使う。
+        `get_translations` しか持たない duck-typed reader を壊さないため
+        (`MergedTagReader.get_translations` が batch へ委譲しないのと同じ理由)。
+
+        Args:
+            tag_ids: 取得対象の tag_id リスト。
+
+        Returns:
+            tag_id -> TagTranslation のリスト。
+        """
+        if not tag_ids:
+            return {}
+        repos: list[Any] = [*self._iter_base_repos_low_to_high()]
+        if self.user_repo is not None:
+            repos.append(self.user_repo)
+        if all(callable(getattr(repo, "get_translations_batch", None)) for repo in repos):
+            return self.get_translations_batch(tag_ids)
+        return {tag_id: self.get_translations(tag_id) for tag_id in tag_ids}
+
+    def _tags_by_ids_across_repos(self, tag_ids: list[int]) -> dict[int, Tag]:
+        """tag_id -> Tag を全リポ横断で一括取得する (先に見つかったリポを優先、Issue #148)。
+
+        Args:
+            tag_ids: 取得対象の tag_id リスト。
+
+        Returns:
+            tag_id -> Tag。どのリポにも無い tag_id はキーを持たない。
+        """
+        if not tag_ids:
+            return {}
+        remaining = set(tag_ids)
+        found: dict[int, Tag] = {}
+        for repo in self._iter_repos():
+            if not remaining:
+                break
+            batch = getattr(repo, "get_tags_by_ids", None)
+            if callable(batch):
+                loaded: dict[int, Tag] = batch(sorted(remaining))
+            else:
+                loaded = {}
+                for tag_id in sorted(remaining):
+                    tag = repo.get_tag_by_id(tag_id)
+                    if tag is not None:
+                        loaded[tag_id] = tag
+            for tag_id, tag in loaded.items():
+                if tag is not None and tag_id in remaining:
+                    found[tag_id] = tag
+            remaining -= found.keys()
+        return found
 
     def search_tags(
         self,
@@ -2994,7 +3129,10 @@ class MergedTagReader:
                     del merged[keyword]
         if not resolve_preferred:
             return merged
-        merged = {keyword: self._resolve_cross_scope_preferred([row])[0] for keyword, row in merged.items()}
+        # Issue #148: 1 行ずつ呼ぶと内部の一括取得が行数ぶん走るため、まとめて 1 回で解決する。
+        keywords_in_order = list(merged)
+        resolved_rows = self._resolve_cross_scope_preferred([merged[kw] for kw in keywords_in_order])
+        merged = dict(zip(keywords_in_order, resolved_rows, strict=True))
         # OverlayTagReader.search_tags_bulk がスタブのため、未解決キーワードを
         # 個別 search_tags で補完する (cross-scope preferred 解決を含む)
         missing = [kw for kw in keywords if kw not in merged]
