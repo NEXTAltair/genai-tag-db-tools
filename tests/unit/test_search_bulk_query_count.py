@@ -35,6 +35,9 @@ pytestmark = pytest.mark.db_tools
 _FORMAT_ID = 1
 _FORMAT_NAME = "danbooru"
 _TOTAL_TAGS = 60
+# 61.._TOTAL_TAGS+_ALIAS_COUNT は 1..30 を preferred に持つ alias タグ
+_ALIAS_COUNT = 30
+_ALIAS_BASE = _TOTAL_TAGS + 1
 
 
 @pytest.fixture
@@ -63,6 +66,11 @@ def _tag_name(tag_id: int) -> str:
     return f"sample_{tag_id}"
 
 
+def _alias_name(preferred_tag_id: int) -> str:
+    """`sample_{preferred_tag_id}` を preferred に持つ alias タグ名。"""
+    return f"alias_{preferred_tag_id}"
+
+
 @pytest.fixture
 def populated_base(base_session_factory: Callable[[], Session]) -> None:
     with base_session_factory() as session:
@@ -79,6 +87,23 @@ def populated_base(base_session_factory: Callable[[], Session]) -> None:
                     type_id=0,
                     alias=False,
                     preferred_tag_id=tag_id,
+                    deprecated=False,
+                )
+            )
+        # alias 行 (cross-scope preferred 解決経路を通すため)。
+        # alias_{i} は sample_{i} を preferred に持つ。
+        for offset in range(_ALIAS_COUNT):
+            alias_id = _ALIAS_BASE + offset
+            preferred_id = offset + 1
+            name = _alias_name(preferred_id)
+            session.add(Tag(tag_id=alias_id, source_tag=name, tag=name))
+            session.add(
+                TagStatus(
+                    tag_id=alias_id,
+                    format_id=_FORMAT_ID,
+                    type_id=0,
+                    alias=True,
+                    preferred_tag_id=preferred_id,
                     deprecated=False,
                 )
             )
@@ -229,3 +254,52 @@ def test_user_patches_by_tag_returns_empty_when_method_missing(
     result = merged._user_patches_by_tag("list_tag_type_patches_batch", "list_tag_type_patches", [1, 2])
 
     assert result == {1: [], 2: []}
+
+
+def test_search_tags_bulk_alias_resolution_query_count_does_not_scale(
+    merged: MergedTagReader,
+) -> None:
+    """alias 行の cross-scope preferred 解決も入力件数に比例して発行しない (Issue #148)。
+
+    `_resolve_cross_scope_preferred` は alias 行ごとに全リポの `list_tag_statuses` /
+    `get_tag_by_id` / `get_translations` を個別に引くため、alias が多いほど発行数が
+    比例して増える。
+    """
+    few = [_alias_name(i) for i in range(1, 6)]  # alias 5 件
+    many = [_alias_name(i) for i in range(1, 26)]  # alias 25 件
+
+    count_many, rows_many = _count_statements(
+        lambda: merged.search_tags_bulk(many, format_name=_FORMAT_NAME, resolve_preferred=True)
+    )
+    count_few, rows_few = _count_statements(
+        lambda: merged.search_tags_bulk(few, format_name=_FORMAT_NAME, resolve_preferred=True)
+    )
+
+    # alias は preferred (sample_N) へ解決されて返る
+    assert rows_few[_alias_name(1)]["tag"] == _tag_name(1)  # type: ignore[index]
+    assert rows_many[_alias_name(25)]["tag"] == _tag_name(25)  # type: ignore[index]
+
+    assert count_many <= count_few + 5, (
+        f"alias 解決の SQL 発行数が入力件数に比例している: 5 件={count_few} 本, 25 件={count_many} 本"
+    )
+
+
+def test_search_tags_bulk_alias_resolution_matches_search_tags(merged: MergedTagReader) -> None:
+    """alias 解決の結果が単数 `search_tags` と一致する (意味論の維持)。"""
+    keywords = [_alias_name(i) for i in range(1, 11)]
+    bulk = merged.search_tags_bulk(keywords, format_name=_FORMAT_NAME, resolve_preferred=True)
+
+    for keyword in keywords:
+        single = merged.search_tags(
+            keyword, partial=False, format_name=_FORMAT_NAME, resolve_preferred=True
+        )
+        expected = single[0] if single else None
+        actual = bulk.get(keyword)
+        if expected is None:
+            assert actual is None, f"{keyword}: bulk のみ行を返した"
+            continue
+        assert actual is not None, f"{keyword}: bulk が行を返していない"
+        assert actual["tag_id"] == expected["tag_id"]
+        assert actual.get("tag") == expected.get("tag")
+        assert actual.get("alias") == expected.get("alias")
+        assert actual.get("translations") == expected.get("translations")

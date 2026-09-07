@@ -60,6 +60,26 @@ class OverlayTagReader:
                 return None
             return Tag(tag_id=row.tag_id, source_tag=row.source_tag, tag=row.tag)
 
+    def get_tags_by_ids(self, tag_ids: list[int]) -> dict[int, Tag]:
+        """複数 tag_id の USER_TAGS 行を detached Tag として一括取得する (Issue #148)。
+
+        Args:
+            tag_ids: 取得対象の tag_id リスト。
+
+        Returns:
+            tag_id -> Tag。存在しない tag_id はキーを持たない。
+        """
+        if not tag_ids:
+            return {}
+        ordered_ids = sorted(set(tag_ids))
+        result: dict[int, Tag] = {}
+        with self.session_factory() as session:
+            for start in range(0, len(ordered_ids), TAG_ID_IN_CHUNK):
+                chunk = ordered_ids[start : start + TAG_ID_IN_CHUNK]
+                for row in session.query(UserTag).filter(UserTag.tag_id.in_(chunk)).all():
+                    result[row.tag_id] = Tag(tag_id=row.tag_id, source_tag=row.source_tag, tag=row.tag)
+        return result
+
     def get_tag_id_by_name(self, keyword: str, partial: bool = False) -> int | None:
         """キーワードで USER_TAGS の tag を検索し、最初に一致した tag_id を返す。"""
         keyword, use_like = normalize_search_keyword(keyword, partial)
