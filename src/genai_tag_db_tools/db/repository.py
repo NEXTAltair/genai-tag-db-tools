@@ -2056,6 +2056,62 @@ class MergedTagReader:
                 format_ids.add(format_id)
         return format_ids
 
+    def _user_patches_by_tag(
+        self, batch_name: str, single_name: str, tag_ids: list[int]
+    ) -> dict[int, list[Any]]:
+        """user_repo から tag_id ごとの patch を取得する (Issue #148)。
+
+        バッチ API (`*_batch`) があれば 1 回にまとめ、無ければ tag_id ごとの単数 API に
+        フォールバックする。どちらも持たない実装では空を返す。
+
+        単数 API は `tag_id` キーワードで呼ぶ。`list_usage_counts` はバッチ化前から
+        `list_usage_counts(tag_id=tag_id)` で呼ばれており、キーワード専用引数を持つ
+        duck-typed 実装を位置引数呼び出しで壊さないため (PR #149 Codex P2)。
+        既存の実装はいずれも第 1 引数名が `tag_id` なので他メソッドでも同じ形で呼べる。
+
+        Args:
+            batch_name: `dict[int, list[...]]` を返すバッチメソッド名。
+            single_name: `list[...]` を返す単数メソッド名。
+            tag_ids: 取得対象の tag_id リスト。
+
+        Returns:
+            tag_id -> patch のリスト (全 tag_id をキーとして持つ)。
+        """
+        assert self.user_repo is not None
+        batch = getattr(self.user_repo, batch_name, None)
+        if callable(batch):
+            loaded: dict[int, list[Any]] = batch(tag_ids)
+            return {tag_id: list(loaded.get(tag_id, [])) for tag_id in tag_ids}
+
+        single = getattr(self.user_repo, single_name, None)
+        if not callable(single):
+            return {tag_id: [] for tag_id in tag_ids}
+        return {tag_id: list(single(tag_id=tag_id)) for tag_id in tag_ids}
+
+    def _tag_ids_with_user_status_patch(
+        self, tag_ids: list[int], requested_format_ids: set[int]
+    ) -> set[int]:
+        """`requested_format_ids` に user status patch を持つ tag_id を一括判定する。
+
+        Issue #148: 行ごとに `list_tag_statuses(tag_id)` を呼ぶと 1 タグあたり 2 本
+        (USER_TAG_STATUS_PATCH / USER_TAG_TYPE_PATCH) 発行して N+1 になる。
+
+        Args:
+            tag_ids: 判定対象の tag_id リスト。
+            requested_format_ids: 対象フォーマットの format_id 集合。
+
+        Returns:
+            いずれかの要求 format に user status patch を持つ tag_id 集合。
+        """
+        if not tag_ids or not requested_format_ids or not self._has_user():
+            return set()
+        statuses_by_tag = self._user_patches_by_tag("list_tag_statuses_batch", "list_tag_statuses", tag_ids)
+        return {
+            tag_id
+            for tag_id, statuses in statuses_by_tag.items()
+            if any(status.format_id in requested_format_ids for status in statuses)
+        }
+
     def _row_has_user_status_patch(self, row: TagSearchRow, requested_format_ids: set[int]) -> bool:
         if not requested_format_ids or not self._has_user():
             return False
@@ -2108,21 +2164,51 @@ class MergedTagReader:
         has_split_patches = hasattr(self.user_repo, "list_status_patches") and hasattr(
             self.user_repo, "list_tag_type_patches"
         )
-        for tag_id in tag_ids:
-            if has_split_patches:
-                patched_by_tag[tag_id] = self.user_repo.list_status_patches(tag_id)
-                type_patched_by_tag[tag_id] = self.user_repo.list_tag_type_patches(tag_id)
-            else:
-                patched_by_tag[tag_id] = self.user_repo.list_tag_statuses(tag_id)
-                type_patched_by_tag[tag_id] = []
-            usage_by_tag[tag_id] = self.user_repo.list_usage_counts(tag_id=tag_id)
+        # Issue #148: tag_id ごとに引くと 3N 本の SQL になるため、バッチ API があれば
+        # まとめて取得する。単数 API しか持たない user_repo 実装との互換は残す。
+        tag_id_list = list(tag_ids)
+        if has_split_patches:
+            patched_by_tag = self._user_patches_by_tag(
+                "list_status_patches_batch", "list_status_patches", tag_id_list
+            )
+            type_patched_by_tag = self._user_patches_by_tag(
+                "list_tag_type_patches_batch", "list_tag_type_patches", tag_id_list
+            )
+        else:
+            patched_by_tag = self._user_patches_by_tag(
+                "list_tag_statuses_batch", "list_tag_statuses", tag_id_list
+            )
+            type_patched_by_tag = {tag_id: [] for tag_id in tag_id_list}
+        usage_by_tag = self._user_patches_by_tag(
+            "list_usage_counts_batch", "list_usage_counts", tag_id_list
+        )
+
+        # Issue #148: format 名 / type 名は行ごとに引くと 2N 本発行する。1 回の呼び出し中は
+        # 不変なので、呼び出しスコープのメモに載せる (インスタンスには残さない)。
+        format_name_memo: dict[int, str] = {}
+        type_name_memo: dict[tuple[int, int], str] = {}
+
+        def format_name_of(format_id: int) -> str:
+            cached = format_name_memo.get(format_id)
+            if cached is None:
+                cached = self._format_name_for_id(format_id)
+                format_name_memo[format_id] = cached
+            return cached
+
+        def type_name_of(format_id: int, type_id: int) -> str:
+            key = (format_id, type_id)
+            cached = type_name_memo.get(key)
+            if cached is None:
+                cached = self._type_name_for_format_type(format_id, type_id)
+                type_name_memo[key] = cached
+            return cached
 
         patched_rows: list[TagSearchRow] = []
         for row in rows:
             updated = dict(row)
             format_statuses = dict(row.get("format_statuses") or {})
             if requested_format_id is not None:
-                requested_format_name = self._format_name_for_id(requested_format_id)
+                requested_format_name = format_name_of(requested_format_id)
                 requested_status = self._format_status_dict(format_statuses.get(requested_format_name))
                 if requested_status:
                     for key in ("alias", "deprecated", "type_id", "type_name", "usage_count"):
@@ -2143,7 +2229,7 @@ class MergedTagReader:
                 updated["translations"] = filtered
 
             for usage in usage_by_tag.get(row["tag_id"], []):
-                fmt_name = self._format_name_for_id(usage.format_id)
+                fmt_name = format_name_of(usage.format_id)
                 status = self._format_status_dict(format_statuses.get(fmt_name))
                 status["usage_count"] = usage.count
                 format_statuses[fmt_name] = status
@@ -2172,8 +2258,8 @@ class MergedTagReader:
                 continue
 
             for patch in patches:
-                fmt_name = self._format_name_for_id(patch.format_id)
-                type_name = self._type_name_for_format_type(patch.format_id, patch.type_id)
+                fmt_name = format_name_of(patch.format_id)
+                type_name = type_name_of(patch.format_id, patch.type_id)
                 status = self._format_status_dict(format_statuses.get(fmt_name))
                 status.update(
                     {
@@ -2197,8 +2283,8 @@ class MergedTagReader:
                 format_statuses[fmt_name] = status
 
             for patch in type_patches:
-                fmt_name = self._format_name_for_id(patch.format_id)
-                type_name = self._type_name_for_format_type(patch.format_id, patch.type_id)
+                fmt_name = format_name_of(patch.format_id)
+                type_name = type_name_of(patch.format_id, patch.type_id)
                 status = self._format_status_dict(format_statuses.get(fmt_name))
                 status.setdefault("alias", False)
                 status.setdefault("deprecated", False)
@@ -2222,19 +2308,19 @@ class MergedTagReader:
                 updated["alias"] = active_patch.alias
                 updated["deprecated"] = active_patch.deprecated
                 updated["type_id"] = active_patch.type_id
-                updated["type_name"] = self._type_name_for_format_type(
+                updated["type_name"] = type_name_of(
                     active_patch.format_id,
                     active_patch.type_id,
                 )
             active_type_patch = self._select_active_status(type_patches, requested_format_id)
             if active_type_patch is not None:
-                fmt_name = self._format_name_for_id(active_type_patch.format_id)
+                fmt_name = format_name_of(active_type_patch.format_id)
                 active_type_status = self._format_status_dict(format_statuses.get(fmt_name))
                 if active_patch is None:
                     updated["alias"] = active_type_status.get("alias", False)
                     updated["deprecated"] = active_type_status.get("deprecated", False)
                 updated["type_id"] = active_type_patch.type_id
-                updated["type_name"] = self._type_name_for_format_type(
+                updated["type_name"] = type_name_of(
                     active_type_patch.format_id,
                     active_type_patch.type_id,
                 )
@@ -2874,8 +2960,13 @@ class MergedTagReader:
                 format_name=None,
                 resolve_preferred=False,
             )
+            # Issue #148: 行ごとに judge すると 2N 本発行するため、まとめて判定する。
+            patched_tag_ids = self._tag_ids_with_user_status_patch(
+                [row["tag_id"] for row in patched_candidates.values()],
+                requested_format_ids,
+            )
             for keyword, row in patched_candidates.items():
-                if self._row_has_user_status_patch(row, requested_format_ids):
+                if row["tag_id"] in patched_tag_ids:
                     merged[keyword] = row
         if merged:
             requested_format_id = self._requested_format_id(format_name)
