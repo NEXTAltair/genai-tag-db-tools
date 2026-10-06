@@ -5,7 +5,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-from sqlalchemy import Engine, create_engine, event, inspect
+from sqlalchemy import URL, Engine, create_engine, event, inspect
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -192,7 +192,7 @@ def _ensure_wal_journal_mode(engine: Engine) -> None:
 
 def _create_engine(db_path: Path) -> Engine:
     engine = create_engine(
-        f"sqlite:///{db_path.resolve().as_uri()}?mode=ro&uri=true"
+        URL.create("sqlite", database=db_path.resolve().as_uri(), query={"mode": "ro", "uri": "true"})
         if _read_only
         else f"sqlite:///{db_path.absolute()}",
         connect_args={"check_same_thread": False},

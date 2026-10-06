@@ -16,7 +16,7 @@ from genai_tag_db_tools.models import DbSourceRef
 
 @pytest.fixture
 def cached_databases(tmp_path, monkeypatch):
-    base = tmp_path / "base ? 日本語.sqlite"
+    base = tmp_path / "base # 日本語.sqlite"
     engine = create_engine(URL.create("sqlite", database=str(base)))
     Base.metadata.create_all(engine)
     engine.dispose()
