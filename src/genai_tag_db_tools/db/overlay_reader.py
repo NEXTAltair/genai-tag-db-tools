@@ -643,8 +643,11 @@ class OverlayTagReader:
             for row in session.query(UserTagTranslationPatch.target_tag_id).filter(translation_cond).all()
         }
         # 翻訳マッチのうち UserTag に存在するものだけを追加する (base scope の翻訳は除外)。
-        extra_ids = translation_ids - direct_ids
-        extra = session.query(UserTag).filter(UserTag.tag_id.in_(extra_ids)).all() if extra_ids else []
+        extra_ids = sorted(translation_ids - direct_ids)
+        extra: list[UserTag] = []
+        for start in range(0, len(extra_ids), TAG_ID_IN_CHUNK):
+            chunk = extra_ids[start : start + TAG_ID_IN_CHUNK]
+            extra.extend(session.query(UserTag).filter(UserTag.tag_id.in_(chunk)).all())
         return direct + extra
 
     def _load_status_patches(
@@ -652,12 +655,15 @@ class OverlayTagReader:
     ) -> dict[int, list[UserTagStatusPatch]]:
         if not tag_ids:
             return {}
-        patches = (
-            session.query(UserTagStatusPatch).filter(UserTagStatusPatch.target_tag_id.in_(tag_ids)).all()
-        )
         result: dict[int, list[UserTagStatusPatch]] = {}
-        for p in patches:
-            result.setdefault(p.target_tag_id, []).append(p)
+        ordered_ids = sorted(tag_ids)
+        for start in range(0, len(ordered_ids), TAG_ID_IN_CHUNK):
+            chunk = ordered_ids[start : start + TAG_ID_IN_CHUNK]
+            patches = (
+                session.query(UserTagStatusPatch).filter(UserTagStatusPatch.target_tag_id.in_(chunk)).all()
+            )
+            for p in patches:
+                result.setdefault(p.target_tag_id, []).append(p)
         # format_id 昇順で並べ、format 未指定時の「先頭パッチ」を決定的にする。
         for patch_list in result.values():
             patch_list.sort(key=lambda p: p.format_id)
@@ -666,15 +672,12 @@ class OverlayTagReader:
     def _load_type_patches(self, session: Session, tag_ids: set[int]) -> dict[int, list[UserTagTypePatch]]:
         if not tag_ids:
             return {}
-        try:
-            rows = session.query(UserTagTypePatch).filter(UserTagTypePatch.target_tag_id.in_(tag_ids)).all()
-        except OperationalError as exc:
-            if self._is_missing_table_error(exc):
-                return {}
-            raise
         result: dict[int, list[UserTagTypePatch]] = {}
-        for row in rows:
-            result.setdefault(row.target_tag_id, []).append(row)
+        ordered_ids = sorted(tag_ids)
+        for start in range(0, len(ordered_ids), TAG_ID_IN_CHUNK):
+            chunk = ordered_ids[start : start + TAG_ID_IN_CHUNK]
+            for row in self._query_type_patch_rows(session, chunk):
+                result.setdefault(row.target_tag_id, []).append(row)
         return result
 
     def _apply_type_patches_to_statuses(
@@ -709,10 +712,13 @@ class OverlayTagReader:
     ) -> dict[int, list[UserTagUsagePatch]]:
         if not tag_ids:
             return {}
-        rows = session.query(UserTagUsagePatch).filter(UserTagUsagePatch.target_tag_id.in_(tag_ids)).all()
         result: dict[int, list[UserTagUsagePatch]] = {}
-        for r in rows:
-            result.setdefault(r.target_tag_id, []).append(r)
+        ordered_ids = sorted(tag_ids)
+        for start in range(0, len(ordered_ids), TAG_ID_IN_CHUNK):
+            chunk = ordered_ids[start : start + TAG_ID_IN_CHUNK]
+            rows = session.query(UserTagUsagePatch).filter(UserTagUsagePatch.target_tag_id.in_(chunk)).all()
+            for r in rows:
+                result.setdefault(r.target_tag_id, []).append(r)
         return result
 
     def _load_translation_patches(
@@ -720,18 +726,22 @@ class OverlayTagReader:
     ) -> dict[int, list[UserTagTranslationPatch]]:
         if not tag_ids:
             return {}
-        rows = (
-            session.query(UserTagTranslationPatch)
-            .filter(UserTagTranslationPatch.target_tag_id.in_(tag_ids))
-            .all()
-        )
         # tombstone (#121) された (scope, language, translation) は patch 由来でも表示しない
         tombstoned = self._load_translation_tombstones(session, tag_ids)
         result: dict[int, list[UserTagTranslationPatch]] = {}
-        for r in rows:
-            if (r.target_scope, r.language, r.translation) in tombstoned.get(r.target_tag_id, set()):
-                continue
-            result.setdefault(r.target_tag_id, []).append(r)
+        ordered_ids = sorted(tag_ids)
+        # ページ制限を掛ける前の全候補が来るため、IN を別々の SQL に分割する。
+        for start in range(0, len(ordered_ids), TAG_ID_IN_CHUNK):
+            chunk = ordered_ids[start : start + TAG_ID_IN_CHUNK]
+            rows = (
+                session.query(UserTagTranslationPatch)
+                .filter(UserTagTranslationPatch.target_tag_id.in_(chunk))
+                .all()
+            )
+            for r in rows:
+                if (r.target_scope, r.language, r.translation) in tombstoned.get(r.target_tag_id, set()):
+                    continue
+                result.setdefault(r.target_tag_id, []).append(r)
         return result
 
     def _load_translation_tombstones(
@@ -768,9 +778,7 @@ class OverlayTagReader:
             result.setdefault(r.target_tag_id, set()).add((r.target_scope, r.language, r.translation))
         return result
 
-    def get_translation_tombstones_batch(
-        self, tag_ids: list[int]
-    ) -> dict[int, set[tuple[str, str, str]]]:
+    def get_translation_tombstones_batch(self, tag_ids: list[int]) -> dict[int, set[tuple[str, str, str]]]:
         """複数 tag_id の tombstone 済み (target_scope, language, translation) 集合を返す (#121)。
 
         MergedTagReader が base 由来の翻訳をマージ時に除外するために参照する。
@@ -968,9 +976,7 @@ class OverlayTagReader:
         """USER_TAG_TRANSLATION_PATCH 全件を返す (tombstone 済み行は除外、#121)。"""
         with self.session_factory() as session:
             rows = session.query(UserTagTranslationPatch).all()
-            tombstoned = self._load_translation_tombstones(
-                session, {r.target_tag_id for r in rows}
-            )
+            tombstoned = self._load_translation_tombstones(session, {r.target_tag_id for r in rows})
             return [
                 TagTranslation(
                     translation_id=r.patch_id,
@@ -979,39 +985,31 @@ class OverlayTagReader:
                     translation=r.translation,
                 )
                 for r in rows
-                if (r.target_scope, r.language, r.translation)
-                not in tombstoned.get(r.target_tag_id, set())
+                if (r.target_scope, r.language, r.translation) not in tombstoned.get(r.target_tag_id, set())
             ]
 
     def get_translations_batch(self, tag_ids: list[int]) -> dict[int, list[TagTranslation]]:
         """複数 tag_id の翻訳をバッチ取得する。
 
+        重複 ID を除き、検索と同じチャンク取得で SQLite の変数上限を避ける。
         tombstone (#121) 済みの (language, translation) は patch 行があっても返さない。
         """
         if not tag_ids:
             return {}
         with self.session_factory() as session:
-            rows = (
-                session.query(UserTagTranslationPatch)
-                .filter(
-                    UserTagTranslationPatch.target_tag_id.in_(tag_ids),
-                )
-                .all()
-            )
-            tombstoned = self._load_translation_tombstones(session, set(tag_ids))
-        result: dict[int, list[TagTranslation]] = {}
-        for r in rows:
-            if (r.target_scope, r.language, r.translation) in tombstoned.get(r.target_tag_id, set()):
-                continue
-            result.setdefault(r.target_tag_id, []).append(
-                TagTranslation(
-                    translation_id=r.patch_id,
-                    tag_id=r.target_tag_id,
-                    language=r.language,
-                    translation=r.translation,
-                )
-            )
-        return result
+            patches = self._load_translation_patches(session, set(tag_ids))
+            return {
+                tag_id: [
+                    TagTranslation(
+                        translation_id=r.patch_id,
+                        tag_id=r.target_tag_id,
+                        language=r.language,
+                        translation=r.translation,
+                    )
+                    for r in rows
+                ]
+                for tag_id, rows in patches.items()
+            }
 
     def get_format_name(self, format_id: int) -> str | None:
         try:
