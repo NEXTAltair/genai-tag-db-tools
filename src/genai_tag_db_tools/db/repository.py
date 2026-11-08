@@ -431,7 +431,14 @@ class TagReader:
         *,
         format_name: str | None = None,
         resolve_preferred: bool = False,
+        lightweight: bool = False,
     ) -> dict[str, TagSearchRow]:
+        """keyword -> 先頭マッチ行を一括で返す。
+
+        `lightweight=True` は usage count / 翻訳 / 他 format の status を読まない軽量モード
+        (Issue #1449)。tag_id / tag / alias / deprecated など canonical 解決に要る項目は
+        通常モードと同一で、usage_count=0・translations={}・format_statuses は空になる。
+        """
         cleaned = [keyword.strip() for keyword in keywords if keyword and keyword.strip()]
         if not cleaned:
             return {}
@@ -451,7 +458,7 @@ class TagReader:
                 return {}
 
             preloader = TagSearchPreloader(session)
-            preloaded = preloader.load(tag_ids)
+            preloaded = preloader.load(tag_ids, lightweight=lightweight, format_id=format_id)
             result_builder = TagSearchResultBuilder(
                 format_id=format_id,
                 resolve_preferred=resolve_preferred,
@@ -1484,7 +1491,9 @@ class TagRepository:
 
         return cache[type_name]
 
-    def _get_or_create_format_id_in_session(self, session: "Session", format_name: str, format_id: int) -> int:
+    def _get_or_create_format_id_in_session(
+        self, session: "Session", format_name: str, format_id: int
+    ) -> int:
         format_obj = session.query(TagFormat).filter(TagFormat.format_id == format_id).one_or_none()
         if format_obj is not None:
             return format_obj.format_id
@@ -1681,7 +1690,9 @@ class TagRepository:
                 for update in tag_updates:
                     scope = self._reader.get_tag_scope(update.tag_id) if self._reader is not None else None
                     if overlay_available and scope in {"base", "user"}:
-                        type_name_id = self._get_or_create_type_name_id_in_session(session, update.type_name)
+                        type_name_id = self._get_or_create_type_name_id_in_session(
+                            session, update.type_name
+                        )
                         patch_type_id = self._resolve_type_id_for_format_in_session(
                             session,
                             update.type_name,
@@ -2162,7 +2173,10 @@ class MergedTagReader:
         if not requested_format_ids or not self._has_user():
             return False
         assert self.user_repo is not None
-        return any(status.format_id in requested_format_ids for status in self.user_repo.list_tag_statuses(row["tag_id"]))
+        return any(
+            status.format_id in requested_format_ids
+            for status in self.user_repo.list_tag_statuses(row["tag_id"])
+        )
 
     def _format_name_for_id(self, format_id: int) -> str:
         try:
@@ -3078,7 +3092,11 @@ class MergedTagReader:
         *,
         format_name: str | None = None,
         resolve_preferred: bool = False,
+        lightweight: bool = False,
     ) -> dict[str, TagSearchRow]:
+        # lightweight は base 検索の preload だけを軽くする (Issue #1449)。翻訳は読まないため、
+        # 翻訳一致の再判定は tombstone を持つ tag に限って行う (下の dropped 判定)。
+        light_kwargs: dict[str, bool] = {"lightweight": True} if lightweight else {}
         requested_format_ids = self._requested_format_ids(format_name)
         merged: dict[str, TagSearchRow] = self._merge_by_key(
             "search_tags_bulk",
@@ -3086,6 +3104,7 @@ class MergedTagReader:
             keywords,
             format_name=format_name,
             resolve_preferred=False,
+            **light_kwargs,
         )
         if self._has_user() and requested_format_ids:
             patched_candidates: dict[str, TagSearchRow] = self._merge_by_key(
@@ -3094,6 +3113,7 @@ class MergedTagReader:
                 keywords,
                 format_name=None,
                 resolve_preferred=False,
+                **light_kwargs,
             )
             # Issue #148: 行ごとに judge すると 2N 本発行するため、まとめて判定する。
             patched_tag_ids = self._tag_ids_with_user_status_patch(
@@ -3101,8 +3121,14 @@ class MergedTagReader:
                 requested_format_ids,
             )
             for keyword, row in patched_candidates.items():
-                if row["tag_id"] in patched_tag_ids:
-                    merged[keyword] = row
+                if row["tag_id"] not in patched_tag_ids:
+                    continue
+                # lightweight の format=None 行は status を持たない。同一 tag なら要求 format の
+                # base status (alias / deprecated 等) を持つ既存行を保持する (Codex P1)。
+                existing = merged.get(keyword)
+                if lightweight and existing is not None and existing["tag_id"] == row["tag_id"]:
+                    continue
+                merged[keyword] = row
         if merged:
             requested_format_id = self._requested_format_id(format_name)
             patched = self._apply_user_patches_to_search_rows(
@@ -3119,6 +3145,11 @@ class MergedTagReader:
                 for keyword, row in merged.items()
                 if not self._row_still_matches_keyword(row, keyword)
             ]
+            if lightweight and dropped:
+                # lightweight は翻訳を読まないため翻訳一致の行が全て不一致に見える。
+                # tombstone を持つ tag だけを再検索対象に絞る (Codex P2)。
+                tombstones = self._translation_tombstones_batch([merged[kw]["tag_id"] for kw in dropped])
+                dropped = [kw for kw in dropped if tombstones.get(merged[kw]["tag_id"])]
             for keyword in dropped:
                 fallback_rows = self.search_tags(
                     keyword, partial=False, format_name=format_name, resolve_preferred=False
@@ -3127,6 +3158,24 @@ class MergedTagReader:
                     merged[keyword] = fallback_rows[0]
                 else:
                     del merged[keyword]
+        if lightweight and self._has_user() and merged:
+            # user type 補正は他 format の base status を参照して alias / deprecated を決める
+            # (`_apply_user_patches_to_search_rows`)。lightweight は status を絞っているため、
+            # type 補正を持つ tag だけ通常モードで引き直す (Codex P2)。
+            type_patches = self._user_patches_by_tag(
+                "list_tag_type_patches_batch",
+                "list_tag_type_patches",
+                [row["tag_id"] for row in merged.values()],
+            )
+            patched_keywords = [kw for kw, row in merged.items() if type_patches.get(row["tag_id"])]
+            if patched_keywords:
+                merged.update(
+                    self.search_tags_bulk(
+                        patched_keywords,
+                        format_name=format_name,
+                        resolve_preferred=False,
+                    )
+                )
         if not resolve_preferred:
             return merged
         # Issue #148: 1 行ずつ呼ぶと内部の一括取得が行数ぶん走るため、まとめて 1 回で解決する。

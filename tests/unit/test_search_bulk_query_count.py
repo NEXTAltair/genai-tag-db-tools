@@ -24,10 +24,13 @@ from genai_tag_db_tools.db.schema import (
     TagFormat,
     TagStatus,
     TagTypeFormatMapping,
+    TagTranslation,
     TagTypeName,
     UserOverlayBase,
     UserTag,
     UserTagStatusPatch,
+    UserTagTranslationTombstone,
+    UserTagTypePatch,
 )
 
 pytestmark = pytest.mark.db_tools
@@ -215,9 +218,7 @@ class _KeywordOnlyUserRepo:
     (PR #149 Codex P2: 位置引数で呼ぶと TypeError になる実装が存在しうる)。
     """
 
-    def list_usage_counts(
-        self, *, tag_id: int | None = None, format_id: int | None = None
-    ) -> list[int]:
+    def list_usage_counts(self, *, tag_id: int | None = None, format_id: int | None = None) -> list[int]:
         return [] if tag_id is None else [tag_id]
 
     def list_status_patches(self, *, tag_id: int | None = None) -> list[int]:
@@ -303,3 +304,139 @@ def test_search_tags_bulk_alias_resolution_matches_search_tags(merged: MergedTag
         assert actual.get("tag") == expected.get("tag")
         assert actual.get("alias") == expected.get("alias")
         assert actual.get("translations") == expected.get("translations")
+
+
+def test_search_tags_bulk_lightweight_matches_canonical_fields(merged: MergedTagReader) -> None:
+    """lightweight でも canonical 解決に要る項目は通常モードと一致する (Issue #1449)。"""
+    keywords = [_tag_name(i) for i in range(1, 21)] + [_alias_name(i) for i in range(1, 11)]
+    full = merged.search_tags_bulk(keywords, format_name=_FORMAT_NAME, resolve_preferred=True)
+    light = merged.search_tags_bulk(
+        keywords, format_name=_FORMAT_NAME, resolve_preferred=True, lightweight=True
+    )
+
+    assert set(light) == set(full)
+    for keyword, expected in full.items():
+        for field in ("tag_id", "tag", "source_tag", "alias", "deprecated", "type_id", "type_name"):
+            assert light[keyword][field] == expected[field], f"{keyword}.{field}"
+
+    # format 指定なし (batch_resolve_tag_ids 相当) も tag_id が一致する
+    full_any = merged.search_tags_bulk(keywords)
+    light_any = merged.search_tags_bulk(keywords, lightweight=True)
+    assert {k: r["tag_id"] for k, r in light_any.items()} == {k: r["tag_id"] for k, r in full_any.items()}
+
+
+def test_search_tags_bulk_lightweight_skips_usage_and_translation_tables(
+    base_session_factory: Callable[[], Session],
+    populated_base: None,
+) -> None:
+    """lightweight は TagUsageCounts / TagTranslation を一切 SELECT しない (Issue #1449)。"""
+    reader = TagReader(session_factory=base_session_factory)
+    keywords = [_tag_name(i) for i in range(1, 21)]
+    statements: list[str] = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(Engine, "before_cursor_execute", capture)
+    try:
+        reader.search_tags_bulk(
+            keywords, format_name=_FORMAT_NAME, resolve_preferred=True, lightweight=True
+        )
+        light_statements = list(statements)
+        statements.clear()
+        reader.search_tags_bulk(keywords, format_name=_FORMAT_NAME, resolve_preferred=True)
+        full_statements = list(statements)
+    finally:
+        event.remove(Engine, "before_cursor_execute", capture)
+
+    def count_of(table: str, stmts: list[str]) -> int:
+        return sum(1 for s in stmts if f"FROM {table}" in s.upper().replace(chr(34), ""))
+
+    # 使用回数は一切読まない。翻訳は keyword 照合 (tag_id 検索) に使う分だけで、
+    # preload の全件ロード分が消えるぶん通常モードより少ない。
+    assert count_of("TAG_USAGE_COUNTS", light_statements) == 0
+    assert count_of("TAG_USAGE_COUNTS", full_statements) > 0
+    assert count_of("TAG_TRANSLATIONS", light_statements) < count_of("TAG_TRANSLATIONS", full_statements)
+
+
+def test_search_tags_bulk_lightweight_keeps_base_status_with_type_only_patch(
+    merged: MergedTagReader,
+    user_session_factory: Callable[[], Session],
+) -> None:
+    """base alias に user type 補正だけがある場合も alias / preferred 解決が通常モードと一致する (Codex P1)。"""
+    alias_id = _ALIAS_BASE
+    with user_session_factory() as session:
+        session.add(
+            UserTagTypePatch(target_scope="base", target_tag_id=alias_id, format_id=_FORMAT_ID, type_id=0)
+        )
+        session.commit()
+    keywords = [_alias_name(1), _tag_name(2)]
+
+    full = merged.search_tags_bulk(keywords, format_name=_FORMAT_NAME, resolve_preferred=True)
+    light = merged.search_tags_bulk(
+        keywords, format_name=_FORMAT_NAME, resolve_preferred=True, lightweight=True
+    )
+
+    assert full[_alias_name(1)]["tag"] == _tag_name(1)
+    assert set(light) == set(full)
+    for keyword, expected in full.items():
+        for field in ("tag_id", "tag", "alias", "deprecated"):
+            assert light[keyword][field] == expected[field], f"{keyword}.{field}"
+
+
+def test_search_tags_bulk_lightweight_translation_match_avoids_per_keyword_search(
+    merged: MergedTagReader,
+    base_session_factory: Callable[[], Session],
+    user_session_factory: Callable[[], Session],
+) -> None:
+    """翻訳一致の keyword は tombstone が無ければ個別 search_tags に落ちない (Codex P2)。"""
+    with base_session_factory() as session:
+        for tag_id in range(1, 11):
+            session.add(TagTranslation(tag_id=tag_id, language="ja", translation=f"訳{tag_id}"))
+        session.commit()
+    keywords = [f"訳{i}" for i in range(1, 11)]
+
+    full = merged.search_tags_bulk(keywords, format_name=_FORMAT_NAME)
+    count_light, light = _count_statements(
+        lambda: merged.search_tags_bulk(keywords, format_name=_FORMAT_NAME, lightweight=True)
+    )
+    assert isinstance(light, dict)
+    assert {k: r["tag_id"] for k, r in light.items()} == {k: r["tag_id"] for k, r in full.items()}
+    assert len(light) == len(keywords)
+    # 個別 search_tags なら 10 keyword で数十本以上増える。bulk なら定数本に収まる。
+    assert count_light < 40
+
+    # tombstone を持つ tag は従来どおり再判定され、唯一の一致訳が消えれば結果から落ちる
+    with user_session_factory() as session:
+        session.add(
+            UserTagTranslationTombstone(
+                target_scope="base", target_tag_id=1, language="ja", translation="訳1"
+            )
+        )
+        session.commit()
+    full_t = merged.search_tags_bulk(keywords, format_name=_FORMAT_NAME)
+    light_t = merged.search_tags_bulk(keywords, format_name=_FORMAT_NAME, lightweight=True)
+    assert set(light_t) == set(full_t)
+
+
+def test_search_tags_bulk_lightweight_type_patch_without_format_matches_full(
+    merged: MergedTagReader,
+    user_session_factory: Callable[[], Session],
+) -> None:
+    """format 指定なしでも type 補正を持つ alias の解決が通常モードと一致する (Codex P2)。"""
+    with user_session_factory() as session:
+        session.add(
+            UserTagTypePatch(
+                target_scope="base", target_tag_id=_ALIAS_BASE, format_id=_FORMAT_ID, type_id=0
+            )
+        )
+        session.commit()
+    keywords = [_alias_name(1), _tag_name(2)]
+
+    full = merged.search_tags_bulk(keywords, resolve_preferred=True)
+    light = merged.search_tags_bulk(keywords, resolve_preferred=True, lightweight=True)
+
+    assert set(light) == set(full)
+    for keyword, expected in full.items():
+        for field in ("tag_id", "tag", "alias", "deprecated"):
+            assert light[keyword][field] == expected[field], f"{keyword}.{field}"
