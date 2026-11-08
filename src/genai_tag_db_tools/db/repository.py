@@ -3158,6 +3158,24 @@ class MergedTagReader:
                     merged[keyword] = fallback_rows[0]
                 else:
                     del merged[keyword]
+        if lightweight and self._has_user() and merged:
+            # user type 補正は他 format の base status を参照して alias / deprecated を決める
+            # (`_apply_user_patches_to_search_rows`)。lightweight は status を絞っているため、
+            # type 補正を持つ tag だけ通常モードで引き直す (Codex P2)。
+            type_patches = self._user_patches_by_tag(
+                "list_tag_type_patches_batch",
+                "list_tag_type_patches",
+                [row["tag_id"] for row in merged.values()],
+            )
+            patched_keywords = [kw for kw, row in merged.items() if type_patches.get(row["tag_id"])]
+            if patched_keywords:
+                merged.update(
+                    self.search_tags_bulk(
+                        patched_keywords,
+                        format_name=format_name,
+                        resolve_preferred=False,
+                    )
+                )
         if not resolve_preferred:
             return merged
         # Issue #148: 1 行ずつ呼ぶと内部の一括取得が行数ぶん走るため、まとめて 1 回で解決する。

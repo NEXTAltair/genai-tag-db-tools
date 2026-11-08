@@ -417,3 +417,26 @@ def test_search_tags_bulk_lightweight_translation_match_avoids_per_keyword_searc
     full_t = merged.search_tags_bulk(keywords, format_name=_FORMAT_NAME)
     light_t = merged.search_tags_bulk(keywords, format_name=_FORMAT_NAME, lightweight=True)
     assert set(light_t) == set(full_t)
+
+
+def test_search_tags_bulk_lightweight_type_patch_without_format_matches_full(
+    merged: MergedTagReader,
+    user_session_factory: Callable[[], Session],
+) -> None:
+    """format 指定なしでも type 補正を持つ alias の解決が通常モードと一致する (Codex P2)。"""
+    with user_session_factory() as session:
+        session.add(
+            UserTagTypePatch(
+                target_scope="base", target_tag_id=_ALIAS_BASE, format_id=_FORMAT_ID, type_id=0
+            )
+        )
+        session.commit()
+    keywords = [_alias_name(1), _tag_name(2)]
+
+    full = merged.search_tags_bulk(keywords, resolve_preferred=True)
+    light = merged.search_tags_bulk(keywords, resolve_preferred=True, lightweight=True)
+
+    assert set(light) == set(full)
+    for keyword, expected in full.items():
+        for field in ("tag_id", "tag", "alias", "deprecated"):
+            assert light[keyword][field] == expected[field], f"{keyword}.{field}"
