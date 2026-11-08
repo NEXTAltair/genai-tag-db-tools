@@ -575,7 +575,22 @@ class TagSearchPreloader:
             rows.extend(query.filter(column.in_(chunk)).all())
         return rows
 
-    def load(self, tag_ids: set[int]) -> PreloadedData:
+    def load(
+        self,
+        tag_ids: set[int],
+        *,
+        lightweight: bool = False,
+        format_id: int | None = None,
+    ) -> PreloadedData:
+        """検索結果の構築に要るデータを一括ロードする。
+
+        Args:
+            tag_ids: 対象 tag_id 集合。
+            lightweight: True のとき usage count と翻訳を読まず、status も `format_id` の
+                ものだけに絞る (canonical / tag_id 解決用、Issue #1449)。`format_id` が
+                None の場合は status も読まない。
+            format_id: lightweight 時に読む status の format_id。
+        """
         if not tag_ids:
             return PreloadedData(
                 format_name_by_id={},
@@ -587,14 +602,18 @@ class TagSearchPreloader:
                 statuses_by_tag_id={},
             )
 
-        initial_status_rows = self._query_in_chunks(
-            self.session.query(TagStatus), TagStatus.tag_id, tag_ids
-        )
+        status_query = self.session.query(TagStatus)
+        if lightweight:
+            # format 指定なしでは status は結果行に使われない (_resolve_status_info 参照)
+            status_query = status_query.filter(
+                TagStatus.format_id == (format_id if format_id is not None else -1)
+            )
+        initial_status_rows = self._query_in_chunks(status_query, TagStatus.tag_id, tag_ids)
         preferred_ids = {
             row.preferred_tag_id for row in initial_status_rows if row.preferred_tag_id is not None
         }
         status_tag_ids = set(tag_ids) | preferred_ids
-        status_rows = self._query_in_chunks(self.session.query(TagStatus), TagStatus.tag_id, status_tag_ids)
+        status_rows = self._query_in_chunks(status_query, TagStatus.tag_id, status_tag_ids)
         format_ids = {row.format_id for row in status_rows}
         format_name_by_id = {
             fmt.format_id: fmt.format_name
@@ -608,17 +627,23 @@ class TagSearchPreloader:
                 format_ids,
             )
         }
-        usage_by_key = {
-            (usage.tag_id, usage.format_id): usage.count
-            for usage in self._query_in_chunks(
-                self.session.query(TagUsageCounts), TagUsageCounts.tag_id, status_tag_ids
-            )
-        }
+        usage_by_key: dict[tuple[int, int], int] = {}
+        if not lightweight:
+            usage_by_key = {
+                (usage.tag_id, usage.format_id): usage.count
+                for usage in self._query_in_chunks(
+                    self.session.query(TagUsageCounts), TagUsageCounts.tag_id, status_tag_ids
+                )
+            }
         tags_by_id = {
             t.tag_id: t for t in self._query_in_chunks(self.session.query(Tag), Tag.tag_id, status_tag_ids)
         }
-        all_translations = self._query_in_chunks(
-            self.session.query(TagTranslation), TagTranslation.tag_id, status_tag_ids
+        all_translations = (
+            []
+            if lightweight
+            else self._query_in_chunks(
+                self.session.query(TagTranslation), TagTranslation.tag_id, status_tag_ids
+            )
         )
         trans_by_tag_id: dict[int, list[TagTranslation]] = {}
         for tr in all_translations:

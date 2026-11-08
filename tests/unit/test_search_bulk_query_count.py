@@ -303,3 +303,56 @@ def test_search_tags_bulk_alias_resolution_matches_search_tags(merged: MergedTag
         assert actual.get("tag") == expected.get("tag")
         assert actual.get("alias") == expected.get("alias")
         assert actual.get("translations") == expected.get("translations")
+
+
+def test_search_tags_bulk_lightweight_matches_canonical_fields(merged: MergedTagReader) -> None:
+    """lightweight でも canonical 解決に要る項目は通常モードと一致する (Issue #1449)。"""
+    keywords = [_tag_name(i) for i in range(1, 21)] + [_alias_name(i) for i in range(1, 11)]
+    full = merged.search_tags_bulk(keywords, format_name=_FORMAT_NAME, resolve_preferred=True)
+    light = merged.search_tags_bulk(
+        keywords, format_name=_FORMAT_NAME, resolve_preferred=True, lightweight=True
+    )
+
+    assert set(light) == set(full)
+    for keyword, expected in full.items():
+        for field in ("tag_id", "tag", "source_tag", "alias", "deprecated", "type_id", "type_name"):
+            assert light[keyword][field] == expected[field], f"{keyword}.{field}"
+
+    # format 指定なし (batch_resolve_tag_ids 相当) も tag_id が一致する
+    full_any = merged.search_tags_bulk(keywords)
+    light_any = merged.search_tags_bulk(keywords, lightweight=True)
+    assert {k: r["tag_id"] for k, r in light_any.items()} == {k: r["tag_id"] for k, r in full_any.items()}
+
+
+def test_search_tags_bulk_lightweight_skips_usage_and_translation_tables(
+    base_session_factory: Callable[[], Session],
+    populated_base: None,
+) -> None:
+    """lightweight は TagUsageCounts / TagTranslation を一切 SELECT しない (Issue #1449)。"""
+    reader = TagReader(session_factory=base_session_factory)
+    keywords = [_tag_name(i) for i in range(1, 21)]
+    statements: list[str] = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(Engine, "before_cursor_execute", capture)
+    try:
+        reader.search_tags_bulk(
+            keywords, format_name=_FORMAT_NAME, resolve_preferred=True, lightweight=True
+        )
+        light_statements = list(statements)
+        statements.clear()
+        reader.search_tags_bulk(keywords, format_name=_FORMAT_NAME, resolve_preferred=True)
+        full_statements = list(statements)
+    finally:
+        event.remove(Engine, "before_cursor_execute", capture)
+
+    def count_of(table: str, stmts: list[str]) -> int:
+        return sum(1 for s in stmts if f"FROM {table}" in s.upper().replace(chr(34), ""))
+
+    # 使用回数は一切読まない。翻訳は keyword 照合 (tag_id 検索) に使う分だけで、
+    # preload の全件ロード分が消えるぶん通常モードより少ない。
+    assert count_of("TAG_USAGE_COUNTS", light_statements) == 0
+    assert count_of("TAG_USAGE_COUNTS", full_statements) > 0
+    assert count_of("TAG_TRANSLATIONS", light_statements) < count_of("TAG_TRANSLATIONS", full_statements)

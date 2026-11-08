@@ -1252,6 +1252,7 @@ class OverlayTagReader:
         *,
         format_name: str | None = None,
         resolve_preferred: bool = False,
+        lightweight: bool = False,
     ) -> dict[str, TagSearchRow]:
         return {}
 
