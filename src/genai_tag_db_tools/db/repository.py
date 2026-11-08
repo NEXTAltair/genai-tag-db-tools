@@ -3094,8 +3094,8 @@ class MergedTagReader:
         resolve_preferred: bool = False,
         lightweight: bool = False,
     ) -> dict[str, TagSearchRow]:
-        # lightweight は base 検索の preload だけを軽くする (Issue #1449)。翻訳一致で選ばれた
-        # 行が user tombstone 後に不一致となる場合は、下の per-keyword フォールバックが救う。
+        # lightweight は base 検索の preload だけを軽くする (Issue #1449)。翻訳は読まないため、
+        # 翻訳一致の再判定は tombstone を持つ tag に限って行う (下の dropped 判定)。
         light_kwargs: dict[str, bool] = {"lightweight": True} if lightweight else {}
         requested_format_ids = self._requested_format_ids(format_name)
         merged: dict[str, TagSearchRow] = self._merge_by_key(
@@ -3121,8 +3121,14 @@ class MergedTagReader:
                 requested_format_ids,
             )
             for keyword, row in patched_candidates.items():
-                if row["tag_id"] in patched_tag_ids:
-                    merged[keyword] = row
+                if row["tag_id"] not in patched_tag_ids:
+                    continue
+                # lightweight の format=None 行は status を持たない。同一 tag なら要求 format の
+                # base status (alias / deprecated 等) を持つ既存行を保持する (Codex P1)。
+                existing = merged.get(keyword)
+                if lightweight and existing is not None and existing["tag_id"] == row["tag_id"]:
+                    continue
+                merged[keyword] = row
         if merged:
             requested_format_id = self._requested_format_id(format_name)
             patched = self._apply_user_patches_to_search_rows(
@@ -3139,6 +3145,11 @@ class MergedTagReader:
                 for keyword, row in merged.items()
                 if not self._row_still_matches_keyword(row, keyword)
             ]
+            if lightweight and dropped:
+                # lightweight は翻訳を読まないため翻訳一致の行が全て不一致に見える。
+                # tombstone を持つ tag だけを再検索対象に絞る (Codex P2)。
+                tombstones = self._translation_tombstones_batch([merged[kw]["tag_id"] for kw in dropped])
+                dropped = [kw for kw in dropped if tombstones.get(merged[kw]["tag_id"])]
             for keyword in dropped:
                 fallback_rows = self.search_tags(
                     keyword, partial=False, format_name=format_name, resolve_preferred=False
