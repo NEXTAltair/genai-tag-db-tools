@@ -460,6 +460,8 @@ converted = searcher.convert_tag("1girl", "danbooru")
 
 **主要フィルタ**:
 - `query`: 検索クエリ文字列
+- `literal`: `*` / `%` を文字として扱う完全一致 (`partial` より優先)。既定は False で、この 2 文字はワイルドカード。
+  `search_tags_bulk` / `search_tags_batch` と `register_tag` の存在確認は常に文字として扱う
 - `format_names`: フォーマット指定
 - `type_names`: タグタイプ指定（character, copyright, artistなど）
 - `min_usage` / `max_usage`: 使用回数範囲

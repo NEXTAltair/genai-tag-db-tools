@@ -82,7 +82,8 @@ class OverlayTagReader:
 
     def get_tag_id_by_name(self, keyword: str, partial: bool = False) -> int | None:
         """キーワードで USER_TAGS の tag を検索し、最初に一致した tag_id を返す。"""
-        keyword, use_like = normalize_search_keyword(keyword, partial)
+        # 登録時の存在確認に使うため、partial=False は常にリテラル一致 (LoRAIro #1620)
+        keyword, use_like = normalize_search_keyword(keyword, partial, literal=not partial)
         with self.session_factory() as session:
             query = session.query(UserTag)
             if use_like:
@@ -514,6 +515,7 @@ class OverlayTagReader:
         alias: bool | None = None,
         deprecated: bool | None = None,
         resolve_preferred: bool = False,
+        literal: bool = False,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[TagSearchRow]:
@@ -530,7 +532,7 @@ class OverlayTagReader:
           単一 format 指定時は ``usage_count`` を実値で返す (#84)。
         - ``language`` フィルタを ``USER_TAG_TRANSLATION_PATCH`` に対して適用する。
         """
-        keyword, use_like = normalize_search_keyword(keyword, partial)
+        keyword, use_like = normalize_search_keyword(keyword, partial, literal=literal)
         concrete_format_names = self._concrete_names(
             format_names or ([format_name] if format_name else None)
         )
@@ -1277,7 +1279,11 @@ class OverlayTagReader:
             if not cleaned or cleaned in result:
                 continue
             rows = self.search_tags(
-                cleaned, partial=False, format_name=format_name, resolve_preferred=resolve_preferred
+                cleaned,
+                partial=False,
+                literal=True,
+                format_name=format_name,
+                resolve_preferred=resolve_preferred,
             )
             if rows:
                 result[cleaned] = rows

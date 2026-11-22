@@ -53,7 +53,8 @@ class TagReader:
             self.session_factory = get_session_factory()
 
     def get_tag_id_by_name(self, keyword: str, partial: bool = False) -> int | None:
-        keyword, use_like = normalize_search_keyword(keyword, partial)
+        # 登録時の存在確認に使うため、partial=False は常にリテラル一致 (LoRAIro #1620)
+        keyword, use_like = normalize_search_keyword(keyword, partial, literal=not partial)
 
         with self.session_factory() as session:
             query = session.query(Tag)
@@ -384,10 +385,11 @@ class TagReader:
         alias: bool | None = None,
         deprecated: bool | None = None,
         resolve_preferred: bool = False,
+        literal: bool = False,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[TagSearchRow]:
-        keyword, use_like = normalize_search_keyword(keyword, partial)
+        keyword, use_like = normalize_search_keyword(keyword, partial, literal=literal)
 
         with self.session_factory() as session:
             builder = TagSearchQueryBuilder(session)
@@ -2394,6 +2396,7 @@ class MergedTagReader:
         keyword: str,
         *,
         partial: bool,
+        literal: bool = False,
         type_name: str | None,
         type_names: list[str] | None,
         language: str | None,
@@ -2402,7 +2405,7 @@ class MergedTagReader:
         alias: bool | None,
         deprecated: bool | None,
     ) -> bool:
-        normalized, use_like = normalize_search_keyword(keyword, partial)
+        normalized, use_like = normalize_search_keyword(keyword, partial, literal=literal)
         tag_values = [row["tag"], row.get("source_tag") or ""]
         translation_values: list[str] = []
         for values in row.get("translations", {}).values():
@@ -2453,6 +2456,7 @@ class MergedTagReader:
             row,
             keyword,
             partial=False,
+            literal=True,
             type_name=None,
             type_names=None,
             language=None,
@@ -2467,12 +2471,13 @@ class MergedTagReader:
         keyword: str,
         *,
         partial: bool,
+        literal: bool = False,
         language: str | None,
     ) -> list[TagSearchRow]:
         if not self._has_user():
             return []
         assert self.user_repo is not None
-        normalized, use_like = normalize_search_keyword(keyword, partial)
+        normalized, use_like = normalize_search_keyword(keyword, partial, literal=literal)
         # 翻訳は大小を区別する (Issue #139)。部分一致 (LIKE) は SQLite 既定に合わせて畳む。
         needle = normalized.strip("%").casefold() if use_like else normalized
         rows: list[TagSearchRow] = []
@@ -2931,6 +2936,7 @@ class MergedTagReader:
         alias: bool | None = None,
         deprecated: bool | None = None,
         resolve_preferred: bool = False,
+        literal: bool = False,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[TagSearchRow]:
@@ -2951,6 +2957,7 @@ class MergedTagReader:
             alias=None,
             deprecated=None,
             resolve_preferred=False,
+            literal=literal,
         )
         if self._has_user() and requested_format_ids:
             rows.extend(
@@ -2970,6 +2977,7 @@ class MergedTagReader:
                     alias=None,
                     deprecated=None,
                     resolve_preferred=False,
+                    literal=literal,
                 )
                 if self._row_has_user_status_patch(row, requested_format_ids)
             )
@@ -2977,6 +2985,7 @@ class MergedTagReader:
             self._base_rows_for_user_translation_matches(
                 keyword,
                 partial=partial,
+                literal=literal,
                 language=language,
             )
         )
@@ -2992,6 +3001,7 @@ class MergedTagReader:
                 row,
                 keyword,
                 partial=partial,
+                literal=literal,
                 type_name=type_name,
                 type_names=type_names,
                 language=language,
@@ -3028,7 +3038,7 @@ class MergedTagReader:
         """
         needle = tag.casefold()
         for repo in self._iter_base_repos():
-            for base_row in repo.search_tags(tag, partial=False):
+            for base_row in repo.search_tags(tag, partial=False, literal=True):
                 if base_row["tag_id"] != exclude_tag_id and base_row["tag"].casefold() == needle:
                     return True
         return False
@@ -3152,7 +3162,11 @@ class MergedTagReader:
                 dropped = [kw for kw in dropped if tombstones.get(merged[kw]["tag_id"])]
             for keyword in dropped:
                 fallback_rows = self.search_tags(
-                    keyword, partial=False, format_name=format_name, resolve_preferred=False
+                    keyword,
+                    partial=False,
+                    literal=True,
+                    format_name=format_name,
+                    resolve_preferred=False,
                 )
                 if fallback_rows:
                     merged[keyword] = fallback_rows[0]
@@ -3183,10 +3197,13 @@ class MergedTagReader:
         resolved_rows = self._resolve_cross_scope_preferred([merged[kw] for kw in keywords_in_order])
         merged = dict(zip(keywords_in_order, resolved_rows, strict=True))
         # OverlayTagReader.search_tags_bulk がスタブのため、未解決キーワードを
-        # 個別 search_tags で補完する (cross-scope preferred 解決を含む)
+        # 個別 search_tags で補完する (cross-scope preferred 解決を含む)。
+        # bulk は完全一致の API なので、補完も `*` / `%` を文字として扱う (LoRAIro #1620)
         missing = [kw for kw in keywords if kw not in merged]
         for kw in missing:
-            rows = self.search_tags(kw, partial=False, format_name=format_name, resolve_preferred=True)
+            rows = self.search_tags(
+                kw, partial=False, literal=True, format_name=format_name, resolve_preferred=True
+            )
             if rows:
                 merged[kw] = rows[0]
         return merged
