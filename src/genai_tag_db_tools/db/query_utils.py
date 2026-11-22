@@ -84,8 +84,13 @@ def contains_like_pattern(substring: str) -> str:
     return f"%{escaped}%"
 
 
-def normalize_search_keyword(keyword: str, partial: bool) -> tuple[str, bool]:
-    """Normalize a search keyword for SQL LIKE conditions."""
+def normalize_search_keyword(keyword: str, partial: bool, *, literal: bool = False) -> tuple[str, bool]:
+    """Normalize a search keyword for SQL LIKE conditions.
+
+    literal=True は `*` / `%` も文字として扱う完全一致で、partial より優先する (LoRAIro #1620)。
+    """
+    if literal:
+        return keyword, False
     has_wildcard = "*" in keyword or "%" in keyword or partial
     if "*" in keyword:
         keyword = keyword.replace("*", "%")

@@ -358,6 +358,10 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
         "resolve_preferred": request.resolve_preferred,
     }
 
+    # literal 引数を持たない reader 実装でも既定の検索は動くよう、指定時だけ渡す
+    if request.literal:
+        common_kwargs["literal"] = True
+
     # フィルタの正本は repository (filtered_tag_ids) に一元化する。core_api 側で行を再フィルタ
     # しない: build_row は単一 format でないと usage_count/deprecated 等を 0/False で返すため、
     # Python 側で再判定すると repository が正しく拾った行を落としてしまう (#45)。

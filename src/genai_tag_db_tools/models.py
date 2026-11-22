@@ -105,6 +105,7 @@ class TagSearchRequest(BaseModel):
 
     Args:
         query: 検索クエリ。
+        literal: `*` / `%` を文字として扱う完全一致。partial より優先する。
         format_names: 対象フォーマット名の絞り込み。
         type_names: 対象タイプ名の絞り込み。
         resolve_preferred: 推奨タグへ正規化して返す。
@@ -116,6 +117,7 @@ class TagSearchRequest(BaseModel):
 
     query: str = Field(..., description="Search query")
     partial: bool = Field(default=True, description="Use partial matching")
+    literal: bool = Field(default=False, description="Exact match treating * and % as literal characters")
     format_names: list[str] | None = Field(default=None, description="Format name filters")
     type_names: list[str] | None = Field(default=None, description="Type name filters")
     resolve_preferred: bool = Field(default=True, description="Resolve to preferred tags")
