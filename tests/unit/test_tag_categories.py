@@ -392,6 +392,49 @@ def test_category_search_returns_categorized_row_not_colliding_tag(env) -> None:
     assert [(item.tag_id, item.tag) for item in items] == [(4, "smile")]
 
 
+def test_user_translation_on_colliding_tag_does_not_replace_categorized_row(db_files) -> None:
+    """最優先 DB の同じ ID の別タグ (4, "cat") に user 翻訳があっても、分類付きの (4, "smile") を返す。
+
+    翻訳由来の候補が ID の重複排除で分類付きの行を上書きし、その後の所属チェックで両方とも落ちて
+    0 件になっていた (PR #156 Codex P2)。
+    """
+    engine = create_engine(f"sqlite:///{db_files['user']}")
+    with Session(engine) as session:
+        session.add(
+            UserTagTranslationPatch(target_scope="base", target_tag_id=4, language="ja", translation="猫")
+        )
+        session.commit()
+    engine.dispose()
+    state = _Env()
+    reader = MergedTagReader(
+        base_repo=[
+            TagReader(state.factory("old", db_files["old"])),
+            TagReader(state.factory("cat", db_files["cat"])),
+        ],
+        user_repo=OverlayTagReader(state.factory("user", db_files["user"])),
+    )
+    try:
+        for request in (
+            TagSearchRequest(query="", category_ids=["pm-face"]),
+            TagSearchRequest(query="", category_ids=["pm-face"], resolve_preferred=False),
+        ):
+            items = search_tags(reader, request).items
+            assert [(item.tag_id, item.tag) for item in items] == [(4, "smile")]
+        paged = search_tags(reader, TagSearchRequest(query="", category_ids=["pm-face"], limit=1))
+        assert [(item.tag_id, item.tag) for item in paged.items] == [(4, "smile")]
+        assert paged.total is None
+        # 翻訳で一致する cat は分類に所属しないので、分類条件付きでは返さない
+        assert _ids(reader, query="猫", partial=False, category_ids=["pm-face"]) == []
+        # 分類条件なしの検索は従来どおり翻訳由来の行 (cat) を返す
+        assert [
+            (i.tag_id, i.tag)
+            for i in search_tags(reader, TagSearchRequest(query="猫", partial=False)).items
+        ] == [(4, "cat")]
+    finally:
+        for engine in state.engines.values():
+            engine.dispose()
+
+
 def test_category_filter_is_applied_before_paging_without_duplicates(env) -> None:
     _, reader = env
     pages = []

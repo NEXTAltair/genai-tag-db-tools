@@ -3060,23 +3060,23 @@ class MergedTagReader:
                 )
                 if self._row_has_user_status_patch(row, requested_format_ids)
             )
-        rows.extend(
-            self._base_rows_for_user_translation_matches(
-                keyword,
-                partial=partial,
-                literal=literal,
-                language=language,
-            )
+        translation_rows = self._base_rows_for_user_translation_matches(
+            keyword,
+            partial=partial,
+            literal=literal,
+            language=language,
         )
-        deduped = {row["tag_id"]: row for row in rows}
-        merged_rows = [deduped[tag_id] for tag_id in sorted(deduped)]
         if category_ids:
-            # user 翻訳パッチ経由で足した行は分類 SQL を通っていないため、ここで所属を確かめる。
-            merged_rows = self._filter_rows_by_categories(
-                merged_rows, category_ids, include_descendants=include_descendant_categories
+            # user 翻訳パッチ経由の行は分類 SQL を通っていない。ID の重複排除より前に所属を確かめ、
+            # 別 DB の同じ ID の無関係なタグが分類付きの行を置き換えないようにする (PR #156 Codex P2)。
+            # 各 base DB の行は、その DB の分類テーブルで所属を解決済み。
+            translation_rows = self._filter_rows_by_categories(
+                translation_rows, category_ids, include_descendants=include_descendant_categories
             )
+        rows.extend(translation_rows)
+        deduped = {row["tag_id"]: row for row in rows}
         rows = self._apply_user_patches_to_search_rows(
-            merged_rows,
+            [deduped[tag_id] for tag_id in sorted(deduped)],
             requested_format_id=requested_format_id,
         )
         rows = [
@@ -3146,10 +3146,13 @@ class MergedTagReader:
         *,
         include_descendants: bool,
     ) -> list[TagSearchRow]:
+        """行の (tag_id, tag) が指定分類 (と子孫) のいずれかに所属する行だけを残す。"""
+        if not rows:
+            return []
         targets: set[str] = set()
         for repo in self._iter_base_repos():
             targets |= repo.expand_category_ids(category_ids, include_descendants=include_descendants)
-        if not targets or not rows:
+        if not targets:
             return []
         memberships = self._merge_category_candidates(
             self._category_candidates([row["tag_id"] for row in rows]),
