@@ -23,6 +23,7 @@ class TestListCommands:
         assert {t["name"] for t in tools} == {
             "ensure-dbs",
             "search",
+            "categories",
             "register",
             "stats",
             "convert",
@@ -31,7 +32,7 @@ class TestListCommands:
             "recommend/translation",
             "recommend/record",
         }
-        assert objs[-1] == {"kind": "result", "ok": True, "message": "commands listed", "count": 9}
+        assert objs[-1] == {"kind": "result", "ok": True, "message": "commands listed", "count": 10}
 
     def test_side_effects_and_read_only(self, capsys: pytest.CaptureFixture[str]) -> None:
         tools = {
@@ -41,6 +42,8 @@ class TestListCommands:
         }
         assert tools["search"]["read_only"] is True
         assert tools["search"]["side_effects"] == ["db_read"]
+        assert tools["categories"]["read_only"] is True
+        assert tools["categories"]["side_effects"] == ["db_read"]
         assert tools["register"]["read_only"] is False
         assert tools["register"]["side_effects"] == ["db_write"]
         assert tools["ensure-dbs"]["side_effects"] == ["network_read", "file_write"]

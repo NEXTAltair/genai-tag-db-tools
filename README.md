@@ -101,12 +101,14 @@ uv run python -m genai_tag_db_tools --gui
 
 ### CLIコマンド
 
-`tag-db` の各コマンド (`search` / `register` / `stats` / `convert` / `ensure-dbs` /
+`tag-db` の各コマンド (`search` / `categories` / `register` / `stats` / `convert` / `ensure-dbs` /
 `aliases register` / `feedback`) は機械可読な JSONL を stdout に出力する（人間可読なログ・
 進捗は stderr）。出力形式・標準エラーコード・exit code・副作用区分・非対話実行の契約は
 [docs/cli.md](docs/cli.md) を参照。`describe` / `list-commands` で各コマンドの入出力モデルと
 副作用分類も JSONL として取得できる。
 
+- `categories`：公開 base DB の検索分類 (namespace / 階層) を一覧。`search --category-id` で分類条件付き検索
+  （[docs/tag-categories.md](docs/tag-categories.md)）
 - `aliases register`：JSONL/CSV から alias を一括登録（既定 dry-run、`--apply` で user DB へ書き込み）
 - `feedback validate-base-patches` / `export-base-patches` / `apply-base-patches`：base DB
   correction patch の検証・出力・適用パイプライン
@@ -366,6 +368,12 @@ from genai_tag_db_tools import (
     search_tags,
     update_tags_type_batch,
 
+    # 検索分類（公開 base DB の TAG_CATEGORIES）
+    get_tag_category_database_info,
+    list_tag_categories,
+    list_tag_category_namespaces,
+    get_tag_categories_batch,
+
     # リコメンド（advisory）
     needs_manual_refinement,
     recommend_manual_refinement,
@@ -382,10 +390,13 @@ from genai_tag_db_tools import (
     get_user_repository,
     create_tag_register_service,
     TagReaderProtocol,
+    TagCategoryReaderProtocol,
     TagRegisterServiceProtocol,
     TagWriterProtocol,
 
     # Pydantic モデル
+    TagCategory,
+    TagCategoryDatabaseInfo,
     RefinementRecommendation,
     RefinementReason,
     RefinementSuggestion,
@@ -467,6 +478,15 @@ converted = searcher.convert_tag("1girl", "danbooru")
 - `min_usage` / `max_usage`: 使用回数範囲
 - `include_aliases`: エイリアスを含むか
 - `resolve_preferred`: 推奨タグに解決するか
+- `category_ids` / `include_descendant_categories`: 検索分類による絞り込み（複数指定は OR、既定で子孫分類を含む）。
+  分類だけで探すときは `query=""`。詳細は [docs/tag-categories.md](docs/tag-categories.md)
+
+#### 検索分類の読み取り
+
+`list_tag_categories(reader, namespace=None)` / `list_tag_category_namespaces(reader)` /
+`get_tag_categories_batch(reader, tag_ids)` / `get_tag_category_database_info(reader)`。
+分類テーブルの無い旧 DB では空（`has_categories=False`）を返し、通常の検索には影響しない。
+仕様は [docs/tag-categories.md](docs/tag-categories.md)。
 
 #### `get_statistics(repo) -> TagStatisticsResult`
 

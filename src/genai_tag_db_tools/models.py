@@ -111,6 +111,9 @@ class TagSearchRequest(BaseModel):
         resolve_preferred: 推奨タグへ正規化して返す。
         include_aliases: エイリアスを含める。
         include_deprecated: 非推奨タグを含める。
+        category_ids: 検索分類の絞り込み (複数指定は OR)。分類だけで探す場合は
+            query="" (partial) を使う。
+        include_descendant_categories: category_ids の子孫分類に所属するタグも含める。
         limit: 取得件数。
         offset: 取得オフセット。
     """
@@ -125,8 +128,76 @@ class TagSearchRequest(BaseModel):
     include_deprecated: bool = Field(default=False, description="Include deprecated tags")
     min_usage: int | None = Field(default=None, description="Minimum usage count")
     max_usage: int | None = Field(default=None, description="Maximum usage count")
+    category_ids: list[str] | None = Field(
+        default=None,
+        description="Search category filters (OR). Matches tags that belong to any of the categories.",
+    )
+    include_descendant_categories: bool = Field(
+        default=True, description="Also match tags in descendant categories of category_ids"
+    )
     limit: int | None = Field(default=None, ge=1, description="Maximum number of items to return")
     offset: int = Field(default=0, ge=0, description="Number of items to skip")
+
+
+class TagCategory(BaseModel):
+    """検索分類のノード (公開 base DB の TAG_CATEGORIES、Issue #153)。
+
+    booru のタグ type (general / artist / character 等) とは別の情報。
+
+    Args:
+        category_id: namespace と path から作られた安定 ID。DB を跨いで同じ分類を指す。
+        namespace: 分類体系の名前。namespace を跨いだ意味の統合はしていない。
+        parent_id: 親ノードの category_id。ルートは None。
+        label: ノードの表示ラベル (path の末尾)。
+        depth: 階層の深さ。ルートが 1。
+        path: ルートからこのノードまでのラベル列。
+    """
+
+    category_id: str = Field(..., description="Stable category id")
+    namespace: str = Field(..., description="Category namespace")
+    parent_id: str | None = Field(default=None, description="Parent category id (None for roots)")
+    label: str = Field(..., description="Category label")
+    depth: int = Field(..., ge=1, description="Depth (root = 1)")
+    path: list[str] = Field(..., description="Labels from the root to this node")
+    model_config = {"frozen": True}
+
+
+class TagCategoryDatabaseInfo(BaseModel):
+    """base DB 1 つ分の検索分類の収録状況。
+
+    Args:
+        version: DATABASE_METADATA の version。未収録なら None。
+        has_categories: 分類テーブル (TAG_CATEGORIES / TAG_CATEGORY_MEMBERSHIPS) があるか。
+        category_count: 分類ノード数。テーブルが無ければ 0。
+        membership_count: タグと分類の所属関係の数。テーブルが無ければ 0。
+    """
+
+    version: str | None = Field(default=None, description="DATABASE_METADATA version")
+    has_categories: bool = Field(..., description="Whether the category tables exist")
+    category_count: int = Field(default=0, ge=0, description="Number of category nodes")
+    membership_count: int = Field(default=0, ge=0, description="Number of tag-category memberships")
+
+
+class TagCategoryListRequest(BaseModel):
+    """検索分類一覧の取得条件 (CLI `categories`)。
+
+    Args:
+        namespace: 指定した namespace のノードだけを返す。None なら全 namespace。
+    """
+
+    namespace: str | None = Field(default=None, description="Category namespace filter")
+
+
+class TagCategoryListResult(BaseModel):
+    """検索分類一覧の取得結果 (CLI `categories`)。
+
+    Args:
+        items: 分類ノード (namespace, path 順)。
+        databases: base DB ごとの収録状況 (優先順)。
+    """
+
+    items: list[TagCategory] = Field(..., description="Category nodes")
+    databases: list[TagCategoryDatabaseInfo] = Field(..., description="Per base DB category availability")
 
 
 class TagIdRef(BaseModel):
