@@ -66,14 +66,6 @@ def test_search_tags_filters_by_format_type_language(session_factory: Callable[[
     assert row["translations"]["ja"] == ["alpha_ja"]
 
 
-def test_convert_tag_is_not_implemented(session_factory: Callable[[], Session]) -> None:
-    reader = TagReader(session_factory)
-    searcher = TagSearcher(MergedTagReader(base_repo=reader))
-
-    with pytest.raises(NotImplementedError):
-        searcher.convert_tag("old_tag", format_id=1)
-
-
 def test_get_formats_languages_types(session_factory: Callable[[], Session]) -> None:
     reader = TagReader(session_factory)
     merged_reader = MergedTagReader(base_repo=reader)
