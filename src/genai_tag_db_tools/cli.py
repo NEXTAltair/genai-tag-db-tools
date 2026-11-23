@@ -11,7 +11,9 @@ from genai_tag_db_tools.core_api import (
     default_sources,
     ensure_databases,
     get_statistics,
+    get_tag_category_database_info,
     initialize_databases,
+    list_tag_categories,
     register_tag,
     search_tags,
 )
@@ -192,6 +194,9 @@ def cmd_search(args: argparse.Namespace) -> None:
         resolve_preferred=args.resolve_preferred,
         include_aliases=args.include_aliases,
         include_deprecated=args.include_deprecated,
+        # 分類オプション追加前の Namespace を組み立てる呼び出し側でも動くよう getattr で読む
+        category_ids=getattr(args, "category_id", None) or None,
+        include_descendant_categories=not getattr(args, "no_category_descendants", False),
         limit=limit,
         offset=args.offset,
     )
@@ -236,6 +241,16 @@ def cmd_register(args: argparse.Namespace) -> None:
         created=result.created,
         tag_id=result.tag_id,
     )
+
+
+def cmd_categories(args: argparse.Namespace) -> None:
+    _set_db_paths(args.base_db, args.user_db_dir)
+    repo = get_default_reader()
+    categories = list_tag_categories(repo, args.namespace)
+    for category in categories:
+        emit_item(category)
+    databases = [info.model_dump() for info in get_tag_category_database_info(repo)]
+    emit_result("categories listed", count=len(categories), databases=databases)
 
 
 def cmd_stats(args: argparse.Namespace) -> None:
@@ -640,6 +655,20 @@ def build_parser(prog: str = "tag-db") -> argparse.ArgumentParser:
     search_parser.add_argument("--include-aliases", action="store_true")
     search_parser.add_argument("--include-deprecated", action="store_true")
     search_parser.add_argument(
+        "--category-id",
+        action="append",
+        help=(
+            "Search category id filter (see `categories`). Repeat for multiple (OR). "
+            "Descendant categories are included unless --no-category-descendants. "
+            'Use --query "" to search by category only.'
+        ),
+    )
+    search_parser.add_argument(
+        "--no-category-descendants",
+        action="store_true",
+        help="Match only the given --category-id nodes, not their descendants.",
+    )
+    search_parser.add_argument(
         "--exact",
         action="store_true",
         help="Use exact matching (partial match is default).",
@@ -658,6 +687,14 @@ def build_parser(prog: str = "tag-db") -> argparse.ArgumentParser:
     )
     _add_base_db_args(search_parser)
     search_parser.set_defaults(func=cmd_search)
+
+    categories_parser = subparsers.add_parser(
+        "categories",
+        help="List search categories (namespace / parent_id / path) of the base DBs.",
+    )
+    categories_parser.add_argument("--namespace", help="Only list categories in this namespace.")
+    _add_base_db_args(categories_parser)
+    categories_parser.set_defaults(func=cmd_categories)
 
     register_parser = subparsers.add_parser("register", help="Register a tag.")
     register_parser.add_argument("--tag", required=True)

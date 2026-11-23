@@ -30,7 +30,7 @@ from genai_tag_db_tools.db.schema import (
     UserTagTypePatch,
     UserTagUsagePatch,
 )
-from genai_tag_db_tools.models import TagSearchRow
+from genai_tag_db_tools.models import TagCategory, TagCategoryDatabaseInfo, TagSearchRow
 
 
 class OverlayTagReader:
@@ -516,6 +516,8 @@ class OverlayTagReader:
         deprecated: bool | None = None,
         resolve_preferred: bool = False,
         literal: bool = False,
+        category_ids: list[str] | None = None,
+        include_descendant_categories: bool = True,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[TagSearchRow]:
@@ -531,7 +533,10 @@ class OverlayTagReader:
         - ``min_usage`` / ``max_usage`` を ``USER_TAG_USAGE_PATCH`` に対して適用し、
           単一 format 指定時は ``usage_count`` を実値で返す (#84)。
         - ``language`` フィルタを ``USER_TAG_TRANSLATION_PATCH`` に対して適用する。
+        - user DB は検索分類を持たない (Issue #153)。``category_ids`` 指定時は空を返す。
         """
+        if category_ids:
+            return []
         keyword, use_like = normalize_search_keyword(keyword, partial, literal=literal)
         concrete_format_names = self._concrete_names(
             format_names or ([format_name] if format_name else None)
@@ -1247,6 +1252,26 @@ class OverlayTagReader:
 
     def get_metadata_value(self, key: str) -> str | None:
         return None
+
+    # 検索分類 (Issue #153): user DB は分類テーブルを持たず、作成もしない。
+
+    def has_tag_categories(self) -> bool:
+        return False
+
+    def list_tag_categories(self, namespace: str | None = None) -> list[TagCategory]:
+        return []
+
+    def get_tag_categories_batch(self, tag_ids: list[int]) -> dict[int, list[TagCategory]]:
+        return {}
+
+    def get_tag_category_rows(self, tag_ids: list[int]) -> dict[int, tuple[str, list[TagCategory]]]:
+        return {}
+
+    def get_tag_category_database_info(self) -> TagCategoryDatabaseInfo:
+        return TagCategoryDatabaseInfo(version=None, has_categories=False)
+
+    def expand_category_ids(self, category_ids: list[str], *, include_descendants: bool) -> set[str]:
+        return set()
 
     def search_tags_bulk(
         self,

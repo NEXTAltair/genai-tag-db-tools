@@ -199,6 +199,38 @@ class DatabaseMetadata(Base):
     value: Mapped[str] = mapped_column()
 
 
+# --- 検索分類 (公開 base DB の読み取り専用テーブル、Issue #153) ---
+# 正本は dataset builder の core/enrichment.py。Base とは別の DeclarativeBase にして、
+# read-only 初期化の必須テーブル判定と user DB の create_all に含めない
+# (分類テーブルの無い旧 DB をそのまま読めるようにし、base DB へ作成・migration しない)。
+
+
+class TagCategoryBase(DeclarativeBase):
+    pass
+
+
+class TagCategoryNode(TagCategoryBase):
+    """検索分類のノード。``path`` は階層ラベル配列の JSON 文字列。"""
+
+    __tablename__ = "TAG_CATEGORIES"
+
+    category_id: Mapped[str] = mapped_column(primary_key=True)
+    namespace: Mapped[str] = mapped_column()
+    parent_id: Mapped[str | None] = mapped_column(nullable=True)
+    label: Mapped[str] = mapped_column()
+    depth: Mapped[int] = mapped_column()
+    path: Mapped[str] = mapped_column()
+
+
+class TagCategoryMembership(TagCategoryBase):
+    """タグと検索分類の所属関係。タグは複数の分類に所属できる。"""
+
+    __tablename__ = "TAG_CATEGORY_MEMBERSHIPS"
+
+    tag_id: Mapped[int] = mapped_column(primary_key=True)
+    category_id: Mapped[str] = mapped_column(primary_key=True)
+
+
 # --- Overlay schema (user DB 専用) ---
 # Base とは別の DeclarativeBase を使い、user DB にのみ作成する。
 

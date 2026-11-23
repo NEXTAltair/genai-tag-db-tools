@@ -1,4 +1,4 @@
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from logging import getLogger
 from typing import TYPE_CHECKING, Any, cast
@@ -33,7 +33,15 @@ from genai_tag_db_tools.db.schema import (
     UserTagStatusPatch,
     UserTagTypePatch,
 )
-from genai_tag_db_tools.models import TagSearchRow
+from genai_tag_db_tools.db.tag_category_queries import (
+    categories_by_tag,
+    category_counts,
+    category_ids_select,
+    category_sort_key,
+    has_category_tables,
+    list_categories,
+)
+from genai_tag_db_tools.models import TagCategory, TagCategoryDatabaseInfo, TagSearchRow
 from genai_tag_db_tools.utils.messages import ErrorMessages
 
 # Reserve format_id range 1-999 for base DBs, 1000+ for user DBs
@@ -172,6 +180,58 @@ class TagReader:
 
     def get_database_version(self) -> str | None:
         return self.get_metadata_value("version")
+
+    def has_tag_categories(self) -> bool:
+        """この DB に検索分類テーブルがあるかを返す。"""
+        with self.session_factory() as session:
+            return has_category_tables(session)
+
+    def list_tag_categories(self, namespace: str | None = None) -> list[TagCategory]:
+        """検索分類ノードを返す。分類テーブルの無い DB では空。"""
+        with self.session_factory() as session:
+            if not has_category_tables(session):
+                return []
+            return list_categories(session, namespace)
+
+    def get_tag_categories_batch(self, tag_ids: list[int]) -> dict[int, list[TagCategory]]:
+        """この DB の tag_id → 所属分類を一括取得する。分類の無い tag_id はキーを持たない。"""
+        return {
+            tag_id: categories for tag_id, (_, categories) in self.get_tag_category_rows(tag_ids).items()
+        }
+
+    def get_tag_category_rows(self, tag_ids: list[int]) -> dict[int, tuple[str, list[TagCategory]]]:
+        """この DB の tag_id → (TAGS.tag, 所属分類) を 1 文で取得する (DB 間の ID 衝突の照合用)。"""
+        if not tag_ids:
+            return {}
+        with self.session_factory() as session:
+            if not has_category_tables(session):
+                return {}
+            return categories_by_tag(session, tag_ids)
+
+    def get_tag_category_database_info(self) -> TagCategoryDatabaseInfo:
+        """この DB の version と検索分類の収録状況を返す。"""
+        with self.session_factory() as session:
+            row = session.query(DatabaseMetadata).filter(DatabaseMetadata.key == "version").one_or_none()
+            version = row.value if row else None
+            if not has_category_tables(session):
+                return TagCategoryDatabaseInfo(version=version, has_categories=False)
+            node_count, membership_count = category_counts(session)
+            return TagCategoryDatabaseInfo(
+                version=version,
+                has_categories=True,
+                category_count=node_count,
+                membership_count=membership_count,
+            )
+
+    def expand_category_ids(self, category_ids: list[str], *, include_descendants: bool) -> set[str]:
+        """この DB の階層で、指定分類 (と子孫) の category_id を返す。存在しない ID は含めない。"""
+        if not category_ids:
+            return set()
+        with self.session_factory() as session:
+            if not has_category_tables(session):
+                return set()
+            selectable = category_ids_select(category_ids, include_descendants=include_descendants)
+            return {row[0] for row in session.execute(selectable)}
 
     def get_format_id(self, format_name: str) -> int:
         with self.session_factory() as session:
@@ -386,12 +446,18 @@ class TagReader:
         deprecated: bool | None = None,
         resolve_preferred: bool = False,
         literal: bool = False,
+        category_ids: list[str] | None = None,
+        include_descendant_categories: bool = True,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[TagSearchRow]:
         keyword, use_like = normalize_search_keyword(keyword, partial, literal=literal)
 
         with self.session_factory() as session:
+            # 分類条件があるときだけ分類テーブルを確かめる (条件なしの検索に SQL を足さない)。
+            # テーブルの無い旧 DB では、どのタグも分類に所属しないので空を返す。
+            if category_ids and not has_category_tables(session):
+                return []
             builder = TagSearchQueryBuilder(session)
             resolved_format_names = format_names or ([format_name] if format_name else None)
             resolved_type_names = type_names or ([type_name] if type_name else None)
@@ -405,6 +471,8 @@ class TagReader:
                 max_usage=max_usage,
                 alias=alias,
                 deprecated=deprecated,
+                category_ids=category_ids,
+                include_descendant_categories=include_descendant_categories,
                 limit=limit,
                 offset=offset,
             )
@@ -2937,9 +3005,18 @@ class MergedTagReader:
         deprecated: bool | None = None,
         resolve_preferred: bool = False,
         literal: bool = False,
+        category_ids: list[str] | None = None,
+        include_descendant_categories: bool = True,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[TagSearchRow]:
+        # 分類条件は各 DB の SQL で所属を解決してから merge する (Issue #153)。
+        # 条件なしのときは分類引数を下位 reader へ渡さず、従来の呼び出しと SQL を変えない。
+        category_kwargs: dict[str, Any] = (
+            {"category_ids": category_ids, "include_descendant_categories": include_descendant_categories}
+            if category_ids
+            else {}
+        )
         requested_format_id = self._requested_format_id(format_name, format_names)
         requested_format_ids = self._requested_format_ids(format_name, format_names)
         rows = self._merge_search_tags_adaptive(
@@ -2958,6 +3035,7 @@ class MergedTagReader:
             deprecated=None,
             resolve_preferred=False,
             literal=literal,
+            **category_kwargs,
         )
         if self._has_user() and requested_format_ids:
             rows.extend(
@@ -2978,17 +3056,24 @@ class MergedTagReader:
                     deprecated=None,
                     resolve_preferred=False,
                     literal=literal,
+                    **category_kwargs,
                 )
                 if self._row_has_user_status_patch(row, requested_format_ids)
             )
-        rows.extend(
-            self._base_rows_for_user_translation_matches(
-                keyword,
-                partial=partial,
-                literal=literal,
-                language=language,
-            )
+        translation_rows = self._base_rows_for_user_translation_matches(
+            keyword,
+            partial=partial,
+            literal=literal,
+            language=language,
         )
+        if category_ids:
+            # user 翻訳パッチ経由の行は分類 SQL を通っていない。ID の重複排除より前に所属を確かめ、
+            # 別 DB の同じ ID の無関係なタグが分類付きの行を置き換えないようにする (PR #156 Codex P2)。
+            # 各 base DB の行は、その DB の分類テーブルで所属を解決済み。
+            translation_rows = self._filter_rows_by_categories(
+                translation_rows, category_ids, include_descendants=include_descendant_categories
+            )
+        rows.extend(translation_rows)
         deduped = {row["tag_id"]: row for row in rows}
         rows = self._apply_user_patches_to_search_rows(
             [deduped[tag_id] for tag_id in sorted(deduped)],
@@ -3019,6 +3104,93 @@ class MergedTagReader:
             rows = self._resolve_cross_scope_preferred(rows)
             rows = self._dedup_case_variant_user_rows(rows)
         return rows
+
+    # ------------------------------------------------------------------
+    # 検索分類 (Issue #153)
+    # ------------------------------------------------------------------
+
+    def _category_candidates(self, tag_ids: list[int]) -> list[dict[int, tuple[str, list[TagCategory]]]]:
+        """base DB ごとに (TAGS.tag, 所属分類) を取得する。DB 数ぶんの SQL で、件数に比例しない。"""
+        if not tag_ids:
+            return []
+        ids = sorted(set(tag_ids))
+        return [repo.get_tag_category_rows(ids) for repo in self._iter_base_repos()]
+
+    @staticmethod
+    def _merge_category_candidates(
+        candidates: list[dict[int, tuple[str, list[TagCategory]]]],
+        identities: Mapping[int, str],
+    ) -> dict[int, list[TagCategory]]:
+        """タグ文字列が一致する DB の所属だけを採用し、同じ category_id は 1 つにまとめる。
+
+        複数 base DB で同じ数値 tag_id が別のタグを指すことがあるため、各 DB で解決した
+        (tag_id, TAGS.tag) が merge 後のタグと一致する場合だけ所属を使う。
+        """
+        merged: dict[int, dict[str, TagCategory]] = {}
+        for loaded in candidates:
+            for tag_id, (tag, categories) in loaded.items():
+                if identities.get(tag_id) != tag:
+                    continue
+                bucket = merged.setdefault(tag_id, {})
+                for category in categories:
+                    bucket.setdefault(category.category_id, category)
+        return {
+            tag_id: sorted(bucket.values(), key=category_sort_key)
+            for tag_id, bucket in sorted(merged.items())
+        }
+
+    def _filter_rows_by_categories(
+        self,
+        rows: list[TagSearchRow],
+        category_ids: list[str],
+        *,
+        include_descendants: bool,
+    ) -> list[TagSearchRow]:
+        """行の (tag_id, tag) が指定分類 (と子孫) のいずれかに所属する行だけを残す。"""
+        if not rows:
+            return []
+        targets: set[str] = set()
+        for repo in self._iter_base_repos():
+            targets |= repo.expand_category_ids(category_ids, include_descendants=include_descendants)
+        if not targets:
+            return []
+        memberships = self._merge_category_candidates(
+            self._category_candidates([row["tag_id"] for row in rows]),
+            {row["tag_id"]: row["tag"] for row in rows},
+        )
+        return [
+            row
+            for row in rows
+            if any(category.category_id in targets for category in memberships.get(row["tag_id"], []))
+        ]
+
+    def list_tag_categories(self, namespace: str | None = None) -> list[TagCategory]:
+        """全 base DB の分類ノードを category_id で重複排除して返す (優先度の高い DB が勝つ)。"""
+        merged: dict[str, TagCategory] = {}
+        for repo in self._iter_base_repos_low_to_high():
+            for category in repo.list_tag_categories(namespace):
+                merged[category.category_id] = category
+        return sorted(merged.values(), key=category_sort_key)
+
+    def get_tag_categories_batch(self, tag_ids: list[int]) -> dict[int, list[TagCategory]]:
+        """tag_id → 所属分類を一括取得する。
+
+        tag_id が指すタグは既存の解決規則 (user → base の優先順) で決め、そのタグ文字列と
+        一致する DB の所属だけを使う。分類の無い tag_id はキーを持たない。
+        """
+        candidates = self._category_candidates(tag_ids)
+        categorized = sorted({tag_id for loaded in candidates for tag_id in loaded})
+        if not categorized:
+            return {}
+        # 分類を持つ tag_id だけ所有タグを解決する (入力件数に比例した SQL を出さない)
+        tags = self._tags_by_ids_across_repos(categorized)
+        return self._merge_category_candidates(
+            candidates, {tag_id: tag.tag for tag_id, tag in tags.items()}
+        )
+
+    def get_tag_category_database_info(self) -> list[TagCategoryDatabaseInfo]:
+        """base DB ごとの version と分類の収録状況を優先順に返す。"""
+        return [repo.get_tag_category_database_info() for repo in self._iter_base_repos()]
 
     def _base_has_case_variant(self, tag: str, *, exclude_tag_id: int) -> bool:
         """いずれかの base repo に ``tag`` と casefold 一致する別 tag_id の canonical タグがあるか。

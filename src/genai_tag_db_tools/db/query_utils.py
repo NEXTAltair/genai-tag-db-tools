@@ -15,6 +15,7 @@ from genai_tag_db_tools.db.schema import (
     TagTypeName,
     TagUsageCounts,
 )
+from genai_tag_db_tools.db.tag_category_queries import apply_category_exists_filter
 from genai_tag_db_tools.models import PreloadedData, TagSearchRow
 
 
@@ -35,6 +36,7 @@ TAG_ID_IN_CHUNK = 900
 # SQLite の lower() / COLLATE NOCASE は ASCII A-Z のみ折り畳む。Python 側で
 # 同じ照合を再現するための変換テーブル (str.lower は Unicode 全体を畳むため不一致)。
 _ASCII_LOWER_TABLE = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
+
 
 def sqlite_ascii_lower(value: str) -> str:
     """SQLite の lower() / COLLATE NOCASE と同じ ASCII 限定の小文字化を行う。"""
@@ -221,10 +223,14 @@ class TagSearchQueryBuilder:
         max_usage: int | None = None,
         alias: bool | None = None,
         deprecated: bool | None = None,
+        category_ids: list[str] | None = None,
+        include_descendant_categories: bool = True,
         limit: int | None = None,
         offset: int = 0,
     ) -> tuple[set[int], int | None]:
         """Return tag ids after applying search filters before limit/offset.
+
+        ``category_ids`` は分類テーブルがある DB でだけ渡すこと (存在確認は呼び出し側)。
 
         The returned format id is only set when exactly one concrete format was
         requested; result row construction uses that to expose format-specific
@@ -269,6 +275,13 @@ class TagSearchQueryBuilder:
             max_usage=max_usage,
         )
         query = self._apply_language_exists_filter(query, tag_id_column, language)
+        if category_ids:
+            query = apply_category_exists_filter(
+                query,
+                tag_id_column,
+                category_ids,
+                include_descendants=include_descendant_categories,
+            )
         query = query.order_by(tag_id_column)
         if offset:
             query = query.offset(offset)

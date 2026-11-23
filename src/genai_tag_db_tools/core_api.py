@@ -8,6 +8,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Literal
 
+from genai_tag_db_tools.api import TagCategoryReaderProtocol
 from genai_tag_db_tools.api import TagReaderProtocol as MergedTagReader
 from genai_tag_db_tools.api import TagRegisterServiceProtocol as TagRegisterService
 from genai_tag_db_tools.core.language_detection import (
@@ -27,6 +28,8 @@ from genai_tag_db_tools.models import (
     RefinementReason,
     RefinementRecommendation,
     RefinementSuggestion,
+    TagCategory,
+    TagCategoryDatabaseInfo,
     TagRecordPublic,
     TagRef,
     TagRegisterRequest,
@@ -362,6 +365,12 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
     if request.literal:
         common_kwargs["literal"] = True
 
+    # 分類条件も指定時だけ渡す (分類引数を持たない reader 実装の既定検索を壊さない、Issue #153)。
+    # 空リストは format_names 等と同じく条件なしとして扱う。
+    if request.category_ids:
+        common_kwargs["category_ids"] = request.category_ids
+        common_kwargs["include_descendant_categories"] = request.include_descendant_categories
+
     # フィルタの正本は repository (filtered_tag_ids) に一元化する。core_api 側で行を再フィルタ
     # しない: build_row は単一 format でないと usage_count/deprecated 等を 0/False で返すため、
     # Python 側で再判定すると repository が正しく拾った行を落としてしまう (#45)。
@@ -385,6 +394,46 @@ def search_tags(repo: MergedTagReader, request: TagSearchRequest) -> TagSearchRe
 
     items = [_row_to_public(row, format_name) for row in page]
     return TagSearchResult(items=items, total=total)
+
+
+def list_tag_categories(
+    reader: TagCategoryReaderProtocol, namespace: str | None = None
+) -> list[TagCategory]:
+    """検索分類ノードを namespace → path 順で返す (Issue #153)。
+
+    階層は各ノードの ``parent_id`` / ``depth`` / ``path`` で表す。複数 base DB に同じ
+    ``category_id`` がある場合は 1 つにまとめる。分類テーブルの無い DB だけなら空リスト。
+
+    Args:
+        reader: :func:`get_tag_reader` 等で取得したリーダ。
+        namespace: 指定時はその namespace のノードだけを返す。
+    """
+    return reader.list_tag_categories(namespace)
+
+
+def list_tag_category_namespaces(reader: TagCategoryReaderProtocol) -> list[str]:
+    """検索分類の namespace 一覧を返す。分類が無ければ空リスト。"""
+    return sorted({category.namespace for category in reader.list_tag_categories(None)})
+
+
+def get_tag_categories_batch(
+    reader: TagCategoryReaderProtocol, tag_ids: list[int]
+) -> dict[int, list[TagCategory]]:
+    """tag_id → 所属する検索分類を一括取得する (Issue #153)。
+
+    検索結果 1 ページ分の tag_id をまとめて渡す。base DB ごとに 1 回の SQL で取得し、
+    件数に比例した SQL は発行しない。tag_id が指すタグは既存の解決規則で決め、
+    そのタグ文字列と一致する DB の所属だけを使う (別 DB の同じ数値 ID に分類を付けない)。
+
+    Returns:
+        分類を持つ tag_id だけをキーに持つ dict。分類は namespace → path 順。
+    """
+    return reader.get_tag_categories_batch(tag_ids)
+
+
+def get_tag_category_database_info(reader: TagCategoryReaderProtocol) -> list[TagCategoryDatabaseInfo]:
+    """読み込み中の base DB ごとに version と検索分類テーブルの有無・件数を返す (優先順)。"""
+    return reader.get_tag_category_database_info()
 
 
 def _row_to_public(row: TagSearchRow, format_name: str | None) -> TagRecordPublic:

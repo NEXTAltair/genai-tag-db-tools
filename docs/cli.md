@@ -3,7 +3,7 @@ type: Contract
 title: tag-db CLI Contract
 status: Accepted
 timestamp: 2026-06-29
-tags: [cli, search, db-read, db-write, tag-conversion, recommendation, advisory, introspection]
+tags: [cli, search, categories, db-read, db-write, tag-conversion, recommendation, advisory, introspection]
 depends_on: [pydantic, sqlalchemy, sqlite]
 ---
 
@@ -110,6 +110,7 @@ The classification below is the **steady state** (base DBs already present, no
 | command | side effects (steady state) | read-only |
 |---|---|---|
 | `search` | `db_read` | conditional (see notes) |
+| `categories` | `db_read` | conditional (see notes) |
 | `stats` | `db_read` | conditional (see notes) |
 | `convert` | `db_read` | conditional (see notes) |
 | `recommend tag` | `db_read` | conditional (see notes) |
@@ -129,7 +130,7 @@ The classification below is the **steady state** (base DBs already present, no
 > **User-DB initialization (`--user-db-dir`):** passing `--user-db-dir` to *any*
 > command (including the read commands) initializes the user DB — it creates the
 > directory, runs the schema `create_all`, and inserts default format/type
-> mappings (`file_write`). So `search` / `stats` / `convert` are read-only only
+> mappings (`file_write`). So `search` / `categories` / `stats` / `convert` are read-only only
 > when `--user-db-dir` is omitted (or points at an already-initialized user DB on
 > a writable path). Do not point `--user-db-dir` at a read-only path for a read
 > command.
@@ -165,6 +166,36 @@ tag-db search --query cat --limit 2
 {"kind": "item", "tag": "cat", "source_tag": null, "tag_id": 1, "format_name": "danbooru", "type_id": 0, "type_name": "general", "alias": false, "deprecated": false, "usage_count": 12345, "translations": {}, "format_statuses": {}}
 {"kind": "item", "tag": "cat_ears", "source_tag": null, "tag_id": 2, "format_name": "danbooru", "type_id": 0, "type_name": "general", "alias": false, "deprecated": false, "usage_count": 678, "translations": {}, "format_statuses": {}}
 {"kind": "result", "ok": true, "message": "search completed", "query": "cat", "count": 2, "total": 2, "limit": 2, "offset": 0}
+```
+
+Search category filter (Issue #153, see [Search categories](tag-categories.md)):
+`--category-id ID` (repeat for OR) keeps tags that belong to the category or, by
+default, any of its descendants; `--no-category-descendants` matches only the
+given nodes. Use `--query ""` to search by category only. The filter is applied
+in the repository before deduplication and `--limit` / `--offset`, and combines
+with the other options. Databases without category tables return no rows for a
+category filter (no error). Item and result lines keep the same keys.
+
+```bash
+tag-db search --query "" --category-id <category_id> --limit 20
+```
+
+### categories — list search categories (`db_read`)
+
+Lists the search category nodes of the base DBs, ordered by namespace and path.
+`--namespace NAME` limits the nodes to one namespace. Each node is an `item`
+line (`TagCategory`); the final `result` carries `count` and `databases`, one
+`TagCategoryDatabaseInfo` per base DB in priority order (`version`,
+`has_categories`, `category_count`, `membership_count`). A DB without category
+tables reports `has_categories: false` and contributes no items.
+
+```bash
+tag-db categories --namespace prompt-generator
+```
+
+```jsonl
+{"kind": "item", "category_id": "<id>", "namespace": "prompt-generator", "parent_id": null, "label": "<label>", "depth": 1, "path": ["<label>"]}
+{"kind": "result", "ok": true, "message": "categories listed", "count": 1, "databases": [{"version": "v2026.10.13.01", "has_categories": true, "category_count": 409, "membership_count": 3796}]}
 ```
 
 ### register — add a tag (`db_write`)

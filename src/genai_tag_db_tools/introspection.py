@@ -33,6 +33,8 @@ from genai_tag_db_tools.models import (
     RecordRecommendRequest,
     RefinementRecommendation,
     RefinementRecommendRequest,
+    TagCategoryListRequest,
+    TagCategoryListResult,
     TagRegisterRequest,
     TagRegisterResult,
     TagSearchRequest,
@@ -89,6 +91,14 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         read_only=True,
         input_model=TagSearchRequest,
         output_model=TagSearchResult,
+    ),
+    "categories": ToolSpec(
+        name="categories",
+        description="List search categories and per base DB availability (read-only).",
+        side_effects=("db_read",),
+        read_only=True,
+        input_model=TagCategoryListRequest,
+        output_model=TagCategoryListResult,
     ),
     "register": ToolSpec(
         name="register",

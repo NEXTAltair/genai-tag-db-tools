@@ -22,6 +22,7 @@ Public surface
 --------------
 Types (use only for annotations; treat instances as opaque handles):
     * ``TagReaderProtocol``           - read-only tag database handle
+    * ``TagCategoryReaderProtocol``   - reader handle with search-category reads
     * ``TagRegisterServiceProtocol``  - tag registration service handle
     * ``TagWriterProtocol``           - write-capable user-DB repository handle
 
@@ -41,9 +42,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 if TYPE_CHECKING:
-    from genai_tag_db_tools.models import TagRegisterRequest, TagRegisterResult
+    from genai_tag_db_tools.models import (
+        TagCategory,
+        TagCategoryDatabaseInfo,
+        TagRegisterRequest,
+        TagRegisterResult,
+    )
 
 __all__ = [
+    "TagCategoryReaderProtocol",
     "TagReaderProtocol",
     "TagRegisterServiceProtocol",
     "TagWriterProtocol",
@@ -84,6 +91,22 @@ class TagReaderProtocol(Protocol):
     def get_type_id_for_format(self, *args: Any, **kwargs: Any) -> Any: ...
     def get_type_name_by_format_type_id(self, *args: Any, **kwargs: Any) -> Any: ...
     def get_unknown_type_tag_ids(self, *args: Any, **kwargs: Any) -> Any: ...
+
+
+@runtime_checkable
+class TagCategoryReaderProtocol(Protocol):
+    """Read-only handle that also exposes the published search categories (Issue #153).
+
+    Readers returned by :func:`get_tag_reader` / :func:`get_user_tag_reader` satisfy
+    this protocol. It is separate from :class:`TagReaderProtocol` so existing reader
+    fakes that only implement the search contract keep satisfying that protocol.
+    Pass the handle to ``list_tag_categories`` / ``get_tag_categories_batch`` /
+    ``get_tag_category_database_info``.
+    """
+
+    def list_tag_categories(self, namespace: str | None = None) -> list[TagCategory]: ...
+    def get_tag_categories_batch(self, tag_ids: list[int]) -> dict[int, list[TagCategory]]: ...
+    def get_tag_category_database_info(self) -> list[TagCategoryDatabaseInfo]: ...
 
 
 @runtime_checkable
