@@ -38,6 +38,21 @@ dataset builder の `core/enrichment.py`。検索分類は booru のタグ type
 
 user DB (overlay) は分類を持たず、作成もしない。user 独自タグは分類に所属しない。
 
+### 型注釈 (mypy strict の利用側)
+
+`get_tag_reader()` / `get_user_tag_reader()` の戻り値型は既存互換のため `TagReaderProtocol` のままで、
+分類メソッドを含まない。型チェックを有効にした利用側では `TagCategoryReaderProtocol` へ `cast` してから渡す
+(実体のリーダはこの Protocol を満たす)。
+
+```python
+from typing import cast
+
+from genai_tag_db_tools import TagCategoryReaderProtocol, get_tag_reader, list_tag_categories
+
+reader = cast(TagCategoryReaderProtocol, get_tag_reader())
+categories = list_tag_categories(reader)
+```
+
 ### version / revision の確認
 
 `version` は DB ファイル内の `DATABASE_METADATA` の値で、いま読み込んでいるファイルの版を表す。
@@ -68,6 +83,22 @@ Hugging Face 上の公開更新は既存のローカルキャッシュを書き�
 - 別 DB に同じ数値 `tag_id` の別タグがあっても、その DB の `TAGS.tag` が一致しない所属は使わない
   (無関係なタグへ分類を付けない)。
 - user 翻訳パッチ経由で一致した base タグも、所属を確かめてから残す。
+
+#### 制約: 衝突した tag_id の行に `get_tag_categories_batch` を使う場合
+
+`get_tag_categories_batch` は tag_id だけを受け取り、その tag_id が指すタグを既存の解決規則
+(user → 優先度の高い base DB) で決める。複数 base DB で同じ数値 tag_id が別のタグを指すとき、
+分類条件付き検索は分類を持つ DB の行 (例: 低優先 DB の `(4, "smile")`) を返すが、その tag_id を
+`get_tag_categories_batch` に渡すと最優先 DB の同じ ID の別タグ (例: `(4, "cat")`) として解決され、
+分類は空 (キーなし) になる。無関係なタグに分類を付けないための挙動で、結果の行と batch の解決先が
+食い違うのはこの衝突のときだけである。
+
+回避方法:
+
+- 分類条件付き検索の結果は、条件に指定した分類 (`include_descendant_categories=True` なら子孫を含む)
+  のいずれかに所属することが保証される。行の分類が条件の分類で足りる場合は、それを使う。
+- 行の全分類が必要なら、その行を返した base DB だけを読み込んだリーダ (`database_runtime_scope()` 内で
+  対象 DB だけを初期化する、CLI なら `--base-db` を 1 つだけ指定する) で `get_tag_categories_batch` を呼ぶ。
 
 ### 旧 DB との互換
 
