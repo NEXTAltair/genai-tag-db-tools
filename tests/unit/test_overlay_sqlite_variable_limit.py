@@ -6,7 +6,7 @@ import sqlite3
 from collections.abc import Iterator
 
 import pytest
-from sqlalchemy import StaticPool, create_engine
+from sqlalchemy import StaticPool, create_engine, insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -37,8 +37,7 @@ _COUNT = 2 * TAG_ID_IN_CHUNK + 7
 _VARIABLE_LIMIT = 999
 
 
-@pytest.fixture
-def overlay_engine() -> Iterator[Engine]:
+def _create_overlay_engine() -> Engine:
     engine = create_engine("sqlite://", poolclass=StaticPool)
     Base.metadata.create_all(engine)
     UserOverlayBase.metadata.create_all(engine)
@@ -47,6 +46,12 @@ def overlay_engine() -> Iterator[Engine]:
         session.add(TagTypeName(type_name_id=1, type_name="character"))
         session.add(TagTypeFormatMapping(format_id=1, type_id=1, type_name_id=1))
         session.commit()
+    return engine
+
+
+@pytest.fixture
+def overlay_engine() -> Iterator[Engine]:
+    engine = _create_overlay_engine()
     yield engine
     engine.dispose()
 
@@ -62,60 +67,88 @@ def _limit_variables(engine: Engine) -> None:
 
 
 def _seed_patches(engine: Engine, *, scope: str, offset: int) -> None:
+    # 準備データは executemany で一括投入する (内容は 1 件ずつ add していた時と同一)。
+    other_scope = "base" if scope == "user" else "user"
+    indexes = range(1, _COUNT + 1)
     with Session(engine) as session:
-        for index in range(1, _COUNT + 1):
-            tag_id = offset + index
-            alias = index % 3 == 0
-            session.add(
-                UserTagStatusPatch(
-                    target_scope=scope,
-                    target_tag_id=tag_id,
-                    format_id=1,
-                    type_id=0,
-                    alias=alias,
-                    preferred_scope=scope,
-                    preferred_tag_id=offset + 1 if alias else tag_id,
-                    deprecated=index % 5 == 0,
-                )
-            )
-            session.add(UserTagTypePatch(target_scope=scope, target_tag_id=tag_id, format_id=1, type_id=1))
-            session.add(
-                UserTagUsagePatch(target_scope=scope, target_tag_id=tag_id, format_id=1, count=index)
-            )
-            for translation in (f"訳{index}", f"別訳{index}", f"hidden{index}"):
-                session.add(
-                    UserTagTranslationPatch(
-                        target_scope=scope, target_tag_id=tag_id, language="ja", translation=translation
-                    )
-                )
-            session.add(
-                UserTagTranslationTombstone(
-                    target_scope=scope, target_tag_id=tag_id, language="ja", translation=f"hidden{index}"
-                )
-            )
+        session.execute(
+            insert(UserTagStatusPatch),
+            [
+                {
+                    "target_scope": scope,
+                    "target_tag_id": offset + index,
+                    "format_id": 1,
+                    "type_id": 0,
+                    "alias": index % 3 == 0,
+                    "preferred_scope": scope,
+                    "preferred_tag_id": offset + 1 if index % 3 == 0 else offset + index,
+                    "deprecated": index % 5 == 0,
+                }
+                for index in indexes
+            ],
+        )
+        session.execute(
+            insert(UserTagTypePatch),
+            [
+                {"target_scope": scope, "target_tag_id": offset + index, "format_id": 1, "type_id": 1}
+                for index in indexes
+            ],
+        )
+        session.execute(
+            insert(UserTagUsagePatch),
+            [
+                {"target_scope": scope, "target_tag_id": offset + index, "format_id": 1, "count": index}
+                for index in indexes
+            ],
+        )
+        session.execute(
+            insert(UserTagTranslationPatch),
+            [
+                {"target_scope": scope, "target_tag_id": offset + index, "language": "ja", "translation": t}
+                for index in indexes
+                for t in (f"訳{index}", f"別訳{index}", f"hidden{index}")
+            ],
+        )
+        session.execute(
+            insert(UserTagTranslationTombstone),
+            [
+                {
+                    "target_scope": scope,
+                    "target_tag_id": offset + index,
+                    "language": "ja",
+                    "translation": f"hidden{index}",
+                }
+                for index in indexes
+            ]
             # A tombstone in the other scope must not hide this visible patch.
-            session.add(
-                UserTagTranslationTombstone(
-                    target_scope="base" if scope == "user" else "user",
-                    target_tag_id=tag_id,
-                    language="ja",
-                    translation=f"訳{index}",
-                )
-            )
+            + [
+                {
+                    "target_scope": other_scope,
+                    "target_tag_id": offset + index,
+                    "language": "ja",
+                    "translation": f"訳{index}",
+                }
+                for index in indexes
+            ],
+        )
         session.commit()
 
 
-@pytest.fixture
-def overlay(overlay_engine: Engine) -> OverlayTagReader:
-    with Session(overlay_engine) as session:
+@pytest.fixture(scope="module")
+def overlay() -> Iterator[OverlayTagReader]:
+    # module scope で 1 回だけ作る。この fixture を使うテストは検索だけで DB を書き換えない
+    # (書き換えるテストは function scope の overlay_engine を使うこと)。
+    engine = _create_overlay_engine()
+    with Session(engine) as session:
         session.add_all(
             UserTag(tag_id=USER_TAG_ID_OFFSET + i, tag=f"fa_{i}", source_tag=f"source_{i}")
             for i in range(1, _COUNT + 1)
         )
         session.commit()
-    _seed_patches(overlay_engine, scope="user", offset=USER_TAG_ID_OFFSET)
-    _limit_variables(overlay_engine)
-    return OverlayTagReader(sessionmaker(bind=overlay_engine, autoflush=False))
+    _seed_patches(engine, scope="user", offset=USER_TAG_ID_OFFSET)
+    _limit_variables(engine)
+    yield OverlayTagReader(sessionmaker(bind=engine, autoflush=False))
+    engine.dispose()
 
 
 @pytest.mark.parametrize("keyword", ["fa", "source", "訳"])
@@ -174,10 +207,18 @@ def test_merged_search_with_small_page_keeps_base_and_overlay_translations(overl
     Base.metadata.create_all(base_engine)
     try:
         with Session(base_engine) as session:
-            for index in range(1, _COUNT + 1):
-                session.add(Tag(tag_id=index, tag=f"fa_{index}", source_tag=f"fa_{index}"))
-                for translation in (f"訳{index}", f"基底{index}", f"hidden{index}"):
-                    session.add(TagTranslation(tag_id=index, language="ja", translation=translation))
+            indexes = range(1, _COUNT + 1)
+            session.execute(
+                insert(Tag), [{"tag_id": i, "tag": f"fa_{i}", "source_tag": f"fa_{i}"} for i in indexes]
+            )
+            session.execute(
+                insert(TagTranslation),
+                [
+                    {"tag_id": i, "language": "ja", "translation": t}
+                    for i in indexes
+                    for t in (f"訳{i}", f"基底{i}", f"hidden{i}")
+                ],
+            )
             session.commit()
         _seed_patches(overlay_engine, scope="base", offset=0)
         _limit_variables(base_engine)

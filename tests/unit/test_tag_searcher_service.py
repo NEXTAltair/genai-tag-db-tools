@@ -32,27 +32,7 @@ def test_search_tags_empty_returns_empty_dataframe():
 
 
 @pytest.mark.db_tools
-def test_convert_tag_returns_original_when_missing():
-    class DummyReader:
-        pass
-
-    searcher = TagSearcher(reader=DummyReader())
-    with pytest.raises(NotImplementedError):
-        searcher.convert_tag("original", 1)
-
-
-@pytest.mark.db_tools
-def test_convert_tag_uses_preferred_tag():
-    class DummyReader:
-        pass
-
-    searcher = TagSearcher(reader=DummyReader())
-    with pytest.raises(NotImplementedError):
-        searcher.convert_tag("original", 1)
-
-
-@pytest.mark.db_tools
-def test_convert_tag_skips_invalid_target():
+def test_convert_tag_is_deprecated_not_implemented():
     class DummyReader:
         pass
 
@@ -72,7 +52,7 @@ def test_get_tag_types_returns_empty_when_missing_format():
 
 
 @pytest.mark.db_tools
-def test_get_format_id_none_returns_zero():
+def test_get_format_id_is_deprecated_not_implemented():
     class DummyReader:
         pass
 

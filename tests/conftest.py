@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 from collections.abc import Generator
 from typing import TYPE_CHECKING
 
 import pytest
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -22,6 +25,27 @@ def pytest_configure(config: pytest.Config) -> None:
     # Enable headless mode for GUI tests in CI/container environments
     if "DISPLAY" not in os.environ:
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
+
+def _disable_sqlite_fsync(dbapi_connection: object, _connection_record: object) -> None:
+    """テスト中の SQLite 接続で commit ごとの fsync を省く。
+
+    テスト DB は tmp_path 上の使い捨てなので耐久性は不要。commit ごとの fsync が
+    実行時間の大半 (1 commit 約 10 ms) を占めていたため、接続時に ``synchronous=OFF`` を設定する。
+    journal_mode / foreign_keys / busy_timeout / query_only など src が設定する値には触れない。
+    """
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA synchronous=OFF")
+        cursor.close()
+
+
+@pytest.fixture(autouse=True, scope="session")
+def sqlite_without_fsync() -> Generator[None, None, None]:
+    """全テストの SQLite 接続に ``_disable_sqlite_fsync`` を適用する。"""
+    event.listen(Engine, "connect", _disable_sqlite_fsync)
+    yield
+    event.remove(Engine, "connect", _disable_sqlite_fsync)
 
 
 @pytest.fixture(autouse=True, scope="function")
